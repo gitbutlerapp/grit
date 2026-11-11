@@ -64,11 +64,9 @@ fn bench_contains_tags(c: &mut Criterion) {
     let mut group = c.benchmark_group("ref_query_contains_tags");
     group.bench_function("grit_contains_tags", |b| {
         b.iter(|| {
-            let query = RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                contains: vec![contains],
-                ..RefQuery::default()
-            };
+            let query = RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Tags])
+                .with_contains(vec![contains]);
             let n = repo
                 .references()
                 .query(&query, &RefQueryOptions::default())
@@ -158,11 +156,9 @@ fn bench_bounded_branches(c: &mut Criterion) {
                                 .expect("open")
                         },
                         |repo| {
-                            let query = RefQuery {
-                                contains: vec![target],
-                                limit,
-                                ..RefQuery::default()
-                            };
+                            let query = RefQuery::default()
+                                .with_contains(vec![target])
+                                .with_limit(limit);
                             std::hint::black_box(
                                 repo.references()
                                     .query(&query, &RefQueryOptions::default())

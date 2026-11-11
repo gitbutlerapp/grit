@@ -18,7 +18,7 @@ use grit_lib::porcelain::hunk_select::HunkSelection;
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, Placement, RebaseOntoOptions, RefScope,
+    AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, Placement, RebaseOntoOptions,
     RewriteOptions, SplitOptions, SquashMessage, SquashOptions,
 };
 
@@ -143,27 +143,21 @@ fn grit_linear(wt: &Path, grit: &Repository, messages: &[&str], ids: &[&str]) ->
 }
 
 fn rewrite_opts(seq: i64) -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: format!("Rewriter <r@grit.test> {seq} +0000")
+    RewriteOptions::new(
+        format!("Rewriter <r@grit.test> {seq} +0000")
             .parse()
             .expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    }
+    )
 }
 
 fn apply_plan(grit: &Repository, plan: &grit_lib::revwalk::history::RewritePlan) {
     grit.history()
         .apply(
             plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "history change-id test".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <r@grit.test>"),
+                "history change-id test",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -248,12 +242,7 @@ fn history_change_ids_survive_every_rewrite() {
     grit.history()
         .apply_fixup(
             &plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "fixup".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(support::reflog_signature("Rewriter <r@grit.test>"), "fixup"),
             &grit.history().staged_paths().expect("staged"),
             &CancelToken::never(),
         )
@@ -293,12 +282,10 @@ fn history_change_ids_survive_every_rewrite() {
     grit.history()
         .apply_absorb(
             &plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "absorb".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <r@grit.test>"),
+                "absorb",
+            ),
             &CancelToken::never(),
         )
         .expect("apply absorb");
@@ -452,19 +439,7 @@ fn history_change_ids_survive_every_rewrite() {
     grit_test_support::refs::set_ref(&grit, "refs/heads/onto", &onto).expect("onto ref");
     let plan = grit
         .history()
-        .rebase_onto(
-            r1,
-            onto,
-            &[r3],
-            &RebaseOntoOptions {
-                pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-                rewrite: rewrite_opts(8),
-                skip_applied: true,
-                flatten_leaf_merges: false,
-                favor: grit_lib::diff::merge_file::MergeFavor::default(),
-                drop: Vec::new(),
-            },
-        )
+        .rebase_onto(r1, onto, &[r3], &RebaseOntoOptions::new(rewrite_opts(8)))
         .expect("rebase");
     let new_r3 = replacement_id(&plan, r3);
     apply_plan(&grit, &plan);
@@ -634,12 +609,10 @@ fn fixup_hunks_preserves_change_id() {
     grit.history()
         .apply_fixup_hunks(
             &plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "fixup hunks".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <r@grit.test>"),
+                "fixup hunks",
+            ),
             &selection,
             &[],
             &CancelToken::never(),

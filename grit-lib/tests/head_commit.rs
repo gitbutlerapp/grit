@@ -12,12 +12,10 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
-use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
-};
+use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    EmptyPolicy, HistoryEngineError, HistoryError, Placement, RefScope, RewriteOptions,
+    HistoryEngineError, HistoryError, Placement, RefScope, RewriteOptions,
 };
 use grit_lib::state::HeadState;
 use grit_test_support::git;
@@ -139,13 +137,10 @@ fn injected_ref_store_is_the_source_of_head() {
         .parse()
         .expect("oid");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: grit_lib::refs::store::RefName::from_trusted("HEAD"),
-            new_value: Some(RawRef::Direct(oid)),
-            expected: Expected::Any,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        })
+        .update(RefUpdate::new(
+            grit_lib::refs::store::RefName::from_trusted("HEAD"),
+            Some(RawRef::Direct(oid)),
+        ))
         .expect("txn");
     refs.prepare(txn)
         .expect("prepare")
@@ -160,13 +155,9 @@ fn history_planning_reports_unborn_head_as_typed_library_error() {
     git(dir.path(), &["init", "-q", "-b", "main"]);
     let repo = open(dir.path());
     let commit = ObjectId::null(HashAlgo::Sha1);
-    let opts = RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: "T <t@grit.test> 1 +0000".parse().expect("signature"),
-        preserve_committer: false,
-        sign: false,
-    };
+    let opts = RewriteOptions::new("T <t@grit.test> 1 +0000".parse().expect("signature"))
+        .with_scope(RefScope::Head)
+        .with_sign(false);
     let err = repo
         .history()
         .move_commit(commit, Placement::Before(commit), &opts)

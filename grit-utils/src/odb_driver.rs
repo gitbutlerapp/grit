@@ -281,11 +281,9 @@ pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
 /// `RevWalk::count` for `HEAD` with a committer `--since` cutoff (bounded walk path).
 pub fn rev_walk_count_head_since(repo: &Repository, since: i64) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
-        let opts = RevWalkListOptions {
-            since: Some(since),
-            limit: Some(20),
-            ..RevWalkListOptions::default()
-        };
+        let opts = RevWalkListOptions::default()
+            .with_since(Some(since))
+            .with_limit(Some(20));
         let n = repo
             .revwalk()
             .count(&["HEAD"], &opts, &mut NullProgress, &CancelToken::never())?;

@@ -11,8 +11,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::commit_ref_update_on_store;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
-    RefUpdateFlags, ReflogUpdate,
+    MemoryRefStore, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
+    ReflogUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use support::require_reftable_git;
@@ -29,17 +29,13 @@ fn forged_log() -> ReflogUpdate {
 }
 
 fn forged_head_update(tip: ObjectId) -> RefUpdate {
-    RefUpdate {
-        name: "HEAD".to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Any,
-        reflog: Some(forged_log()),
-        flags: RefUpdateFlags {
-            no_deref: true,
-            log_only: true,
-            ..Default::default()
-        },
-    }
+    RefUpdate::new("HEAD".to_owned(), Some(RawRef::Direct(tip)))
+        .with_reflog(Some(forged_log()))
+        .with_flags(
+            RefUpdateFlags::default()
+                .with_no_deref(true)
+                .with_log_only(true),
+        )
 }
 
 fn assert_invalid_reflog_signature(err: Error) {

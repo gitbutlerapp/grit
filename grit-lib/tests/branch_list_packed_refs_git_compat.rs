@@ -266,18 +266,12 @@ fn branch_at_annotated_tag_is_peeled_for_filters_like_git() {
             .map(str::to_owned)
             .collect::<Vec<_>>()
     };
-    let points_at = RefQuery {
-        points_at: vec![target],
-        ..RefQuery::default()
-    };
+    let points_at = RefQuery::default().with_points_at(vec![target]);
     assert_eq!(
         names(list(&repo, BranchScope::Local, points_at)),
         git_names(&["--points-at", &target.to_hex()])
     );
-    let contains = RefQuery {
-        contains: vec![target],
-        ..RefQuery::default()
-    };
+    let contains = RefQuery::default().with_contains(vec![target]);
     assert_eq!(
         names(list(&repo, BranchScope::Local, contains.clone())),
         git_names(&["--contains", &target.to_hex()])
@@ -286,10 +280,7 @@ fn branch_at_annotated_tag_is_peeled_for_filters_like_git() {
         names(list(
             &repo,
             BranchScope::Local,
-            RefQuery {
-                limit: Some(1),
-                ..contains
-            }
+            contains.with_limit(Some(1))
         )),
         git_names(&["--contains", &target.to_hex(), "--count=1"])
     );
@@ -308,15 +299,13 @@ fn bounded_packed_branch_contains_matches_git_metadata_and_order() {
             let rows = list(
                 &repo,
                 BranchScope::Remote,
-                RefQuery {
-                    contains: vec![target],
-                    limit: Some(limit),
-                    sort: grit_lib::refs::listing::RefSort {
+                RefQuery::default()
+                    .with_contains(vec![target])
+                    .with_limit(Some(limit))
+                    .with_sort(grit_lib::refs::listing::RefSort {
                         reverse,
                         ..Default::default()
-                    },
-                    ..RefQuery::default()
-                },
+                    }),
             );
             let expected = git_out(&clone, &[
                 "for-each-ref",

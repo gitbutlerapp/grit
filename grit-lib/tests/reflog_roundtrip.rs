@@ -1273,13 +1273,11 @@ fn grit_expire_matches_git_expire_byte_for_byte_via_handle() {
         let grit_repo = open_repo(grit_copy.path());
         grit_repo
             .reflogs()
-            .expire(&ExpireOptions {
-                now: NOW,
-                expire: Some("1600000000".into()),
-                expire_unreachable: Some("never".into()),
-                all: false,
-                dry_run: false,
-            })
+            .expire(
+                &ExpireOptions::new(NOW)
+                    .with_expire(Some("1600000000".into()))
+                    .with_expire_unreachable(Some("never".into())),
+            )
             .expect("handle expire");
         git_expire(
             git_copy.path(),

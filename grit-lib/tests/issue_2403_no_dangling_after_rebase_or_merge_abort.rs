@@ -10,8 +10,8 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_test_support::git;
 use grit_test_support::objects::git_supports_sha256;
@@ -90,22 +90,14 @@ fn oid(root: &Path, rev: &str) -> ObjectId {
 }
 
 fn rewrite_options() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: TEST_IDENT.parse().expect("signature"),
-        preserve_committer: false,
-        sign: false,
-    }
+    RewriteOptions::new(TEST_IDENT.parse().expect("signature"))
+        .with_scope(RefScope::Head)
+        .with_sign(false)
 }
 
 fn apply_options() -> ApplyOptions {
-    ApplyOptions {
-        identity: TEST_IDENT.parse().expect("identity"),
-        reflog_message: "rebase".into(),
-        record_operation: None,
-        hooks: PostOperationHooks::Skip,
-    }
+    ApplyOptions::new(TEST_IDENT.parse().expect("identity"), "rebase")
+        .with_hooks(PostOperationHooks::Skip)
 }
 
 fn start_rebase_main_side(root: &Path) {

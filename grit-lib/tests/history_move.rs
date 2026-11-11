@@ -11,9 +11,7 @@ use std::process::Command;
 use grit_lib::objects::parse_commit;
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, HistoryError, Placement, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{ApplyOptions, HistoryError, Placement, RefScope, RewriteOptions};
 
 use support::{build_commit_dag, commit_file, git, git_rev_parse_verify, HistoryRepo};
 
@@ -47,12 +45,7 @@ fn apply_plan(wt: &std::path::Path, plan: &grit_lib::revwalk::history::RewritePl
     grit.history()
         .apply(
             plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("T <t@grit.test>"),
-                reflog_message: "history move".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(support::reflog_signature("T <t@grit.test>"), "history move"),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -144,13 +137,7 @@ fn move_commit_before_and_after() {
     let wt = repo.worktree();
     let [a, b, c, _d] = init_linear_four(wt);
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts = RewriteOptions::new(committer(1).parse().expect("signature"));
 
     let plan = grit
         .history()
@@ -192,13 +179,7 @@ fn move_commit_to_top_and_bottom_of_segment() {
     let tip = git_rev_parse_verify(wt, "HEAD").expect("e");
     let _ = _d;
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts = RewriteOptions::new(committer(1).parse().expect("signature"));
 
     let plan = grit
         .history()
@@ -227,13 +208,8 @@ fn move_noop_errors() {
     let wt = repo.worktree();
     let [_a, b, c, _d] = init_linear_four(wt);
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts =
+        RewriteOptions::new(committer(1).parse().expect("signature")).with_scope(RefScope::Head);
     let err = grit
         .history()
         .move_commit(b, Placement::Before(c), &opts)
@@ -258,13 +234,8 @@ fn move_with_ancient_merge_on_first_parent_chain() {
         &[("d", "refs/heads/main")],
     );
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts =
+        RewriteOptions::new(committer(1).parse().expect("signature")).with_scope(RefScope::Head);
     let plan = grit
         .history()
         .move_commit(oids["c"], Placement::Before(oids["b"]), &opts)
@@ -293,13 +264,7 @@ fn move_with_forked_topic_branch_succeeds() {
         &[("d", "refs/heads/main"), ("t", "refs/heads/topic")],
     );
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts = RewriteOptions::new(committer(1).parse().expect("signature"));
     let plan = grit
         .history()
         .move_commit(oids["c"], Placement::Before(oids["b"]), &opts)
@@ -338,13 +303,8 @@ fn move_across_merge_rejected() {
         &[("merge", "refs/heads/main")],
     );
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts =
+        RewriteOptions::new(committer(1).parse().expect("signature")).with_scope(RefScope::Head);
     let err = grit
         .history()
         .move_commit(oids["b"], Placement::After(oids["merge"]), &opts)
@@ -370,13 +330,8 @@ fn move_conflict_changes_nothing() {
     let c = git_rev_parse_verify(wt, "HEAD").expect("c");
     let main_before = git_rev_parse_verify(wt, "HEAD").expect("tip");
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts =
+        RewriteOptions::new(committer(1).parse().expect("signature")).with_scope(RefScope::Head);
     let err = grit
         .history()
         .move_commit(c, Placement::Before(b), &opts)
@@ -403,13 +358,7 @@ fn move_maps_branch_in_segment() {
         ],
     );
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: committer(1).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts = RewriteOptions::new(committer(1).parse().expect("signature"));
     let plan = grit
         .history()
         .move_commit(c, Placement::Before(b), &opts)
@@ -443,13 +392,7 @@ fn history_move_matches_git_rebase_reorder() {
 
     git(wt, &["config", "grit.changeIds", "false"]);
     let grit = open_grit(wt);
-    let opts = RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: PINNED_COMMITTER.parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    };
+    let opts = RewriteOptions::new(PINNED_COMMITTER.parse().expect("signature"));
     let plan = grit
         .history()
         .move_commit(c, Placement::Before(b), &opts)

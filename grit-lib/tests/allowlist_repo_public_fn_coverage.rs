@@ -364,10 +364,7 @@ fn porcelain_stash_tag_status_and_worktree() {
         .odb()
         .write(ObjectKind::Blob, b"not tag")
         .expect("blob");
-    let tag_query = RefQuery {
-        namespaces: vec![RefNamespace::Tags],
-        ..RefQuery::default()
-    };
+    let tag_query = RefQuery::default().with_namespaces(vec![RefNamespace::Tags]);
     let _ = repo
         .tags()
         .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
@@ -394,11 +391,9 @@ fn porcelain_stash_tag_status_and_worktree() {
     let _ = repo
         .references()
         .query(
-            &RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                contains: vec![tag_oid],
-                ..RefQuery::default()
-            },
+            &RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Tags])
+                .with_contains(vec![tag_oid]),
             &RefQueryOptions::default(),
         )
         .ok();

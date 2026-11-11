@@ -214,11 +214,12 @@ fn git_count(dir: &Path, range: &str) -> usize {
 }
 
 fn path_log(repo: &Repository, path: &str) -> Vec<ObjectId> {
-    let options = RevWalkListOptions {
-        limit: Some(5),
-        pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
-        ..RevWalkListOptions::default()
-    };
+    let options = RevWalkListOptions::default()
+        .with_limit(Some(5))
+        .with_pathspec(Pathspec::scoped(
+            vec![path.to_owned()],
+            PathspecGlobalFlags::default(),
+        ));
     repo.revwalk()
         .commits(&["main"], &options)
         .expect("log -- path")
@@ -263,10 +264,7 @@ fn graph_file_under_objects_does_not_invent_commits_for_a_custom_store() {
         matches!(counted, Err(Error::Object(ObjectError::NotFound { .. }))),
         "the walk must reach the store's missing parent, not take it from the graph file: {counted:?}"
     );
-    let bounded = RevWalkListOptions {
-        limit: Some(3),
-        ..RevWalkListOptions::default()
-    };
+    let bounded = RevWalkListOptions::default().with_limit(Some(3));
     assert_eq!(
         custom
             .revwalk()

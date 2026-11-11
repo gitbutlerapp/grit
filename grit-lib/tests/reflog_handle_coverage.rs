@@ -68,13 +68,11 @@ fn repository_reflogs_public_methods() {
         .expect("re-append");
 
     let outcome = handle
-        .expire(&ExpireOptions {
-            now: 1_700_000_000,
-            expire: Some("now".into()),
-            expire_unreachable: Some("never".into()),
-            all: false,
-            dry_run: false,
-        })
+        .expire(
+            &ExpireOptions::new(1_700_000_000)
+                .with_expire(Some("now".into()))
+                .with_expire_unreachable(Some("never".into())),
+        )
         .expect("expire");
     assert!(outcome.entries_pruned >= 1);
     assert!(!outcome.dry_run);

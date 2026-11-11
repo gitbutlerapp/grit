@@ -213,26 +213,19 @@ impl RevSelectArgs {
             .build_commit_filter(repo)
             .map_err(invalid_commit_filter)?;
         let pickaxe = self.build_pickaxe().map_err(invalid_pickaxe)?;
-        Ok(RevWalkListOptions {
-            limit: self.limit.get(),
-            skip: self.skip,
-            since,
-            until,
-            merges: merge_filter(self.merges, self.no_merges),
-            reverse: self.reverse,
-            refs: ref_selections(self),
-            first_parent: self.first_parent,
-            follow: self.follow,
-            full_history: false,
-            pathspec,
-            commit_filter,
-            pickaxe,
-            graph: false,
-            retain_commit_data: false,
-            retained_commit_extent: grit_lib::revwalk::CommitExtent::Whole,
-            left_right: false,
-            cherry_mark: false,
-        })
+        Ok(RevWalkListOptions::default()
+            .with_limit(self.limit.get())
+            .with_skip(self.skip)
+            .with_since(since)
+            .with_until(until)
+            .with_merges(merge_filter(self.merges, self.no_merges))
+            .with_reverse(self.reverse)
+            .with_refs(ref_selections(self))
+            .with_first_parent(self.first_parent)
+            .with_follow(self.follow)
+            .with_pathspec(pathspec)
+            .with_commit_filter(commit_filter)
+            .with_pickaxe(pickaxe))
     }
 
     /// Revision tokens passed to the library walk (after applying command defaults).

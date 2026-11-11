@@ -293,7 +293,10 @@ impl TagList {
 }
 
 /// Inputs for [`create_tag`].
+///
+/// Build with [`CreateTagRequest::new`] and the `with_*` setters.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CreateTagRequest {
     /// Short tag name (without `refs/tags/`).
     pub name: String,
@@ -313,6 +316,95 @@ pub struct CreateTagRequest {
     pub force: bool,
     /// Compute the outcome without updating refs (or writing new tag objects).
     pub dry_run: bool,
+}
+
+impl CreateTagRequest {
+    /// A request for a lightweight tag `name` at `target`: no message or tagger, signing per
+    /// `tag.gpgSign`, no tree-sha256 claim, failing if the tag exists, and updating refs.
+    ///
+    /// Set [`message`](Self::message) and [`tagger`](Self::tagger) for an annotated tag.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: short tag name (without `refs/tags/`).
+    /// - `target`: object the tag points at.
+    #[must_use]
+    pub fn new(name: impl Into<String>, target: ObjectId) -> Self {
+        Self {
+            name: name.into(),
+            target,
+            message: None,
+            tagger: None,
+            sign: None,
+            signing_key: None,
+            tree_sha256: None,
+            force: false,
+            dry_run: false,
+        }
+    }
+
+    /// Sets [`name`](Self::name).
+    #[must_use]
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
+
+    /// Sets [`target`](Self::target).
+    #[must_use]
+    pub fn with_target(mut self, target: ObjectId) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`tagger`](Self::tagger).
+    #[must_use]
+    pub fn with_tagger(mut self, tagger: Option<String>) -> Self {
+        self.tagger = tagger;
+        self
+    }
+
+    /// Sets [`sign`](Self::sign).
+    #[must_use]
+    pub fn with_sign(mut self, sign: Option<bool>) -> Self {
+        self.sign = sign;
+        self
+    }
+
+    /// Sets [`signing_key`](Self::signing_key).
+    #[must_use]
+    pub fn with_signing_key(mut self, signing_key: Option<String>) -> Self {
+        self.signing_key = signing_key;
+        self
+    }
+
+    /// Sets [`tree_sha256`](Self::tree_sha256).
+    #[must_use]
+    pub fn with_tree_sha256(mut self, tree_sha256: Option<TreeSha256Options>) -> Self {
+        self.tree_sha256 = tree_sha256;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// Result of [`create_tag`].

@@ -23,8 +23,8 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_test_support::git;
 use grit_test_support::integrate_branch;
@@ -106,26 +106,13 @@ fn rebase_stop_and_status_report_the_same_conflict() {
             onto: None,
             branch_tip: fx.feat,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: IDENT.parse().expect("committer"),
-                preserve_committer: false,
-                sign: false,
-            },
-            skip_applied: false,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-        apply: ApplyOptions {
-            identity: IDENT.parse().expect("identity"),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new(IDENT.parse().expect("committer"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        )
+        .with_skip_applied(false),
+        apply: ApplyOptions::new(IDENT.parse().expect("identity"), "rebase"),
         exec: None,
     };
     let RebaseOutcome::Stopped(stop) = repo

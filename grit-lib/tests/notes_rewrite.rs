@@ -8,8 +8,8 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
-    RewriteOptions, SquashMessage, SquashOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
+    SquashMessage, SquashOptions, StartRebaseOptions,
 };
 use grit_test_support::git;
 
@@ -43,22 +43,14 @@ fn assert_fsck_strict(root: &std::path::Path) {
 }
 
 fn rewrite_options() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: IDENT.parse().expect("signature"),
-        preserve_committer: false,
-        sign: false,
-    }
+    RewriteOptions::new(IDENT.parse().expect("signature"))
+        .with_scope(RefScope::Head)
+        .with_sign(false)
 }
 
 fn apply_options() -> ApplyOptions {
-    ApplyOptions {
-        identity: IDENT.parse().expect("signature"),
-        reflog_message: "history".into(),
-        record_operation: None,
-        hooks: PostOperationHooks::Skip,
-    }
+    ApplyOptions::new(IDENT.parse().expect("signature"), "history")
+        .with_hooks(PostOperationHooks::Skip)
 }
 
 fn note_on_object(root: &std::path::Path, object: &ObjectId) -> Option<String> {

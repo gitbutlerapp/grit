@@ -556,17 +556,11 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
         .expect("origin/main");
     let tag_outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "v1-ann".to_owned(),
-            target: head,
-            message: Some("release".to_owned()),
-            tagger: Some("T <t@example.com> 946684800 +0000".to_owned()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v1-ann".to_owned(), head)
+                .with_message(Some("release".to_owned()))
+                .with_tagger(Some("T <t@example.com> 946684800 +0000".to_owned())),
+        )
         .expect("annotated tag");
 
     match transport.connect(&url, Service::ReceivePack, &ConnectOptions::default()) {

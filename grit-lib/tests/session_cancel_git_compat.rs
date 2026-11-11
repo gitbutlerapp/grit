@@ -14,8 +14,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink};
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions,
-    StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::stash::{StashMode, StashPushOptions};
 
@@ -221,26 +220,14 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
             onto: None,
             branch_tip: topic,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: IDENT.parse().expect("signature"),
-                preserve_committer: false,
-                sign: false,
-            },
-            skip_applied: false,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-        apply: ApplyOptions {
-            identity: IDENT.parse().expect("signature"),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new(IDENT.parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        )
+        .with_skip_applied(false),
+        apply: ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
         exec: None,
     };
     let repo = open_grit_repo(root);

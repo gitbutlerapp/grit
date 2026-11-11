@@ -85,13 +85,8 @@ fn store_rejects_casefold_create_against_packed_ref() {
         common_dir: git_dir.to_path_buf(),
         namespace_prefix: None,
     });
-    let update = RefUpdate {
-        name: "refs/heads/foo".to_owned(),
-        new_value: Some(RawRef::Direct(oid(0xcd))),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
+    let update = RefUpdate::new("refs/heads/foo".to_owned(), Some(RawRef::Direct(oid(0xcd))))
+        .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
     assert!(matches!(
         store.prepare(txn),
@@ -172,20 +167,10 @@ fn initial_transaction_rejects_same_batch_casefold_pair() {
         common_dir: git_dir.to_path_buf(),
         namespace_prefix: None,
     });
-    let foo = RefUpdate {
-        name: "refs/heads/Foo".to_owned(),
-        new_value: Some(RawRef::Direct(oid(1))),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
-    let bar = RefUpdate {
-        name: "refs/heads/foo".to_owned(),
-        new_value: Some(RawRef::Direct(oid(2))),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
+    let foo = RefUpdate::new("refs/heads/Foo".to_owned(), Some(RawRef::Direct(oid(1))))
+        .with_expected(Expected::Missing);
+    let bar = RefUpdate::new("refs/heads/foo".to_owned(), Some(RawRef::Direct(oid(2))))
+        .with_expected(Expected::Missing);
     let txn = RefTransaction::new()
         .initial()
         .update(foo)
@@ -211,13 +196,8 @@ fn case_sensitive_config_allows_distinct_case_ref_names() {
         common_dir: git_dir.to_path_buf(),
         namespace_prefix: None,
     });
-    let update = RefUpdate {
-        name: "refs/heads/foo".to_owned(),
-        new_value: Some(RawRef::Direct(oid(2))),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
+    let update = RefUpdate::new("refs/heads/foo".to_owned(), Some(RawRef::Direct(oid(2))))
+        .with_expected(Expected::Missing);
     let txn = RefTransaction::new()
         .initial()
         .update(update)

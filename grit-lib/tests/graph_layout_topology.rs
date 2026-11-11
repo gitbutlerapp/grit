@@ -96,11 +96,9 @@ fn graph_layout_filtered_parents_rewrite() -> grit_lib::error::Result<()> {
     let walk = repo.revwalk().commits(
         &["main"],
         &{
-            let mut walk = (&RevWalkListOptions {
-                commit_filter: Some(std::sync::Arc::new(filter)),
-                limit: Some(10),
-                ..Default::default()
-            })
+            let mut walk = (&RevWalkListOptions::default()
+                .with_commit_filter(Some(std::sync::Arc::new(filter)))
+                .with_limit(Some(10)))
                 .clone();
             walk.graph = true;
             walk

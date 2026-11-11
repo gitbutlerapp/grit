@@ -168,13 +168,10 @@ fn reflog_expire_dry_run() {
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::default()).expect("open");
     let before = log_snapshot(grit_copy.path());
 
-    let opts = ExpireOptions {
-        now: 3_000_000,
-        expire: Some("1600000000".into()),
-        expire_unreachable: Some("never".into()),
-        all: false,
-        dry_run: true,
-    };
+    let opts = ExpireOptions::new(3_000_000)
+        .with_expire(Some("1600000000".into()))
+        .with_expire_unreachable(Some("never".into()))
+        .with_dry_run(true);
 
     let dry = grit_repo.reflogs().expire(&opts).expect("dry expire");
 
@@ -196,10 +193,7 @@ fn reflog_expire_dry_run() {
 
     let real = grit_repo
         .reflogs()
-        .expire(&ExpireOptions {
-            dry_run: false,
-            ..opts.clone()
-        })
+        .expire(&opts.clone().with_dry_run(false))
         .expect("real expire");
     assert_eq!(real.entries_pruned, dry.entries_pruned);
     assert_eq!(

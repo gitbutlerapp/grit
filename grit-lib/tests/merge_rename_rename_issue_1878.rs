@@ -19,9 +19,7 @@ use grit_lib::operation::{conflicts_from_tree_merge, Conflict, ConflictKind, Ren
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{
-    EmptyPolicy, HistoryError, RebaseOntoOptions, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{HistoryError, RebaseOntoOptions, RefScope, RewriteOptions};
 use grit_test_support::git;
 use grit_test_support::{integrate_branch_with, predict_merge};
 use support::{
@@ -292,13 +290,9 @@ fn pick_of_the_other_rename_conflicts() {
 #[test]
 fn rebase_onto_the_other_rename_conflicts() {
     let fx = rename_rename_repo(Edit::None, Edit::None);
-    let opts = RebaseOntoOptions::new(RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: COMMITTER.parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    });
+    let opts = RebaseOntoOptions::new(
+        RewriteOptions::new(COMMITTER.parse().expect("signature")).with_scope(RefScope::Head),
+    );
     let err = fx
         .repo
         .history()

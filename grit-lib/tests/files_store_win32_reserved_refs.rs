@@ -22,13 +22,10 @@ fn files_store_allows_win32_reserved_refname_on_unix() {
     let oid = empty_commit_oid(&repo);
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/aux".to_owned(),
-            new_value: Some(RawRef::Direct(oid)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new("refs/heads/aux".to_owned(), Some(RawRef::Direct(oid)))
+                .with_expected(Expected::Missing),
+        )
         .expect("txn");
     store
         .prepare(txn)

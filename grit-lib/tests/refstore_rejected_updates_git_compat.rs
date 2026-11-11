@@ -6,8 +6,7 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::{
-    open_ref_store, Expected, RawRef, RefName, RefNameRef, RefStore, RefStoreError, RefTransaction,
-    RefUpdate, RefUpdateFlags,
+    open_ref_store, RawRef, RefName, RefNameRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::Repository;
 
@@ -17,13 +16,8 @@ use support::{
 };
 
 fn put(store: &dyn RefStore, name: &str, value: RawRef) -> Result<(), RefStoreError> {
-    let txn = RefTransaction::new().update(RefUpdate {
-        name: RefName::from_trusted(name),
-        new_value: Some(value),
-        expected: Expected::Any,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
-    })?;
+    let txn =
+        RefTransaction::new().update(RefUpdate::new(RefName::from_trusted(name), Some(value)))?;
     store.prepare(txn)?.commit()
 }
 

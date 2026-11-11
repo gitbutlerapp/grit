@@ -78,11 +78,12 @@ fn grit_path_commits(
     repo.revwalk()
         .commits(
             tokens,
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
-                limit,
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped(
+                    vec![path.to_owned()],
+                    PathspecGlobalFlags::default(),
+                ))
+                .with_limit(limit),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -140,15 +141,12 @@ fn path_limited_count_and_limit_match_git() {
         .revwalk()
         .count(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(
-                    vec![path.to_owned()],
-                    PathspecGlobalFlags::default(),
-                    &mut NullProgress,
-                    &CancelToken::never(),
-                ),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                vec![path.to_owned()],
+                PathspecGlobalFlags::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )),
         )
         .expect("grit count");
     assert_eq!(grit_count, git_count);
@@ -157,10 +155,10 @@ fn path_limited_count_and_limit_match_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                vec![path.to_owned()],
+                PathspecGlobalFlags::default(),
+            )),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -172,11 +170,12 @@ fn path_limited_count_and_limit_match_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
-                limit: Some(3),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped(
+                    vec![path.to_owned()],
+                    PathspecGlobalFlags::default(),
+                ))
+                .with_limit(Some(3)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -301,15 +300,12 @@ fn path_limited_exclude_only_pathspec_matches_git() {
         .revwalk()
         .count(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(
-                    vec![spec.to_owned()],
-                    PathspecGlobalFlags::default(),
-                    &mut NullProgress,
-                    &CancelToken::never(),
-                ),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                vec![spec.to_owned()],
+                PathspecGlobalFlags::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )),
         )
         .expect("grit count");
     assert_eq!(grit_count, git_count);
@@ -351,10 +347,8 @@ fn path_limited_root_gitlink_matches_git() {
         .revwalk()
         .count(
             &[orphan.as_str()],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(["sub"], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped(["sub"], PathspecGlobalFlags::default())),
         )
         .expect("grit count");
     assert_eq!(grit_count, git_count);
@@ -366,15 +360,12 @@ fn grit_path_count(wt: &std::path::Path, path: &str) -> usize {
         .revwalk()
         .count(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(
-                    vec![path.to_owned()],
-                    PathspecGlobalFlags::default(),
-                    &mut NullProgress,
-                    &CancelToken::never(),
-                ),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                vec![path.to_owned()],
+                PathspecGlobalFlags::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )),
         )
         .expect("grit count")
 }
@@ -656,15 +647,12 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .revwalk()
         .count(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(
-                    ["f.txt"],
-                    PathspecGlobalFlags::default(),
-                    &mut NullProgress,
-                    &CancelToken::never(),
-                ),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                ["f.txt"],
+                PathspecGlobalFlags::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )),
         )
         .expect("grit count f.txt");
     assert_eq!(grit_count_file, git_count_file);
@@ -673,15 +661,12 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .revwalk()
         .count(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(
-                    ["."],
-                    PathspecGlobalFlags::default(),
-                    &mut NullProgress,
-                    &CancelToken::never(),
-                ),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                ["."],
+                PathspecGlobalFlags::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )),
         )
         .expect("grit count dot");
     assert_eq!(grit_count_dot, git_count_dot);
@@ -705,10 +690,8 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(["f.txt"], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped(["f.txt"], PathspecGlobalFlags::default())),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -740,15 +723,12 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
         .revwalk()
         .count(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(
-                    vec![top_spec],
-                    PathspecGlobalFlags::default(),
-                    &mut NullProgress,
-                    &CancelToken::never(),
-                ),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                vec![top_spec],
+                PathspecGlobalFlags::default(),
+                &mut NullProgress,
+                &CancelToken::never(),
+            )),
         )
         .expect("grit top count");
     assert_eq!(grit_top_count, git_top_count);
@@ -770,15 +750,12 @@ fn path_limited_from_subdirectory_cwd_matches_git() {
             .revwalk()
             .count(
                 &["HEAD"],
-                &RevWalkListOptions {
-                    pathspec: Pathspec::scoped(
-                        vec![path_spec.to_owned()],
-                        PathspecGlobalFlags::default(),
-                        &mut NullProgress,
-                        &CancelToken::never(),
-                    ),
-                    ..RevWalkListOptions::default()
-                },
+                &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                    vec![path_spec.to_owned()],
+                    PathspecGlobalFlags::default(),
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )),
             )
             .expect("grit count pathspec");
         assert_eq!(grit_count, git_count, "pathspec {path_spec:?}");

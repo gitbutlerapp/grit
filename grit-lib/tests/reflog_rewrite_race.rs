@@ -14,7 +14,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::prepare_with_lock_wait;
 use grit_lib::refs::store::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate, ReflogUpdate,
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::ExpireOptions;
@@ -29,19 +29,17 @@ fn append(
     ts: i64,
     lock_wait: LockWait,
 ) -> grit_lib::error::Result<()> {
-    let txn = RefTransaction::new().update(RefUpdate {
-        name: "refs/heads/race".into(),
-        new_value: Some(RawRef::Direct(oid)),
-        expected: Expected::Any,
-        reflog: Some(ReflogUpdate {
-            identity: "T <t@example.com>".into(),
-            message: "x".into(),
-            time: time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
-            old_oid: None,
-            new_oid: Some(oid),
-        }),
-        flags: RefUpdateFlags::default(),
-    })?;
+    let txn = RefTransaction::new().update(
+        RefUpdate::new("refs/heads/race".into(), Some(RawRef::Direct(oid))).with_reflog(Some(
+            ReflogUpdate {
+                identity: "T <t@example.com>".into(),
+                message: "x".into(),
+                time: time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
+                old_oid: None,
+                new_oid: Some(oid),
+            },
+        )),
+    )?;
     prepare_with_lock_wait(store, txn, lock_wait)?.commit()?;
     Ok(())
 }
@@ -50,13 +48,11 @@ fn expire(repo: &Repository) -> grit_lib::error::Result<usize> {
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
     Ok(repo
         .reflogs()
-        .expire(&ExpireOptions {
-            now,
-            expire: Some("1.year.ago".into()),
-            expire_unreachable: Some("1.year.ago".into()),
-            all: false,
-            dry_run: false,
-        })?
+        .expire(
+            &ExpireOptions::new(now)
+                .with_expire(Some("1.year.ago".into()))
+                .with_expire_unreachable(Some("1.year.ago".into())),
+        )?
         .entries_pruned)
 }
 

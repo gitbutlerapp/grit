@@ -31,20 +31,12 @@ fn git_rev_parse(wt: &std::path::Path, spec: &str) -> grit_lib::objects::ObjectI
 const PINNED_COMMITTER: &str = "Refs Harness Author <refs-harness@example.com> 1700001000 +0000";
 
 fn rebase_opts(scope: RefScope, empty: EmptyPolicy, skip: bool) -> RebaseOntoOptions {
-    RebaseOntoOptions {
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-        rewrite: RewriteOptions {
-            scope,
-            empty,
-            committer: PINNED_COMMITTER.parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
-        skip_applied: skip,
-        flatten_leaf_merges: false,
-        favor: MergeFavor::default(),
-        drop: Vec::new(),
-    }
+    RebaseOntoOptions::new(
+        RewriteOptions::new(PINNED_COMMITTER.parse().expect("signature"))
+            .with_scope(scope)
+            .with_empty(empty),
+    )
+    .with_skip_applied(skip)
 }
 
 /// `upstream` (first commit), `onto` (carries the second patch), `tip` (branch tip with third patch).
@@ -111,12 +103,10 @@ fn apply_plan(repo: &Repository, plan: &grit_lib::revwalk::history::RewritePlan)
     repo.history()
         .apply(
             plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Test <t@grit.test>"),
-                reflog_message: "rebase onto".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Test <t@grit.test>"),
+                "rebase onto",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -1150,11 +1140,9 @@ fn git_rebase_onto_with_strategy(
 }
 
 fn rebase_opts_with_favor(favor: MergeFavor) -> RebaseOntoOptions {
-    RebaseOntoOptions {
-        favor,
-        skip_applied: false,
-        ..rebase_opts(RefScope::Head, EmptyPolicy::Drop, true)
-    }
+    (rebase_opts(RefScope::Head, EmptyPolicy::Drop, true))
+        .with_favor(favor)
+        .with_skip_applied(false)
 }
 
 fn tip_tree(repo: &Repository, tip: ObjectId) -> ObjectId {

@@ -66,14 +66,12 @@ fn main() -> Result<()> {
         let marker = if branch.current { "*" } else { " " };
         println!("branch {marker} {} {}", branch.name, branch.oid.to_hex());
     }
-    let tag_query = RefQuery {
-        namespaces: vec![RefNamespace::Tags],
-        sort: RefSort {
+    let tag_query = RefQuery::default()
+        .with_namespaces(vec![RefNamespace::Tags])
+        .with_sort(RefSort {
             key: SortKey::Name,
             reverse: false,
-        },
-        ..RefQuery::default()
-    };
+        });
     let tag_rows = repo
         .tags()
         .list(&grit_lib::repo_handles::TagListOptions::full_annotations(

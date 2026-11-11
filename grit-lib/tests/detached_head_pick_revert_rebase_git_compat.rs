@@ -13,8 +13,8 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, PreRebase, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use grit_lib::state::HeadState;
 
@@ -54,20 +54,12 @@ fn ident() -> grit_lib::ident::Signature {
 }
 
 fn detached_rebase_opts() -> RebaseOntoOptions {
-    RebaseOntoOptions {
-        pre_rebase: PreRebase::Skip,
-        rewrite: RewriteOptions {
-            scope: RefScope::Head,
-            empty: grit_lib::revwalk::history::EmptyPolicy::Drop,
-            committer: ident(),
-            preserve_committer: false,
-            sign: false,
-        },
-        skip_applied: false,
-        flatten_leaf_merges: false,
-        favor: grit_lib::diff::merge_file::MergeFavor::default(),
-        drop: Vec::new(),
-    }
+    RebaseOntoOptions::new(
+        RewriteOptions::new(ident())
+            .with_scope(RefScope::Head)
+            .with_sign(false),
+    )
+    .with_skip_applied(false)
 }
 
 fn start_rebase_opts(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
@@ -78,12 +70,8 @@ fn start_rebase_opts(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
             branch_tip: tip,
         },
         rebase: detached_rebase_opts(),
-        apply: ApplyOptions {
-            identity: ident(),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
+        apply: ApplyOptions::new(ident(), "rebase")
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
         exec: None,
     }
 }

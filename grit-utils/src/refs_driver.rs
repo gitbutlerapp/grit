@@ -183,10 +183,8 @@ pub fn ref_query_for_driver(
         "heads" => vec![RefNamespace::Heads],
         other => vec![RefNamespace::Custom(format!("refs/{other}/"))],
     };
-    RefQuery {
-        namespaces,
-        contains: contains.into_iter().collect(),
-        merged: merged.into_iter().collect(),
-        ..RefQuery::default()
-    }
+    RefQuery::default()
+        .with_namespaces(namespaces)
+        .with_contains(contains.into_iter().collect())
+        .with_merged(merged.into_iter().collect())
 }

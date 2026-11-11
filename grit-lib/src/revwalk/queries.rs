@@ -93,6 +93,7 @@ pub struct RevWalkCommitIterOptions {
 /// ([`Self::pathspec`]) live here rather than in the tokens. The low-level engine options are
 /// [`RevListOptions`], used by [`crate::rev_list::rev_list`] and [`RevWalk::walk`] (one spec string).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RevWalkListOptions {
     /// Maximum number of commits to return (matches `rev-list --max-count` / `-n`).
     pub limit: Option<usize>,
@@ -162,6 +163,134 @@ impl Default for RevWalkListOptions {
             left_right: false,
             cherry_mark: false,
         }
+    }
+}
+
+impl RevWalkListOptions {
+    /// Sets [`limit`](Self::limit).
+    #[must_use]
+    pub fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Sets [`skip`](Self::skip).
+    #[must_use]
+    pub fn with_skip(mut self, skip: usize) -> Self {
+        self.skip = skip;
+        self
+    }
+
+    /// Sets [`since`](Self::since).
+    #[must_use]
+    pub fn with_since(mut self, since: Option<i64>) -> Self {
+        self.since = since;
+        self
+    }
+
+    /// Sets [`until`](Self::until).
+    #[must_use]
+    pub fn with_until(mut self, until: Option<i64>) -> Self {
+        self.until = until;
+        self
+    }
+
+    /// Sets [`merges`](Self::merges).
+    #[must_use]
+    pub fn with_merges(mut self, merges: MergeFilter) -> Self {
+        self.merges = merges;
+        self
+    }
+
+    /// Sets [`reverse`](Self::reverse).
+    #[must_use]
+    pub fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+
+    /// Sets [`refs`](Self::refs).
+    #[must_use]
+    pub fn with_refs(mut self, refs: Vec<RefSelection>) -> Self {
+        self.refs = refs;
+        self
+    }
+
+    /// Sets [`first_parent`](Self::first_parent).
+    #[must_use]
+    pub fn with_first_parent(mut self, first_parent: bool) -> Self {
+        self.first_parent = first_parent;
+        self
+    }
+
+    /// Sets [`pathspec`](Self::pathspec).
+    #[must_use]
+    pub fn with_pathspec(mut self, pathspec: Pathspec) -> Self {
+        self.pathspec = pathspec;
+        self
+    }
+
+    /// Sets [`follow`](Self::follow).
+    #[must_use]
+    pub fn with_follow(mut self, follow: bool) -> Self {
+        self.follow = follow;
+        self
+    }
+
+    /// Sets [`full_history`](Self::full_history).
+    #[must_use]
+    pub fn with_full_history(mut self, full_history: bool) -> Self {
+        self.full_history = full_history;
+        self
+    }
+
+    /// Sets [`commit_filter`](Self::commit_filter).
+    #[must_use]
+    pub fn with_commit_filter(mut self, commit_filter: Option<Arc<CommitFilter>>) -> Self {
+        self.commit_filter = commit_filter;
+        self
+    }
+
+    /// Sets [`pickaxe`](Self::pickaxe).
+    #[must_use]
+    pub fn with_pickaxe(mut self, pickaxe: Option<Arc<crate::diff::Pickaxe>>) -> Self {
+        self.pickaxe = pickaxe;
+        self
+    }
+
+    /// Sets [`graph`](Self::graph).
+    #[must_use]
+    pub fn with_graph(mut self, graph: bool) -> Self {
+        self.graph = graph;
+        self
+    }
+
+    /// Sets [`retain_commit_data`](Self::retain_commit_data).
+    #[must_use]
+    pub fn with_retain_commit_data(mut self, retain_commit_data: bool) -> Self {
+        self.retain_commit_data = retain_commit_data;
+        self
+    }
+
+    /// Sets [`retained_commit_extent`](Self::retained_commit_extent).
+    #[must_use]
+    pub fn with_retained_commit_extent(mut self, retained_commit_extent: CommitExtent) -> Self {
+        self.retained_commit_extent = retained_commit_extent;
+        self
+    }
+
+    /// Sets [`left_right`](Self::left_right).
+    #[must_use]
+    pub fn with_left_right(mut self, left_right: bool) -> Self {
+        self.left_right = left_right;
+        self
+    }
+
+    /// Sets [`cherry_mark`](Self::cherry_mark).
+    #[must_use]
+    pub fn with_cherry_mark(mut self, cherry_mark: bool) -> Self {
+        self.cherry_mark = cherry_mark;
+        self
     }
 }
 

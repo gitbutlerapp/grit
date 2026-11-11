@@ -15,7 +15,6 @@ use grit_lib::objects::odb::OdbBuilder;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefName, RefNameRef, RefStore, RefTransaction, RefUpdate,
-    RefUpdateFlags,
 };
 use grit_lib::repo::{Repository, RepositoryError};
 use grit_lib::revwalk::rev_list::RevListOptions;
@@ -53,13 +52,10 @@ fn commit(repo: &Repository, parent: Option<ObjectId>, message: &str) -> ObjectI
 
 fn advance_head(refs: &dyn RefStore, old: Option<ObjectId>, new: ObjectId) {
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("HEAD"),
-            new_value: Some(RawRef::Direct(new)),
-            expected: old.map_or(Expected::Any, Expected::Oid),
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        })
+        .update(
+            RefUpdate::new(RefName::from_trusted("HEAD"), Some(RawRef::Direct(new)))
+                .with_expected(old.map_or(Expected::Any, Expected::Oid)),
+        )
         .expect("txn");
     refs.prepare(txn)
         .expect("prepare")

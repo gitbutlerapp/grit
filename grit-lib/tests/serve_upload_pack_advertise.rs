@@ -255,13 +255,13 @@ fn memory_serve_repo(
     store
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: RefName::from_trusted("refs/heads/master"),
-                    new_value: Some(RawRef::Direct(commit)),
-                    expected: Expected::Missing,
-                    reflog: None,
-                    flags: Default::default(),
-                })
+                .update(
+                    RefUpdate::new(
+                        RefName::from_trusted("refs/heads/master"),
+                        Some(RawRef::Direct(commit)),
+                    )
+                    .with_expected(Expected::Missing),
+                )
                 .expect("txn"),
         )
         .expect("prepare")

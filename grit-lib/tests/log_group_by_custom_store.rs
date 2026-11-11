@@ -48,10 +48,7 @@ fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "first-parent HEAD",
             tokens: &["HEAD"],
-            options: RevWalkListOptions {
-                first_parent: true,
-                ..RevWalkListOptions::default()
-            },
+            options: RevWalkListOptions::default().with_first_parent(true),
         },
         Scenario {
             name: "side..main",
@@ -61,18 +58,12 @@ fn scenarios() -> Vec<Scenario> {
         Scenario {
             name: "--all",
             tokens: &[],
-            options: RevWalkListOptions {
-                refs: vec![RefSelection::All],
-                ..RevWalkListOptions::default()
-            },
+            options: RevWalkListOptions::default().with_refs(vec![RefSelection::All]),
         },
         Scenario {
             name: "limited",
             tokens: &["main"],
-            options: RevWalkListOptions {
-                limit: Some(7),
-                ..RevWalkListOptions::default()
-            },
+            options: RevWalkListOptions::default().with_limit(Some(7)),
         },
     ]
 }

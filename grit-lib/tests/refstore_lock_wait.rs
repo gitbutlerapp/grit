@@ -29,7 +29,7 @@ use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::RefName;
 use grit_lib::refs::store::{
     Expected, FilesRefStore, FilesRefStoreConfig, MemoryRefStore, RawRef, RefNameRef, RefStore,
-    RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
+    RefStoreError, RefTransaction, RefUpdate,
 };
 use grit_lib::refs::{
     commit_ref_update_on_store, commit_ref_updates_on_store, prepare_with_lock_wait,
@@ -48,13 +48,7 @@ fn oid(n: u32) -> ObjectId {
 }
 
 fn set(name: &str, value: ObjectId, expected: Expected) -> RefUpdate {
-    RefUpdate {
-        name: RefName::from_trusted(name),
-        new_value: Some(RawRef::Direct(value)),
-        expected,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
-    }
+    RefUpdate::new(RefName::from_trusted(name), Some(RawRef::Direct(value))).with_expected(expected)
 }
 
 fn txn(name: &str, value: ObjectId) -> RefTransaction {

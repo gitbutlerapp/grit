@@ -1637,19 +1637,17 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
         let identity = "T <t@example.com>";
         let mut update = |new, exp, msg: &str| {
             let txn = RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/main".into(),
-                    new_value: Some(RawRef::Direct(new)),
-                    expected: exp,
-                    flags: Default::default(),
-                    reflog: Some(ReflogUpdate {
-                        identity: identity.into(),
-                        message: msg.into(),
-                        time: ts,
-                        old_oid: None,
-                        new_oid: None,
-                    }),
-                })
+                .update(
+                    RefUpdate::new("refs/heads/main".into(), Some(RawRef::Direct(new)))
+                        .with_expected(exp)
+                        .with_reflog(Some(ReflogUpdate {
+                            identity: identity.into(),
+                            message: msg.into(),
+                            time: ts,
+                            old_oid: None,
+                            new_oid: None,
+                        })),
+                )
                 .expect("txn");
             repo.ref_store()
                 .prepare(txn)
@@ -1660,19 +1658,17 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
         update(c1, Expected::Missing, "branch: Created");
         update(c2, Expected::Oid(c1), "reset: moving to c2");
         let side_txn = RefTransaction::new()
-            .update(RefUpdate {
-                name: "refs/heads/feature".into(),
-                new_value: Some(RawRef::Direct(side)),
-                expected: Expected::Missing,
-                flags: Default::default(),
-                reflog: Some(ReflogUpdate {
-                    identity: identity.into(),
-                    message: "branch: Created".into(),
-                    time: ts,
-                    old_oid: None,
-                    new_oid: None,
-                }),
-            })
+            .update(
+                RefUpdate::new("refs/heads/feature".into(), Some(RawRef::Direct(side)))
+                    .with_expected(Expected::Missing)
+                    .with_reflog(Some(ReflogUpdate {
+                        identity: identity.into(),
+                        message: "branch: Created".into(),
+                        time: ts,
+                        old_oid: None,
+                        new_oid: None,
+                    })),
+            )
             .expect("side txn");
         repo.ref_store()
             .prepare(side_txn)
@@ -2155,19 +2151,17 @@ fn connectivity_only_dangling_excludes_reachable_blobs_in_bare_repo() {
         repo.ref_store()
             .prepare(
                 RefTransaction::new()
-                    .update(RefUpdate {
-                        name: name.into(),
-                        new_value: Some(RawRef::Direct(oid)),
-                        expected: Expected::Missing,
-                        flags: Default::default(),
-                        reflog: Some(ReflogUpdate {
-                            identity: identity.into(),
-                            message: "test".into(),
-                            time: ts,
-                            old_oid: None,
-                            new_oid: None,
-                        }),
-                    })
+                    .update(
+                        RefUpdate::new(name.into(), Some(RawRef::Direct(oid)))
+                            .with_expected(Expected::Missing)
+                            .with_reflog(Some(ReflogUpdate {
+                                identity: identity.into(),
+                                message: "test".into(),
+                                time: ts,
+                                old_oid: None,
+                                new_oid: None,
+                            })),
+                    )
                     .expect("txn"),
             )
             .expect("prepare")
@@ -2312,19 +2306,17 @@ fn connectivity_only_does_not_inflate_reachable_blob_bodies() {
     repo.ref_store()
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/main".into(),
-                    new_value: Some(RawRef::Direct(commit)),
-                    expected: Expected::Missing,
-                    flags: Default::default(),
-                    reflog: Some(ReflogUpdate {
-                        identity: "T <t@example.com>".into(),
-                        message: "init".into(),
-                        time: ts,
-                        old_oid: None,
-                        new_oid: None,
-                    }),
-                })
+                .update(
+                    RefUpdate::new("refs/heads/main".into(), Some(RawRef::Direct(commit)))
+                        .with_expected(Expected::Missing)
+                        .with_reflog(Some(ReflogUpdate {
+                            identity: "T <t@example.com>".into(),
+                            message: "init".into(),
+                            time: ts,
+                            old_oid: None,
+                            new_oid: None,
+                        })),
+                )
                 .expect("txn"),
         )
         .expect("prepare")

@@ -225,13 +225,10 @@ pub(crate) fn commit_ref_update_on_store_with_wait(
 /// let store = MemoryRefStore::new();
 /// let oid = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
 /// let txn = |name: &str| {
-///     RefTransaction::new().update(RefUpdate {
-///         name: RefName::from_trusted(name),
-///         new_value: Some(RawRef::Direct(oid)),
-///         expected: Expected::Any,
-///         reflog: None,
-///         flags: Default::default(),
-///     })
+///     RefTransaction::new().update(RefUpdate::new(
+///         RefName::from_trusted(name),
+///         Some(RawRef::Direct(oid)),
+///     ))
 /// };
 ///
 /// let held = store.prepare(txn("refs/heads/a")?)?;

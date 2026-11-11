@@ -16,8 +16,8 @@ use grit_lib::refs::check_ref_format::RefNamePolicy;
 use grit_lib::refs::commit_ref_update_on_store;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef,
-    RefStorageFormat, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
+    MemoryRefStore, PreparedRefTransaction, RawRef, RefEntry, RefName, RefNameRef,
+    RefStorageFormat, RefStore, RefStoreError, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
@@ -42,13 +42,7 @@ impl RacingStore {
     fn set(&self, oid: ObjectId) {
         commit_ref_update_on_store(
             &self.inner,
-            RefUpdate {
-                name: RefName::from_trusted(NOTES),
-                new_value: Some(RawRef::Direct(oid)),
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            },
+            RefUpdate::new(RefName::from_trusted(NOTES), Some(RawRef::Direct(oid))),
         )
         .expect("move notes ref");
     }

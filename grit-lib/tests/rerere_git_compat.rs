@@ -13,8 +13,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
-    StartRebaseOptions,
+    RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::state::{resolve_head, HeadState};
 use grit_test_support::start_replay_sequence;
@@ -322,26 +321,14 @@ fn issue_2468_rebase_replays_git_rr_cache() {
             onto: None,
             branch_tip: tip,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: ident(),
-                preserve_committer: false,
-                sign: false,
-            },
-            skip_applied: false,
-            flatten_leaf_merges: false,
-            favor: Default::default(),
-            drop: Vec::new(),
-        },
-        apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: ident(),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new(ident())
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        )
+        .with_skip_applied(false)
+        .with_favor(Default::default()),
+        apply: grit_lib::revwalk::history::ApplyOptions::new(ident(), "rebase"),
         exec: None,
     };
     let out = repo

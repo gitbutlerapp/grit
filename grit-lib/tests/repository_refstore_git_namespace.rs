@@ -10,7 +10,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
+use grit_lib::refs::store::{Expected, RawRef, RefTransaction, RefUpdate};
 use grit_lib::repo::Repository;
 
 fn sample_oid() -> ObjectId {
@@ -66,13 +66,10 @@ fn repository_files_refstore_honors_git_namespace_option() {
     repo.ref_store()
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/topic".to_owned(),
-                    new_value: Some(RawRef::Direct(oid)),
-                    expected: Expected::Missing,
-                    reflog: None,
-                    flags: RefUpdateFlags::default(),
-                })
+                .update(
+                    RefUpdate::new("refs/heads/topic".to_owned(), Some(RawRef::Direct(oid)))
+                        .with_expected(Expected::Missing),
+                )
                 .expect("txn"),
         )
         .expect("prepare")

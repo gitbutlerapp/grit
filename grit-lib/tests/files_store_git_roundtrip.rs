@@ -49,17 +49,15 @@ fn files_store_git_roundtrip() {
             RefName::from_trusted(format!("refs/heads/branch-{i:04}"))
         };
         txn = txn
-            .update(RefUpdate {
-                name,
-                new_value: Some(RawRef::Direct(tip)),
-                expected: if i == 0 {
-                    Expected::Any
-                } else {
-                    Expected::Missing
-                },
-                reflog: Some(log.clone()),
-                flags: Default::default(),
-            })
+            .update(
+                RefUpdate::new(name, Some(RawRef::Direct(tip)))
+                    .with_expected(if i == 0 {
+                        Expected::Any
+                    } else {
+                        Expected::Missing
+                    })
+                    .with_reflog(Some(log.clone())),
+            )
             .expect("push");
     }
     store
@@ -130,13 +128,10 @@ fn files_store_respects_git_lock() {
 
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/locked".to_owned(),
-            new_value: Some(RawRef::Direct(sample_oid(9))),
-            expected: Expected::Any,
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(RefUpdate::new(
+            "refs/heads/locked".to_owned(),
+            Some(RawRef::Direct(sample_oid(9))),
+        ))
         .expect("txn");
 
     match store.prepare(txn) {

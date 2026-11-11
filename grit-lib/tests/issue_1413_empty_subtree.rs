@@ -10,7 +10,7 @@ use grit_lib::diff::merge_trees::{merge_trees_three_way, TreeMergeConflictPresen
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::progress::CancelToken;
-use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, RefScope, RewriteOptions};
+use grit_lib::revwalk::history::{ApplyOptions, RewriteOptions};
 
 use support::{
     assert_git_fsck_strict, commit_file, commit_tree, git, git_fsck_strict, git_rev_parse,
@@ -53,24 +53,18 @@ fn assert_head_has_no_empty_subtree_dirs(wt: &Path) {
 }
 
 fn drop_opts(seq: i64) -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: format!("Tester <t@grit.test> {seq} +0000")
+    RewriteOptions::new(
+        format!("Tester <t@grit.test> {seq} +0000")
             .parse()
             .expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    }
+    )
 }
 
 fn apply_opts() -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("Tester <t@grit.test>"),
-        reflog_message: "history drop".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("Tester <t@grit.test>"),
+        "history drop",
+    )
 }
 
 #[test]

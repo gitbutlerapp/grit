@@ -23,13 +23,10 @@ fn rev(dir: &Path, rev: &str) -> ObjectId {
 }
 
 fn kind_tags(repo: &Repository) -> Vec<TagSummary> {
-    let query = RefQuery {
-        sort: RefSort {
-            key: SortKey::Name,
-            reverse: false,
-        },
-        ..RefQuery::default()
-    };
+    let query = RefQuery::default().with_sort(RefSort {
+        key: SortKey::Name,
+        reverse: false,
+    });
     let TagList::Summaries(tags) = repo
         .tags()
         .list(
@@ -219,17 +216,7 @@ fn unsorted_packed_refs_classify_like_git() {
 }
 
 fn lightweight(name: &str, target: ObjectId, force: bool) -> CreateTagRequest {
-    CreateTagRequest {
-        name: name.into(),
-        target,
-        message: None,
-        tagger: None,
-        sign: None,
-        signing_key: None,
-        tree_sha256: None,
-        force,
-        dry_run: false,
-    }
+    CreateTagRequest::new(name, target).with_force(force)
 }
 
 #[test]

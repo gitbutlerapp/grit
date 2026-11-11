@@ -309,9 +309,7 @@ fn targeted_tag_decorations_keep_injected_backends_and_broken_tags_working(
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::objects::odb::store::MemoryStore;
     use grit_lib::objects::HashAlgo;
-    use grit_lib::refs::store::{
-        Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
-    };
+    use grit_lib::refs::store::{MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate};
     use std::sync::Arc;
 
     let dir = tempfile::tempdir().expect("tempdir");
@@ -360,13 +358,8 @@ fn targeted_tag_decorations_keep_injected_backends_and_broken_tags_working(
         ("refs/tags/dangling", dangling),
         ("refs/tags/missing", missing),
     ] {
-        transaction = transaction.update(RefUpdate {
-            name: name.to_owned(),
-            new_value: Some(RawRef::Direct(oid)),
-            expected: Expected::Any,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        })?;
+        transaction =
+            transaction.update(RefUpdate::new(name.to_owned(), Some(RawRef::Direct(oid))))?;
     }
     refs.prepare(transaction)?.commit()?;
     let targeted = repo.revwalk().decorations(

@@ -70,10 +70,8 @@ fn log_pathspec_literal_matches_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped([path], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped([path], PathspecGlobalFlags::default())),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -93,10 +91,8 @@ fn log_pathspec_glob_matches_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped([pattern], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped([pattern], PathspecGlobalFlags::default())),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -116,10 +112,8 @@ fn log_pathspec_exclude_matches_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped([spec], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped([spec], PathspecGlobalFlags::default())),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -139,10 +133,8 @@ fn log_pathspec_icase_matches_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped([spec], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped([spec], PathspecGlobalFlags::default())),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -162,10 +154,8 @@ fn log_pathspec_after_rename_matches_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped([path], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped([path], PathspecGlobalFlags::default())),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -185,11 +175,9 @@ fn log_pathspec_rename_follow_matches_git() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped([path], PathspecGlobalFlags::default()),
-                follow: true,
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped([path], PathspecGlobalFlags::default()))
+                .with_follow(true),
             &mut NullProgress,
             &CancelToken::never(),
         )

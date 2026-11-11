@@ -229,10 +229,7 @@ fn patch_ids_and_cherry_mark_match_git_on_ranges_split_across_workers() {
     assert_eq!(want.len(), 81);
     assert_eq!(got, want);
 
-    let opts = grit_lib::revwalk::RevWalkListOptions {
-        cherry_mark: true,
-        ..Default::default()
-    };
+    let opts = grit_lib::revwalk::RevWalkListOptions::default().with_cherry_mark(true);
     let result = repo
         .revwalk()
         .rev_list_result(

@@ -22,9 +22,8 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, HistoryEngineError, HistoryError, PreRebase, RebaseOntoOptions,
-    RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope, RewriteOptions,
-    StartRebaseOptions,
+    ApplyOptions, HistoryEngineError, HistoryError, PreRebase, RebaseOntoOptions, RebaseOutcome,
+    RebasePlan, RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_test_support::{continue_merge, integrate_branch_with};
 
@@ -630,22 +629,14 @@ fn rebase_opts(upstream: ObjectId, tip: ObjectId, pre_rebase: PreRebase) -> Star
             onto: None,
             branch_tip: tip,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase,
-            ..RebaseOntoOptions::new(RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: IDENT.parse().expect("signature"),
-                preserve_committer: false,
-                sign: false,
-            })
-        },
-        apply: ApplyOptions {
-            identity: IDENT.parse().expect("signature"),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: PostOperationHooks::Skip,
-        },
+        rebase: (RebaseOntoOptions::new(
+            RewriteOptions::new(IDENT.parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        ))
+        .with_pre_rebase(pre_rebase),
+        apply: ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
+            .with_hooks(PostOperationHooks::Skip),
         exec: None,
     }
 }

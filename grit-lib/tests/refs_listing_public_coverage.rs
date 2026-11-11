@@ -45,16 +45,13 @@ fn query_listings_from_pairs_and_store() {
             None,
         ),
     ];
-    let query = RefQuery {
-        namespaces: vec![RefNamespace::Tags],
-        patterns: vec![],
-        sort: RefSort {
+    let query = RefQuery::default()
+        .with_namespaces(vec![RefNamespace::Tags])
+        .with_sort(RefSort {
             key: SortKey::Name,
             reverse: false,
-        },
-        limit: Some(1),
-        ..RefQuery::default()
-    };
+        })
+        .with_limit(Some(1));
     let out = query_listings_from_pairs(pairs, &query, &RefQueryOptions::default(), None).unwrap();
     assert_eq!(out.len(), 1);
     assert_eq!(out[0].full_name, "refs/tags/a");
@@ -68,10 +65,7 @@ fn query_listings_from_pairs_and_store() {
         .unwrap();
     let heads = query_listings_on_store(
         &store,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Heads],
-            ..RefQuery::default()
-        },
+        &RefQuery::default().with_namespaces(vec![RefNamespace::Heads]),
         &RefQueryOptions::default(),
         None,
     )
@@ -94,23 +88,14 @@ fn references_query_peels_annotated_tags() {
         .unwrap()
         .oid;
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: commit,
-            message: Some("note".into()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v1", commit)
+                .with_message(Some("note".into()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".into())),
+        )
         .unwrap();
 
-    let query = RefQuery {
-        namespaces: vec![RefNamespace::Tags],
-        ..RefQuery::default()
-    };
+    let query = RefQuery::default().with_namespaces(vec![RefNamespace::Tags]);
     let rows = repo
         .references()
         .query(&query, &RefQueryOptions::default())
@@ -129,26 +114,17 @@ fn references_query_peels_annotated_tag_to_non_commit() {
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
     let blob: ObjectId = repo.odb().write(ObjectKind::Blob, b"payload").unwrap();
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "of-blob".into(),
-            target: blob,
-            message: Some("annotated".into()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("of-blob", blob)
+                .with_message(Some("annotated".into()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".into())),
+        )
         .unwrap();
 
     let rows = repo
         .references()
         .query(
-            &RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                ..RefQuery::default()
-            },
+            &RefQuery::default().with_namespaces(vec![RefNamespace::Tags]),
             &RefQueryOptions::default(),
         )
         .unwrap();
@@ -172,26 +148,13 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
         .unwrap()
         .oid;
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "light".into(),
-            target: commit,
-            message: None,
-            tagger: None,
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(&CreateTagRequest::new("light", commit))
         .unwrap();
 
     let rows = repo
         .references()
         .query(
-            &RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                ..RefQuery::default()
-            },
+            &RefQuery::default().with_namespaces(vec![RefNamespace::Tags]),
             &RefQueryOptions::default(),
         )
         .unwrap();
@@ -215,26 +178,13 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
         .unwrap()
         .oid;
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "t".into(),
-            target: commit,
-            message: None,
-            tagger: None,
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(&CreateTagRequest::new("t", commit))
         .unwrap();
 
-    let query = RefQuery {
-        namespaces: vec![
-            RefNamespace::Tags,
-            RefNamespace::Custom("refs/tags/".to_owned()),
-        ],
-        ..RefQuery::default()
-    };
+    let query = RefQuery::default().with_namespaces(vec![
+        RefNamespace::Tags,
+        RefNamespace::Custom("refs/tags/".to_owned()),
+    ]);
     let rows = repo
         .references()
         .query(&query, &RefQueryOptions::default())
@@ -259,10 +209,7 @@ fn symbolic_ref_listing_does_not_leak_resolved_peel() {
 
     let rows = query_listings_on_store(
         &store,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Remotes],
-            ..RefQuery::default()
-        },
+        &RefQuery::default().with_namespaces(vec![RefNamespace::Remotes]),
         &RefQueryOptions::default(),
         None,
     )
@@ -300,14 +247,12 @@ fn date_sort_keeps_refs_with_missing_objects() {
 
     let rows = query_listings_on_store(
         &store,
-        &RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            sort: RefSort {
+        &RefQuery::default()
+            .with_namespaces(vec![RefNamespace::Tags])
+            .with_sort(RefSort {
                 key: SortKey::Date,
                 reverse: false,
-            },
-            ..RefQuery::default()
-        },
+            }),
         &RefQueryOptions::default(),
         Some(repo.odb()),
     )
@@ -327,10 +272,10 @@ fn pairs_query_short_name_uses_longest_namespace_prefix() {
         "0000000000000000000000000000000000000001".parse().unwrap(),
         None,
     )];
-    let query = RefQuery {
-        namespaces: vec![RefNamespace::Custom("refs/".to_owned()), RefNamespace::Tags],
-        ..RefQuery::default()
-    };
+    let query = RefQuery::default().with_namespaces(vec![
+        RefNamespace::Custom("refs/".to_owned()),
+        RefNamespace::Tags,
+    ]);
     let rows = query_listings_from_pairs(pairs, &query, &RefQueryOptions::default(), None).unwrap();
     assert_eq!(rows[0].short_name, "foo/bar");
 }

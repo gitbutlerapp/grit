@@ -183,14 +183,12 @@ fn list_tags_matches_git_and_classifies_targets() {
     let tags = open(&dir)
         .tags()
         .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
-            RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                sort: RefSort {
+            RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Tags])
+                .with_sort(RefSort {
                     key: SortKey::Name,
                     reverse: false,
-                },
-                ..RefQuery::default()
-            },
+                }),
         ))
         .unwrap()
         .into_summaries()
@@ -450,17 +448,7 @@ fn list_and_delete_on_reftable_backend() {
         .create(&BranchCreateOptions::at_head("topic"))
         .unwrap();
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: tip,
-            message: None,
-            tagger: None,
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(&CreateTagRequest::new("v1", tip))
         .unwrap();
 
     let names: Vec<String> = repo
@@ -475,10 +463,7 @@ fn list_and_delete_on_reftable_backend() {
     assert_eq!(
         repo.tags()
             .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
-                RefQuery {
-                    namespaces: vec![RefNamespace::Tags],
-                    ..RefQuery::default()
-                }
+                RefQuery::default().with_namespaces(vec![RefNamespace::Tags])
             ))
             .unwrap()
             .into_summaries()
@@ -513,10 +498,7 @@ fn list_and_delete_on_reftable_backend() {
     assert!(repo
         .tags()
         .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
-            RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                ..RefQuery::default()
-            }
+            RefQuery::default().with_namespaces(vec![RefNamespace::Tags])
         ))
         .unwrap()
         .into_summaries()
@@ -535,34 +517,30 @@ fn memory_store_repo(root: &Path) -> (Repository, Arc<MemoryRefStore>, ObjectId)
     let tip = oid(&dir, "HEAD");
 
     let store = Arc::new(MemoryRefStore::new());
-    let direct = |name: &str, reflog: bool| RefUpdate {
-        name: name.to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Missing,
-        reflog: reflog.then(|| ReflogUpdate {
-            identity: "T <t@example.com>".to_owned(),
-            message: "create".to_owned(),
-            time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
-            old_oid: None,
-            new_oid: None,
-        }),
-        flags: RefUpdateFlags::default(),
+    let direct = |name: &str, reflog: bool| {
+        RefUpdate::new(name.to_owned(), Some(RawRef::Direct(tip)))
+            .with_expected(Expected::Missing)
+            .with_reflog(reflog.then(|| ReflogUpdate {
+                identity: "T <t@example.com>".to_owned(),
+                message: "create".to_owned(),
+                time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+                old_oid: None,
+                new_oid: None,
+            }))
     };
     let txn = RefTransaction::new()
         .update(direct("refs/heads/main", false))
         .and_then(|t| t.update(direct("refs/heads/topic", true)))
         .and_then(|t| t.update(direct("refs/tags/injected", false)))
         .and_then(|t| {
-            t.update(RefUpdate {
-                name: "HEAD".to_owned(),
-                new_value: Some(RawRef::Symbolic("refs/heads/main".to_owned())),
-                expected: Expected::Missing,
-                reflog: None,
-                flags: RefUpdateFlags {
-                    no_deref: true,
-                    ..RefUpdateFlags::default()
-                },
-            })
+            t.update(
+                RefUpdate::new(
+                    "HEAD".to_owned(),
+                    Some(RawRef::Symbolic("refs/heads/main".to_owned())),
+                )
+                .with_expected(Expected::Missing)
+                .with_flags(RefUpdateFlags::default().with_no_deref(true)),
+            )
         })
         .unwrap();
     store.prepare(txn).unwrap().commit().unwrap();
@@ -587,14 +565,12 @@ fn list_and_delete_use_injected_memory_ref_store() {
     let tags: Vec<String> = repo
         .tags()
         .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
-            RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                sort: RefSort {
+            RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Tags])
+                .with_sort(RefSort {
                     key: SortKey::Name,
                     reverse: false,
-                },
-                ..RefQuery::default()
-            },
+                }),
         ))
         .unwrap()
         .into_summaries()
@@ -655,10 +631,7 @@ fn list_and_delete_use_injected_memory_ref_store() {
     assert!(repo
         .tags()
         .list(&grit_lib::repo_handles::TagListOptions::full_annotations(
-            RefQuery {
-                namespaces: vec![RefNamespace::Tags],
-                ..RefQuery::default()
-            }
+            RefQuery::default().with_namespaces(vec![RefNamespace::Tags])
         ))
         .unwrap()
         .into_summaries()
@@ -679,16 +652,14 @@ fn delete_current_branch_uses_injected_head_when_disk_differs() {
     let disk_main = std::fs::read(dir.join(".git/refs/heads/main")).unwrap();
     let disk_log = std::fs::read(dir.join(".git/logs/refs/heads/main")).unwrap();
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "HEAD".to_owned(),
-            new_value: Some(RawRef::Symbolic("refs/heads/topic".to_owned())),
-            expected: Expected::Symref("refs/heads/main".to_owned()),
-            reflog: None,
-            flags: RefUpdateFlags {
-                no_deref: true,
-                ..RefUpdateFlags::default()
-            },
-        })
+        .update(
+            RefUpdate::new(
+                "HEAD".to_owned(),
+                Some(RawRef::Symbolic("refs/heads/topic".to_owned())),
+            )
+            .with_expected(Expected::Symref("refs/heads/main".to_owned()))
+            .with_flags(RefUpdateFlags::default().with_no_deref(true)),
+        )
         .unwrap();
     store.prepare(txn).unwrap().commit().unwrap();
 

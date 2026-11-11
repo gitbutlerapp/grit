@@ -9,7 +9,7 @@ use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::reflog::ReflogEntry;
-use grit_lib::refs::store::{Expected, RawRef, RefName, RefUpdate, RefUpdateFlags};
+use grit_lib::refs::store::{Expected, RawRef, RefName, RefUpdate};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::ReflogCreate;
 use grit_lib::state::{HeadState, InProgressOperation};
@@ -66,14 +66,12 @@ fn handle_writes_are_what_git_reads() {
         refs.update("refs/tags/v2", &second).expect("tag");
         refs.update_symbolic("refs/heads/alias", "refs/heads/topic")
             .expect("alias");
-        refs.apply(&[RefUpdate {
-            name: RefName::try_from("refs/heads/batch").expect("valid"),
-            new_value: Some(RawRef::Direct(first)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        }])
-        .expect("batch");
+        refs.apply(&[RefUpdate::new(
+            RefName::try_from("refs/heads/batch").expect("valid"),
+            Some(RawRef::Direct(first)),
+        )
+        .with_expected(Expected::Missing)])
+            .expect("batch");
         refs.compare_and_delete("refs/tags/v2", &second)
             .expect("delete v2");
         refs.update_symbolic("HEAD", "refs/heads/topic")
@@ -336,20 +334,16 @@ fn handles_round_trip_through_a_reopened_store_on_both_backends() {
         refs.update("refs/tags/v1.0", &first).expect("tag v1.0");
         let outcomes = refs
             .apply_each(vec![
-                RefUpdate {
-                    name: RefName::try_from("refs/heads/ok").expect("valid"),
-                    new_value: Some(RawRef::Direct(first)),
-                    expected: Expected::Missing,
-                    reflog: None,
-                    flags: RefUpdateFlags::default(),
-                },
-                RefUpdate {
-                    name: RefName::try_from("refs/heads/topic").expect("valid"),
-                    new_value: Some(RawRef::Direct(second)),
-                    expected: Expected::Oid(second),
-                    reflog: None,
-                    flags: RefUpdateFlags::default(),
-                },
+                RefUpdate::new(
+                    RefName::try_from("refs/heads/ok").expect("valid"),
+                    Some(RawRef::Direct(first)),
+                )
+                .with_expected(Expected::Missing),
+                RefUpdate::new(
+                    RefName::try_from("refs/heads/topic").expect("valid"),
+                    Some(RawRef::Direct(second)),
+                )
+                .with_expected(Expected::Oid(second)),
             ])
             .expect("non-atomic batch");
         assert!(outcomes[0].result.is_ok(), "{format:?}: {outcomes:?}");

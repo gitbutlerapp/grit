@@ -16,9 +16,7 @@ use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::NullProgress;
-use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefNameRef, RefUpdate, RefUpdateFlags,
-};
+use grit_lib::refs::store::{Expected, MemoryRefStore, RawRef, RefNameRef, RefUpdate};
 use grit_lib::refs::{
     commit_ref_update_on_store, update_branch_for_commit_on_store, BranchCommitRefUpdate,
 };
@@ -63,13 +61,8 @@ fn branch_create_runs_prepared_and_committed() {
     fs::write(&log, "").expect("clear log");
     commit_ref_update_on_store(
         repo.ref_store(),
-        RefUpdate {
-            name: "refs/heads/topic".into(),
-            new_value: Some(RawRef::Direct(tip)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        },
+        RefUpdate::new("refs/heads/topic".into(), Some(RawRef::Direct(tip)))
+            .with_expected(Expected::Missing),
     )
     .expect("create branch");
 
@@ -105,13 +98,8 @@ fn prepared_refusal_leaves_ref_unchanged_and_logs_aborted() {
     fs::write(&log, "").expect("clear log");
     let err = commit_ref_update_on_store(
         repo.ref_store(),
-        RefUpdate {
-            name: "refs/heads/blocked".into(),
-            new_value: Some(RawRef::Direct(tip)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        },
+        RefUpdate::new("refs/heads/blocked".into(), Some(RawRef::Direct(tip)))
+            .with_expected(Expected::Missing),
     )
     .expect_err("hook blocks");
     assert!(matches!(err, Error::Hook(_)), "{err}");
@@ -322,13 +310,8 @@ fn core_hooks_path_is_honored() {
     fs::write(&log, "").expect("clear log");
     commit_ref_update_on_store(
         repo.ref_store(),
-        RefUpdate {
-            name: "refs/heads/x".into(),
-            new_value: Some(RawRef::Direct(tip)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        },
+        RefUpdate::new("refs/heads/x".into(), Some(RawRef::Direct(tip)))
+            .with_expected(Expected::Missing),
     )
     .expect("branch");
     let text = read_log(&log);

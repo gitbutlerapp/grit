@@ -10,9 +10,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::lockfile::LockWait;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::prepare_with_lock_wait;
-use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
-};
+use grit_lib::refs::store::{RawRef, RefStore, RefTransaction, RefUpdate, ReflogUpdate};
 use grit_lib::repo::Repository;
 use grit_lib::test_support::refs::expire_reflog;
 
@@ -23,19 +21,17 @@ fn append_on_store(
     ts: i64,
     lock_wait: LockWait,
 ) -> grit_lib::error::Result<()> {
-    let txn = RefTransaction::new().update(RefUpdate {
-        name: refname.to_owned(),
-        new_value: Some(RawRef::Direct(oid)),
-        expected: Expected::Any,
-        reflog: Some(ReflogUpdate {
-            identity: format!("T <t@example.com> {ts} +0000"),
-            message: "x".into(),
-            time: time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
-            old_oid: None,
-            new_oid: Some(oid),
-        }),
-        flags: RefUpdateFlags::default(),
-    })?;
+    let txn = RefTransaction::new().update(
+        RefUpdate::new(refname.to_owned(), Some(RawRef::Direct(oid))).with_reflog(Some(
+            ReflogUpdate {
+                identity: format!("T <t@example.com> {ts} +0000"),
+                message: "x".into(),
+                time: time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
+                old_oid: None,
+                new_oid: Some(oid),
+            },
+        )),
+    )?;
     prepare_with_lock_wait(store, txn, lock_wait)?.commit()?;
     Ok(())
 }

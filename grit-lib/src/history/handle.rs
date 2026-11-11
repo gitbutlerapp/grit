@@ -47,25 +47,18 @@ use super::types::{
 ///
 /// # fn example(repo: &Repository, commit: grit_lib::objects::ObjectId) -> Result<(), Box<dyn std::error::Error>> {
 /// let identity: grit_lib::ident::Signature = "Rewriter <r@example.com> 1700000000 +0000".parse()?;
-/// let rewrite = RewriteOptions {
-///     scope: RefScope::Branches,
-///     empty: EmptyPolicy::Drop,
-///     committer: identity.clone(),
-///     preserve_committer: false,
-///     sign: false,
-/// };
+/// let rewrite = RewriteOptions::new(identity.clone())
+///     .with_scope(RefScope::Branches)
+///     .with_empty(EmptyPolicy::Drop)
+///     .with_sign(false);
 /// let history = repo.history();
 /// let plan = history.reword(
 ///     commit,
 ///     &RewordOptions::default().with_message("Better subject\n"),
 ///     &rewrite,
 /// )?;
-/// let apply = ApplyOptions {
-///     identity,
-///     reflog_message: "history reword".into(),
-///     record_operation: Some("reword".into()),
-///     hooks: Default::default(),
-/// };
+/// let apply = ApplyOptions::new(identity, "history reword")
+///     .with_record_operation(Some("reword".into()));
 /// history.apply(&plan, &apply, &mut NullProgress, &CancelToken::never())?;
 /// # Ok(())
 /// # }

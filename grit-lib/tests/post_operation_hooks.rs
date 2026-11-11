@@ -21,8 +21,8 @@ use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope,
-    RewordOptions, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewordOptions,
+    RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::worktree::{AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::integrate_branch_with;
@@ -627,22 +627,14 @@ fn amend_without_post_rewrite_runs_only_post_commit() {
 }
 
 fn rewrite_options() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: IDENT.parse().expect("signature"),
-        preserve_committer: false,
-        sign: false,
-    }
+    RewriteOptions::new(IDENT.parse().expect("signature"))
+        .with_scope(RefScope::Head)
+        .with_sign(false)
 }
 
 fn apply_options(record: Option<&str>) -> ApplyOptions {
-    ApplyOptions {
-        identity: IDENT.parse().expect("IDENT"),
-        reflog_message: "history".into(),
-        record_operation: record.map(str::to_owned),
-        hooks: PostOperationHooks::Run,
-    }
+    ApplyOptions::new(IDENT.parse().expect("IDENT"), "history")
+        .with_record_operation(record.map(str::to_owned))
 }
 
 fn rebase_onto(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
@@ -856,10 +848,7 @@ fn skipped_rewrite_hooks_and_undo_run_nothing() {
         .history()
         .apply(
             &plan,
-            &ApplyOptions {
-                hooks: PostOperationHooks::Skip,
-                ..apply_options(Some("drop"))
-            },
+            &(apply_options(Some("drop"))).with_hooks(PostOperationHooks::Skip),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )

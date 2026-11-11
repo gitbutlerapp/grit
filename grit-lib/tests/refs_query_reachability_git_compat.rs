@@ -106,11 +106,9 @@ fn scenario_contains(backend: Backend, with_graph: bool) {
         worktree,
         &repo,
         &["refs/tags/", &format!("--contains={mid}")],
-        RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            contains: vec![mid],
-            ..RefQuery::default()
-        },
+        RefQuery::default()
+            .with_namespaces(vec![RefNamespace::Tags])
+            .with_contains(vec![mid]),
     );
 }
 
@@ -124,11 +122,9 @@ fn scenario_points_at(backend: Backend, with_graph: bool) {
         worktree,
         &repo,
         &["refs/tags/", &format!("--points-at={inner}")],
-        RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            points_at: vec![inner],
-            ..RefQuery::default()
-        },
+        RefQuery::default()
+            .with_namespaces(vec![RefNamespace::Tags])
+            .with_points_at(vec![inner]),
     );
 }
 
@@ -142,11 +138,9 @@ fn scenario_merged(backend: Backend, with_graph: bool) {
         worktree,
         &repo,
         &["refs/heads/", &format!("--merged={merge_tip}")],
-        RefQuery {
-            namespaces: vec![RefNamespace::Heads],
-            merged: vec![merge_tip],
-            ..RefQuery::default()
-        },
+        RefQuery::default()
+            .with_namespaces(vec![RefNamespace::Heads])
+            .with_merged(vec![merge_tip]),
     );
 }
 
@@ -223,20 +217,16 @@ fn combined_contains_matches_git_on_two_roots() {
     for (extra, query) in [
         (
             vec![format!("--contains={a}"), format!("--contains={b}")],
-            RefQuery {
-                namespaces: vec![RefNamespace::Heads],
-                contains: vec![a, b],
-                ..RefQuery::default()
-            },
+            RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Heads])
+                .with_contains(vec![a, b]),
         ),
         (
             vec![format!("--contains={a}"), format!("--no-contains={b}")],
-            RefQuery {
-                namespaces: vec![RefNamespace::Heads],
-                contains: vec![a],
-                no_contains: vec![b],
-                ..RefQuery::default()
-            },
+            RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Heads])
+                .with_contains(vec![a])
+                .with_no_contains(vec![b]),
         ),
     ] {
         let mut git_args = vec!["for-each-ref", "--format=%(refname)"];
@@ -276,11 +266,9 @@ fn shared_history_contains_batched_matches_git() {
     git(worktree, &["branch", "tip-b", "HEAD"]);
     git(worktree, &["tag", "t-a", "tip-a"]);
     git(worktree, &["tag", "t-b", "tip-b"]);
-    let query = RefQuery {
-        namespaces: vec![RefNamespace::Tags],
-        contains: vec![target],
-        ..RefQuery::default()
-    };
+    let query = RefQuery::default()
+        .with_namespaces(vec![RefNamespace::Tags])
+        .with_contains(vec![target]);
     let git_args = ["refs/tags/", &format!("--contains={target}")];
     assert_same(worktree, &repo, &git_args, query.clone());
 
@@ -307,11 +295,9 @@ fn many_unique_tips_skewed_dates_contains_matches_git() {
         let spec = format!("HEAD~{i}");
         git(worktree, &["tag", &format!("batch-{i}"), &spec]);
     }
-    let query = RefQuery {
-        namespaces: vec![RefNamespace::Tags],
-        contains: vec![target],
-        ..RefQuery::default()
-    };
+    let query = RefQuery::default()
+        .with_namespaces(vec![RefNamespace::Tags])
+        .with_contains(vec![target]);
     let git_args = ["refs/tags/batch-*", &format!("--contains={target}")];
     let git_names = git_refnames(worktree, &git_args);
     let grit_names = grit_refnames(&repo, query.clone());
@@ -352,11 +338,9 @@ fn contains_skewed_committer_dates_matches_git() {
         worktree,
         &repo,
         &["refs/heads/", &format!("--contains={target}")],
-        RefQuery {
-            namespaces: vec![RefNamespace::Heads],
-            contains: vec![target],
-            ..RefQuery::default()
-        },
+        RefQuery::default()
+            .with_namespaces(vec![RefNamespace::Heads])
+            .with_contains(vec![target]),
     );
 }
 
@@ -390,11 +374,9 @@ fn points_at_deep_tag_chain_matches_git() {
         worktree,
         &repo,
         &["refs/tags/", &format!("--points-at={inner}")],
-        RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            points_at: vec![inner],
-            ..RefQuery::default()
-        },
+        RefQuery::default()
+            .with_namespaces(vec![RefNamespace::Tags])
+            .with_points_at(vec![inner]),
     );
 }
 
@@ -417,11 +399,9 @@ fn contains_excludes_tree_tag_without_commit_tip() {
         worktree,
         &repo,
         &["refs/tags/", &format!("--contains={target}")],
-        RefQuery {
-            namespaces: vec![RefNamespace::Tags],
-            contains: vec![target],
-            ..RefQuery::default()
-        },
+        RefQuery::default()
+            .with_namespaces(vec![RefNamespace::Tags])
+            .with_contains(vec![target]),
     );
 }
 
@@ -534,11 +514,9 @@ fn bounded_contains_does_not_load_irrelevant_trailing_tips() {
     let rows = repo
         .references()
         .query(
-            &RefQuery {
-                contains: vec![target],
-                limit: Some(100),
-                ..RefQuery::default()
-            },
+            &RefQuery::default()
+                .with_contains(vec![target])
+                .with_limit(Some(100)),
             &RefQueryOptions::default(),
         )
         .unwrap();
@@ -595,15 +573,9 @@ fn merged_filter_reads_each_shared_tip_once() {
         objects.reads.lock().unwrap().clear();
         objects.info.lock().unwrap().clear();
         let query = if merged {
-            RefQuery {
-                merged: vec![base],
-                ..RefQuery::default()
-            }
+            RefQuery::default().with_merged(vec![base])
         } else {
-            RefQuery {
-                no_merged: vec![base],
-                ..RefQuery::default()
-            }
+            RefQuery::default().with_no_merged(vec![base])
         };
         let got = grit_refnames(&repo, query);
         let expected: Vec<String> = names
@@ -659,21 +631,17 @@ fn merged_with_shared_tips_matches_git() {
                     worktree,
                     &repo,
                     &[prefix, &format!("--merged={target}")],
-                    RefQuery {
-                        namespaces: namespaces.clone(),
-                        merged: vec![target],
-                        ..RefQuery::default()
-                    },
+                    RefQuery::default()
+                        .with_namespaces(namespaces.clone())
+                        .with_merged(vec![target]),
                 );
                 assert_same(
                     worktree,
                     &repo,
                     &[prefix, &format!("--no-merged={target}")],
-                    RefQuery {
-                        namespaces: namespaces.clone(),
-                        no_merged: vec![target],
-                        ..RefQuery::default()
-                    },
+                    RefQuery::default()
+                        .with_namespaces(namespaces.clone())
+                        .with_no_merged(vec![target]),
                 );
             }
         }
@@ -705,10 +673,7 @@ fn merged_filter_peels_loose_tips_with_one_header_read() {
     let rows = repo
         .references()
         .query(
-            &RefQuery {
-                merged: vec![base],
-                ..RefQuery::default()
-            },
+            &RefQuery::default().with_merged(vec![base]),
             &RefQueryOptions::default(),
         )
         .unwrap();
@@ -751,36 +716,28 @@ fn filtered_listings_report_git_peels() {
         let cases: Vec<(Vec<String>, RefQuery)> = vec![
             (
                 vec![format!("--merged={tip}")],
-                RefQuery {
-                    merged: vec![tip],
-                    namespaces: all.clone(),
-                    ..RefQuery::default()
-                },
+                RefQuery::default()
+                    .with_merged(vec![tip])
+                    .with_namespaces(all.clone()),
             ),
             (
                 vec![format!("--no-merged={mid}")],
-                RefQuery {
-                    no_merged: vec![mid],
-                    namespaces: all.clone(),
-                    ..RefQuery::default()
-                },
+                RefQuery::default()
+                    .with_no_merged(vec![mid])
+                    .with_namespaces(all.clone()),
             ),
             (
                 vec![format!("--points-at={mid}")],
-                RefQuery {
-                    points_at: vec![mid],
-                    namespaces: all.clone(),
-                    ..RefQuery::default()
-                },
+                RefQuery::default()
+                    .with_points_at(vec![mid])
+                    .with_namespaces(all.clone()),
             ),
             (
                 vec![format!("--contains={mid}"), "--count=2".to_owned()],
-                RefQuery {
-                    contains: vec![mid],
-                    limit: Some(2),
-                    namespaces: all.clone(),
-                    ..RefQuery::default()
-                },
+                RefQuery::default()
+                    .with_contains(vec![mid])
+                    .with_limit(Some(2))
+                    .with_namespaces(all.clone()),
             ),
         ];
         for (filter, query) in cases {
@@ -839,11 +796,9 @@ fn bounded_contains_memoizes_shared_negative_history() {
     let rows = repo
         .references()
         .query(
-            &RefQuery {
-                contains: vec![target],
-                limit: Some(1),
-                ..RefQuery::default()
-            },
+            &RefQuery::default()
+                .with_contains(vec![target])
+                .with_limit(Some(1)),
             &RefQueryOptions::default(),
         )
         .unwrap();
@@ -913,16 +868,14 @@ fn bounded_contains_order_filters_tags_and_backends_match_git() {
                 git(worktree, &["pack-refs", "--all"]);
             }
             maybe_write_graph(worktree, &repo, with_graph);
-            let base = RefQuery {
-                namespaces: vec![
+            let base = RefQuery::default()
+                .with_namespaces(vec![
                     RefNamespace::Heads,
                     RefNamespace::Tags,
                     RefNamespace::Custom("refs/heads/".into()),
-                ],
-                patterns: vec!["test/".into()],
-                contains: vec![target],
-                ..RefQuery::default()
-            };
+                ])
+                .with_patterns(vec!["test/".into()])
+                .with_contains(vec![target]);
             for sort in [SortKey::Name, SortKey::Version, SortKey::Date] {
                 for reverse in [false, true] {
                     for filter in 0..6 {
@@ -993,11 +946,9 @@ fn bounded_contains_validates_targets_even_with_zero_limit_or_no_candidates() {
             let err = repo
                 .references()
                 .query(
-                    &RefQuery {
-                        contains: vec![target],
-                        limit: Some(limit),
-                        ..RefQuery::default()
-                    },
+                    &RefQuery::default()
+                        .with_contains(vec![target])
+                        .with_limit(Some(limit)),
                     &RefQueryOptions::default(),
                 )
                 .unwrap_err();
@@ -1107,16 +1058,14 @@ fn bounded_contains_parent_rewrite_cycles_match_unlimited_and_git() {
                     };
                     assert_eq!(all, expected);
                     for limit in [None, Some(1), Some(2), Some(100)] {
-                        let query = RefQuery {
-                            namespaces: vec![RefNamespace::Heads],
-                            contains: vec![child.parse().unwrap()],
-                            sort: grit_lib::refs::listing::RefSort {
+                        let query = RefQuery::default()
+                            .with_namespaces(vec![RefNamespace::Heads])
+                            .with_contains(vec![child.parse().unwrap()])
+                            .with_sort(grit_lib::refs::listing::RefSort {
                                 key: grit_lib::refs::listing::SortKey::Name,
                                 reverse,
-                            },
-                            limit,
-                            ..RefQuery::default()
-                        };
+                            })
+                            .with_limit(limit);
                         assert_eq!(grit_refnames(&repo, query), all[..limit.unwrap_or(all.len()).min(all.len())],
                             "backend={backend:?} graph={with_graph} replace={replace} reverse={reverse} limit={limit:?}");
                     }

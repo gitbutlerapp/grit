@@ -11,7 +11,6 @@ use std::sync::Arc;
 
 use grit_lib::blame::BlameOptions;
 use grit_lib::bundle::BundleSpec;
-use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptions};
 use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::ident::Signature;
@@ -26,7 +25,7 @@ use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::Remote;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::{NoteAddOutcome, NotesWriteOptions};
-use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, RefScope, RewriteOptions};
+use grit_lib::revwalk::history::{ApplyOptions, RefScope, RewriteOptions};
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::revwalk::ResolveOptions;
 use grit_test_support::write_merge_tree;
@@ -406,25 +405,16 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
             merge_commit,
             &grit_lib::revwalk::history::RewordOptions::default()
                 .with_message("merge topic (reworded)".to_owned()),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: committer.clone(),
-                preserve_committer: false,
-                sign: false,
-            },
+            &RewriteOptions::new(committer.clone())
+                .with_scope(RefScope::Head)
+                .with_sign(false),
         )
         .expect("plan reword");
     let applied = repo
         .history()
         .apply(
             &plan,
-            &ApplyOptions {
-                identity: committer,
-                reflog_message: "history reword".to_owned(),
-                record_operation: None,
-                hooks: PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(committer, "history reword".to_owned()),
             &mut NullProgress,
             &CancelToken::never(),
         )

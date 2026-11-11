@@ -298,18 +298,16 @@ fn rename_on_injected_memory_ref_store() {
     let tip = oid(&dir, "HEAD");
 
     let store = Arc::new(MemoryRefStore::new());
-    let direct = |name: &str, reflog: bool| RefUpdate {
-        name: name.to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Missing,
-        reflog: reflog.then(|| ReflogUpdate {
-            identity: "T <t@example.com>".to_owned(),
-            message: "create".to_owned(),
-            time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
-            old_oid: None,
-            new_oid: None,
-        }),
-        flags: RefUpdateFlags::default(),
+    let direct = |name: &str, reflog: bool| {
+        RefUpdate::new(name.to_owned(), Some(RawRef::Direct(tip)))
+            .with_expected(Expected::Missing)
+            .with_reflog(reflog.then(|| ReflogUpdate {
+                identity: "T <t@example.com>".to_owned(),
+                message: "create".to_owned(),
+                time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+                old_oid: None,
+                new_oid: None,
+            }))
     };
     store
         .prepare(
@@ -318,16 +316,14 @@ fn rename_on_injected_memory_ref_store() {
                 .unwrap()
                 .update(direct("refs/heads/topic", true))
                 .unwrap()
-                .update(RefUpdate {
-                    name: "HEAD".to_owned(),
-                    new_value: Some(RawRef::Symbolic("refs/heads/main".to_owned())),
-                    expected: Expected::Missing,
-                    reflog: None,
-                    flags: RefUpdateFlags {
-                        no_deref: true,
-                        ..RefUpdateFlags::default()
-                    },
-                })
+                .update(
+                    RefUpdate::new(
+                        "HEAD".to_owned(),
+                        Some(RawRef::Symbolic("refs/heads/main".to_owned())),
+                    )
+                    .with_expected(Expected::Missing)
+                    .with_flags(RefUpdateFlags::default().with_no_deref(true)),
+                )
                 .unwrap(),
         )
         .unwrap()
@@ -388,28 +384,22 @@ fn rename_retargets_head_on_injected_store_when_branch_checked_out() {
     let tip = oid(&dir, "HEAD");
 
     let store = Arc::new(MemoryRefStore::new());
-    let direct = |name: &str| RefUpdate {
-        name: name.to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
+    let direct = |name: &str| {
+        RefUpdate::new(name.to_owned(), Some(RawRef::Direct(tip))).with_expected(Expected::Missing)
     };
     store
         .prepare(
             RefTransaction::new()
                 .update(direct("refs/heads/topic"))
                 .unwrap()
-                .update(RefUpdate {
-                    name: "HEAD".to_owned(),
-                    new_value: Some(RawRef::Symbolic("refs/heads/topic".to_owned())),
-                    expected: Expected::Missing,
-                    reflog: None,
-                    flags: RefUpdateFlags {
-                        no_deref: true,
-                        ..RefUpdateFlags::default()
-                    },
-                })
+                .update(
+                    RefUpdate::new(
+                        "HEAD".to_owned(),
+                        Some(RawRef::Symbolic("refs/heads/topic".to_owned())),
+                    )
+                    .with_expected(Expected::Missing)
+                    .with_flags(RefUpdateFlags::default().with_no_deref(true)),
+                )
                 .unwrap(),
         )
         .unwrap()

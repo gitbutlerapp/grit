@@ -111,10 +111,7 @@ struct Observed {
 }
 
 fn count(repo: &Repository, refs: Vec<RefSelection>) -> usize {
-    let options = RevWalkListOptions {
-        refs,
-        ..RevWalkListOptions::default()
-    };
+    let options = RevWalkListOptions::default().with_refs(refs);
     repo.revwalk()
         .count(&[], &options, &mut NullProgress, &CancelToken::never())
         .expect("count")
@@ -138,17 +135,7 @@ fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
         .create(&BranchCreateOptions::at_head("side"))
         .expect("side");
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: first,
-            message: None,
-            tagger: None,
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(&CreateTagRequest::new("v1", first))
         .expect("tag");
     fs::write(wt.join("g"), "y\n").expect("write");
     let second = commit_all(repo, "second change");

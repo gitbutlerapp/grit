@@ -94,17 +94,12 @@ fn create_tag_ssh_signed_verifies_with_git_verify_tag() {
 
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "v1".to_owned(),
-            target: head,
-            message: Some("signed release".to_owned()),
-            tagger: Some(tagger),
-            sign: Some(true),
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v1".to_owned(), head)
+                .with_message(Some("signed release".to_owned()))
+                .with_tagger(Some(tagger))
+                .with_sign(Some(true)),
+        )
         .expect("create signed tag");
     assert!(outcome.signed);
 
@@ -139,17 +134,10 @@ fn create_tag_honors_tag_gpgsign_config() {
 
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "v2".to_owned(),
-            target: head,
-            message: None,
-            tagger: Some("T <t@example.com> 1700000000 +0000".to_owned()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v2".to_owned(), head)
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".to_owned())),
+        )
         .expect("create tag with tag.gpgSign");
     assert!(outcome.signed);
     git_out(root, &["verify-tag", "v2"]);
@@ -169,17 +157,12 @@ fn signed_tag_passes_git_fsck_strict() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let head = repo.references().resolve("HEAD").unwrap();
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "rel".to_owned(),
-            target: head,
-            message: Some("x".to_owned()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".to_owned()),
-            sign: Some(true),
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("rel".to_owned(), head)
+                .with_message(Some("x".to_owned()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".to_owned()))
+                .with_sign(Some(true)),
+        )
         .expect("signed tag");
 
     git_out(root, &["fsck", "--strict"]);
@@ -303,17 +286,11 @@ fn create_tag_openpgp_signed_verifies_with_git() {
     let head = repo.references().resolve("HEAD").unwrap();
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "openpgp-v1".to_owned(),
-            target: head,
-            message: Some("openpgp tag".to_owned()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".to_owned()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("openpgp-v1".to_owned(), head)
+                .with_message(Some("openpgp tag".to_owned()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".to_owned())),
+        )
         .expect("signed openpgp tag");
     assert!(outcome.signed);
 

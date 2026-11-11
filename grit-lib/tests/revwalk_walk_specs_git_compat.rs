@@ -465,10 +465,7 @@ fn assert_symmetric_ranges_match_git(wt: &Path) {
                 .revwalk()
                 .commits(
                     &[spec],
-                    &RevWalkListOptions {
-                        limit: Some(limit),
-                        ..RevWalkListOptions::default()
-                    },
+                    &RevWalkListOptions::default().with_limit(Some(limit)),
                     &mut NullProgress,
                     &CancelToken::never(),
                 )
@@ -553,10 +550,7 @@ fn symmetric_range_walk_stops_at_merge_base_frontier() {
         .revwalk()
         .commits(
             &["main...topic"],
-            &RevWalkListOptions {
-                limit: Some(2),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_limit(Some(2)),
             &mut NullProgress,
             &CancelToken::never(),
         )

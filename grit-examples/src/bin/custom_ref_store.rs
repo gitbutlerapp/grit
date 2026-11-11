@@ -37,13 +37,13 @@ fn main() -> grit_lib::error::Result<()> {
     println!("read_raw_calls={}", counting.read_raw_calls());
     println!("for_each_ref_calls={}", counting.for_each_ref_calls());
 
-    let txn = RefTransaction::new().update(RefUpdate {
-        name: RefName::from_trusted("refs/heads/custom-demo"),
-        new_value: Some(RawRef::Direct(oid)),
-        expected: Expected::Oid(oid),
-        reflog: None,
-        flags: grit_lib::refs::store::RefUpdateFlags::default(),
-    })?;
+    let txn = RefTransaction::new().update(
+        RefUpdate::new(
+            RefName::from_trusted("refs/heads/custom-demo"),
+            Some(RawRef::Direct(oid)),
+        )
+        .with_expected(Expected::Oid(oid)),
+    )?;
     counting.prepare(txn)?.commit()?;
     println!("prepare_calls={}", counting.prepare_calls());
 

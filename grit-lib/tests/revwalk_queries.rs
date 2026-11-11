@@ -110,10 +110,10 @@ fn revs_matches_git_rev_list() {
     let grit_path = grit_rev_list_oids(
         &repo,
         &["rw6012-l"],
-        &RevWalkListOptions {
-            pathspec: Pathspec::scoped(["content.txt"], PathspecGlobalFlags::default()),
-            ..RevWalkListOptions::default()
-        },
+        &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+            ["content.txt"],
+            PathspecGlobalFlags::default(),
+        )),
     );
     assert_eq!(
         grit_path.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
@@ -400,11 +400,9 @@ fn skip_and_limit_match_git() {
         &[("f", "refs/heads/main")],
     );
     let repo = open_grit(wt);
-    let opts = RevWalkListOptions {
-        skip: 2,
-        limit: Some(2),
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default()
+        .with_skip(2)
+        .with_limit(Some(2));
     let git_oids = git_rev_list(wt, &["--skip=2", "-n", "2", "main"]);
     let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
     assert_eq!(
@@ -440,11 +438,9 @@ fn since_until_match_git() {
     );
     git(wt, &["update-ref", "refs/heads/main", &new_tip.to_hex()]);
     let repo = open_grit(wt);
-    let opts = RevWalkListOptions {
-        since: Some(1_400_000_000),
-        until: Some(1_900_000_000),
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default()
+        .with_since(Some(1_400_000_000))
+        .with_until(Some(1_900_000_000));
     let git_oids = git_rev_list(wt, &["--since=1400000000", "--until=1900000000", "main"]);
     let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
     assert_eq!(
@@ -452,11 +448,9 @@ fn since_until_match_git() {
         git_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>()
     );
 
-    let bounded = RevWalkListOptions {
-        since: Some(1_400_000_000),
-        limit: Some(1),
-        ..RevWalkListOptions::default()
-    };
+    let bounded = RevWalkListOptions::default()
+        .with_since(Some(1_400_000_000))
+        .with_limit(Some(1));
     let git_bounded = git_rev_list(wt, &["--since=1400000000", "-n", "1", "main"]);
     let grit_bounded = grit_rev_list_oids(&repo, &["main"], &bounded);
     assert_eq!(
@@ -479,10 +473,7 @@ fn merges_and_no_merges_match_git() {
         (MergeFilter::OnlyMerges, "--merges"),
         (MergeFilter::NoMerges, "--no-merges"),
     ] {
-        let opts = RevWalkListOptions {
-            merges,
-            ..RevWalkListOptions::default()
-        };
+        let opts = RevWalkListOptions::default().with_merges(merges);
         let git_oids = git_rev_list(wt, &[git_flag, "main"]);
         let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
         assert_eq!(
@@ -516,10 +507,7 @@ fn no_merges_unlimited_order_matches_git_equal_committer_dates() {
     git(wt, &["update-ref", "refs/heads/main", &second.to_hex()]);
 
     let repo = open_grit(wt);
-    let opts = RevWalkListOptions {
-        merges: MergeFilter::NoMerges,
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default().with_merges(MergeFilter::NoMerges);
     let git_oids = git_rev_list(wt, &["--no-merges", "main"]);
     let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
     assert_eq!(
@@ -538,10 +526,7 @@ fn reverse_matches_git() {
         &[("d", "refs/heads/main")],
     );
     let repo = open_grit(wt);
-    let opts = RevWalkListOptions {
-        reverse: true,
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default().with_reverse(true);
     let git_oids = git_rev_list(wt, &["--reverse", "main"]);
     let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
     assert_eq!(
@@ -561,10 +546,7 @@ fn ref_sets_all_branches_tags_remotes_match_git() {
     let grit_oids = grit_rev_list_oids(
         &repo,
         &[],
-        &RevWalkListOptions {
-            refs: vec![RefSelection::All],
-            ..RevWalkListOptions::default()
-        },
+        &RevWalkListOptions::default().with_refs(vec![RefSelection::All]),
     );
     assert_eq!(
         grit_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
@@ -575,10 +557,7 @@ fn ref_sets_all_branches_tags_remotes_match_git() {
     let grit_br = grit_rev_list_oids(
         &repo,
         &[],
-        &RevWalkListOptions {
-            refs: vec![RefSelection::Branches(None)],
-            ..RevWalkListOptions::default()
-        },
+        &RevWalkListOptions::default().with_refs(vec![RefSelection::Branches(None)]),
     );
     assert_eq!(
         grit_br.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
@@ -589,10 +568,7 @@ fn ref_sets_all_branches_tags_remotes_match_git() {
     let grit_tags = grit_rev_list_oids(
         &repo,
         &[],
-        &RevWalkListOptions {
-            refs: vec![RefSelection::Tags(None)],
-            ..RevWalkListOptions::default()
-        },
+        &RevWalkListOptions::default().with_refs(vec![RefSelection::Tags(None)]),
     );
     assert_eq!(
         grit_tags.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
@@ -603,10 +579,7 @@ fn ref_sets_all_branches_tags_remotes_match_git() {
     let grit_rem = grit_rev_list_oids(
         &repo,
         &[],
-        &RevWalkListOptions {
-            refs: vec![RefSelection::Remotes(None)],
-            ..RevWalkListOptions::default()
-        },
+        &RevWalkListOptions::default().with_refs(vec![RefSelection::Remotes(None)]),
     );
     assert_eq!(
         grit_rem.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),
@@ -620,10 +593,8 @@ fn branches_glob_matches_git() {
     let wt = hist.worktree();
     setup_revwalk_filter_fixture(wt);
     let repo = open_grit(wt);
-    let opts = RevWalkListOptions {
-        refs: vec![RefSelection::Branches(Some("feature/*".into()))],
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default()
+        .with_refs(vec![RefSelection::Branches(Some("feature/*".into()))]);
     let git_oids = git_rev_list(wt, &["--branches=feature/*"]);
     let grit_oids = grit_rev_list_oids(&repo, &[], &opts);
     assert_eq!(
@@ -651,10 +622,7 @@ fn ref_set_only_empty_positive_specs_yields_empty_walk() {
             RefSelection::Tags(Some("no-such-tag-*".into())),
         ),
     ] {
-        let opts = RevWalkListOptions {
-            refs: vec![selection],
-            ..RevWalkListOptions::default()
-        };
+        let opts = RevWalkListOptions::default().with_refs(vec![selection]);
         assert_eq!(grit_rev_list_count(&repo, &[], &opts), 0, "{label}");
         assert!(grit_rev_list_oids(&repo, &[], &opts).is_empty(), "{label}");
     }
@@ -686,10 +654,7 @@ fn left_right_counts_no_merges_match_git() {
         .revwalk()
         .left_right_counts(
             &[token],
-            &RevWalkListOptions {
-                merges: MergeFilter::NoMerges,
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_merges(MergeFilter::NoMerges),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -709,11 +674,9 @@ fn since_bounded_merge_dag_count_match_git() {
         support::commit_labeled_with_dates(wt, "merge", &[left, right], "@500 +0000", "@500 +0000");
     git(wt, &["update-ref", "refs/heads/main", &merge.to_hex()]);
     let repo = open_grit(wt);
-    let opts = RevWalkListOptions {
-        since: Some(200),
-        limit: Some(20),
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default()
+        .with_since(Some(200))
+        .with_limit(Some(20));
     let git_n = git_rev_list_count(
         wt,
         &["--since=1970-01-01 00:03:20 +0000", "-n", "20", "main"],
@@ -743,11 +706,9 @@ fn since_skew_bounded_limit_match_git() {
     );
     git(wt, &["update-ref", "refs/heads/main", &skewed.to_hex()]);
     let repo = open_grit(wt);
-    let opts = RevWalkListOptions {
-        since: Some(1_500_000_000),
-        limit: Some(2),
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default()
+        .with_since(Some(1_500_000_000))
+        .with_limit(Some(2));
     let git_oids = git_rev_list(wt, &["--since=1500000000", "-n", "2", "main"]);
     let grit_oids = grit_rev_list_oids(&repo, &["main"], &opts);
     assert_eq!(
@@ -826,46 +787,29 @@ fn merge_heavy_range_counts_match_git_with_filters() {
         (vec![], RevWalkListOptions::default()),
         (
             vec!["--first-parent".into()],
-            RevWalkListOptions {
-                first_parent: true,
-                ..RevWalkListOptions::default()
-            },
+            RevWalkListOptions::default().with_first_parent(true),
         ),
         (
             vec!["--merges".into()],
-            RevWalkListOptions {
-                merges: MergeFilter::OnlyMerges,
-                ..RevWalkListOptions::default()
-            },
+            RevWalkListOptions::default().with_merges(MergeFilter::OnlyMerges),
         ),
         (
             vec!["--no-merges".into()],
-            RevWalkListOptions {
-                merges: MergeFilter::NoMerges,
-                ..RevWalkListOptions::default()
-            },
+            RevWalkListOptions::default().with_merges(MergeFilter::NoMerges),
         ),
         (
             vec![format!("--since={since}")],
-            RevWalkListOptions {
-                since: Some(since),
-                ..RevWalkListOptions::default()
-            },
+            RevWalkListOptions::default().with_since(Some(since)),
         ),
         (
             vec![format!("--until={until}")],
-            RevWalkListOptions {
-                until: Some(until),
-                ..RevWalkListOptions::default()
-            },
+            RevWalkListOptions::default().with_until(Some(until)),
         ),
         (
             vec![format!("--since={since}"), "--first-parent".into()],
-            RevWalkListOptions {
-                since: Some(since),
-                first_parent: true,
-                ..RevWalkListOptions::default()
-            },
+            RevWalkListOptions::default()
+                .with_since(Some(since))
+                .with_first_parent(true),
         ),
     ];
 
@@ -1013,10 +957,7 @@ fn left_right_counts_first_parent_shapes_match_git() {
         let grit_fp = walk
             .left_right_counts(
                 &[token],
-                &RevWalkListOptions {
-                    first_parent: true,
-                    ..RevWalkListOptions::default()
-                },
+                &RevWalkListOptions::default().with_first_parent(true),
                 &mut NullProgress,
                 &CancelToken::never(),
             )
@@ -1085,10 +1026,7 @@ fn first_parent_hide_fixture(wt: &Path) -> HashMap<&'static str, ObjectId> {
 }
 
 fn first_parent_walk() -> RevWalkListOptions {
-    RevWalkListOptions {
-        first_parent: true,
-        ..RevWalkListOptions::default()
-    }
+    RevWalkListOptions::default().with_first_parent(true)
 }
 
 /// `git rev-list --left-right <args>` as `(oid, is_left)` pairs in output order.
@@ -1109,10 +1047,7 @@ fn grit_rev_list_sides(
     token: &str,
     opts: &RevWalkListOptions,
 ) -> Vec<(ObjectId, bool)> {
-    let opts = RevWalkListOptions {
-        left_right: true,
-        ..opts.clone()
-    };
+    let opts = opts.clone().with_left_right(true);
     let result = repo
         .revwalk()
         .rev_list_result(&[token], &opts, &mut NullProgress, &CancelToken::never())
@@ -1215,10 +1150,7 @@ fn first_parent_range_lists_match_git_on_merge_heavy_history() {
                 git_rev_list(wt, &args),
                 "{args:?}, commit-graph: {with_graph}"
             );
-            let limited = RevWalkListOptions {
-                limit: Some(3),
-                ..first_parent_walk()
-            };
+            let limited = first_parent_walk().with_limit(Some(3));
             args.insert(0, "--max-count=3");
             assert_eq!(
                 grit_rev_list_oids(&repo, tokens, &limited),

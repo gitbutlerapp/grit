@@ -83,17 +83,13 @@ fn signed_tag_with_tree_sha256(
     opts: TreeSha256Options,
 ) -> grit_lib::porcelain::tag::CreateTagOutcome {
     repo.tags()
-        .create(&CreateTagRequest {
-            name: name.to_owned(),
-            target: head,
-            message: Some("release".to_owned()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".to_owned()),
-            sign: Some(true),
-            signing_key: None,
-            tree_sha256: Some(opts),
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new(name.to_owned(), head)
+                .with_message(Some("release".to_owned()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".to_owned()))
+                .with_sign(Some(true))
+                .with_tree_sha256(Some(opts)),
+        )
         .expect("create signed tag with tree-sha256")
 }
 
@@ -246,17 +242,13 @@ fn missing_submodule_fails_before_writing_tag() {
     let head = repo.references().resolve("HEAD").unwrap();
     let err = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "bad".to_owned(),
-            target: head,
-            message: Some("x".into()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-            sign: Some(true),
-            signing_key: None,
-            tree_sha256: Some(TreeSha256Options::default()),
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("bad".to_owned(), head)
+                .with_message(Some("x".into()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".into()))
+                .with_sign(Some(true))
+                .with_tree_sha256(Some(TreeSha256Options::default())),
+        )
         .unwrap_err();
     assert!(
         matches!(
@@ -285,17 +277,13 @@ fn tree_sha256_with_no_sign_is_error() {
     let head = repo.references().resolve("HEAD").unwrap();
     let err = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "nope".to_owned(),
-            target: head,
-            message: Some("x".into()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-            sign: Some(false),
-            signing_key: None,
-            tree_sha256: Some(TreeSha256Options::default()),
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("nope".to_owned(), head)
+                .with_message(Some("x".into()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".into()))
+                .with_sign(Some(false))
+                .with_tree_sha256(Some(TreeSha256Options::default())),
+        )
         .unwrap_err();
     assert!(matches!(
         err,
@@ -325,34 +313,25 @@ fn signed_tag_tree_sha256_overhead_within_bound() {
 
     let sign_only = std::time::Instant::now();
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "sign-only".to_owned(),
-            target: head,
-            message: Some("m".into()),
-            tagger: Some(tagger.clone()),
-            sign: Some(true),
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("sign-only".to_owned(), head)
+                .with_message(Some("m".into()))
+                .with_tagger(Some(tagger.clone()))
+                .with_sign(Some(true)),
+        )
         .expect("sign only");
     let sign_only_elapsed = sign_only.elapsed();
 
     let with_ts = std::time::Instant::now();
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "with-ts".to_owned(),
-            target: head,
-            message: Some("m".into()),
-            tagger: Some(tagger),
-            sign: Some(true),
-            signing_key: None,
-            tree_sha256: Some(TreeSha256Options::default()),
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("with-ts".to_owned(), head)
+                .with_message(Some("m".into()))
+                .with_tagger(Some(tagger))
+                .with_sign(Some(true))
+                .with_tree_sha256(Some(TreeSha256Options::default())),
+        )
         .expect("sign with tree-sha256");
     let with_ts_elapsed = with_ts.elapsed();
     let hash_ms = outcome.tree_sha256.expect("ts").hash_elapsed.as_secs_f64() * 1000.0;

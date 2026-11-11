@@ -14,7 +14,7 @@ use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, RebaseOntoOptions,
-    RefScope, RewriteOptions,
+    RewriteOptions,
 };
 
 use support::{
@@ -26,33 +26,27 @@ fn open_grit(wt: &std::path::Path) -> Repository {
 }
 
 fn rewrite_opts() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: "Undo Tester <undo@grit.test> 1 +0000"
+    RewriteOptions::new(
+        "Undo Tester <undo@grit.test> 1 +0000"
             .parse()
             .expect("signature"),
-        preserve_committer: false,
-        sign: false,
-    }
+    )
+    .with_sign(false)
 }
 
 fn apply_opts(operation: &str) -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("Undo Tester <undo@grit.test>"),
-        reflog_message: format!("history {operation}"),
-        record_operation: Some(operation.into()),
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("Undo Tester <undo@grit.test>"),
+        format!("history {operation}"),
+    )
+    .with_record_operation(Some(operation.into()))
 }
 
 fn undo_opts() -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("Undo Tester <undo@grit.test>"),
-        reflog_message: "history undo".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("Undo Tester <undo@grit.test>"),
+        "history undo",
+    )
 }
 
 fn drop_and_apply(grit: &Repository, commit: grit_lib::objects::ObjectId) {
@@ -114,14 +108,7 @@ fn undo_after_rebase_restores_stacked_branches() {
             oids["u"],
             onto,
             &[oids["c"]],
-            &RebaseOntoOptions {
-                pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-                rewrite: rewrite_opts(),
-                skip_applied: true,
-                flatten_leaf_merges: false,
-                favor: grit_lib::diff::merge_file::MergeFavor::default(),
-                drop: Vec::new(),
-            },
+            &RebaseOntoOptions::new(rewrite_opts()),
         )
         .expect("rebase plan");
     grit.history()
@@ -272,12 +259,11 @@ fn undo_survives_git_gc_with_reflog_updates_disabled() {
     // `gc.reflogExpireUnreachable` (30 days), so the forced reflog entry that keeps the
     // dropped tip alive must carry a current timestamp, not the fixed test epoch.
     let now = time::OffsetDateTime::now_utc().unix_timestamp();
-    let drop_opts = ApplyOptions {
-        identity: format!("Undo Tester <undo@grit.test> {now} +0000")
+    let drop_opts = (apply_opts("drop")).with_identity(
+        format!("Undo Tester <undo@grit.test> {now} +0000")
             .parse()
             .expect("signature"),
-        ..apply_opts("drop")
-    };
+    );
     let plan = grit
         .history()
         .drop_commit(dropped_tip, &rewrite_opts())

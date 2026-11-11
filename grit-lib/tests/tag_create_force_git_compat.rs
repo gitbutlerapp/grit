@@ -53,17 +53,12 @@ fn force_replace_lightweight_with_annotated_git_clean() {
     let tagger = "Tagger <t@example.com> 946684800 +0000";
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: head,
-            message: Some("annotated release\n".into()),
-            tagger: Some(tagger.into()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: true,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v1", head)
+                .with_message(Some("annotated release\n".into()))
+                .with_tagger(Some(tagger.into()))
+                .with_force(true),
+        )
         .expect("force annotated");
 
     assert_eq!(outcome.kind, TagKind::Annotated);
@@ -100,17 +95,7 @@ fn force_replace_annotated_with_lightweight_git_clean() {
         .oid;
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: head,
-            message: None,
-            tagger: None,
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: true,
-            dry_run: false,
-        })
+        .create(&CreateTagRequest::new("v1", head).with_force(true))
         .expect("force lightweight");
 
     assert_eq!(outcome.kind, TagKind::Lightweight);
@@ -134,17 +119,12 @@ fn create_dry_run_leaves_refs_untouched() {
     let (repo, head) = seed_repo(&root);
 
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "preview".into(),
-            target: head,
-            message: Some("note\n".into()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: true,
-        })
+        .create(
+            &CreateTagRequest::new("preview", head)
+                .with_message(Some("note\n".into()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".into()))
+                .with_dry_run(true),
+        )
         .expect("dry-run create");
 
     assert!(repo
@@ -157,17 +137,13 @@ fn create_dry_run_leaves_refs_untouched() {
 
     git(&root, &["tag", "existing"]);
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "existing".into(),
-            target: head,
-            message: Some("other\n".into()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: true,
-            dry_run: true,
-        })
+        .create(
+            &CreateTagRequest::new("existing", head)
+                .with_message(Some("other\n".into()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".into()))
+                .with_force(true)
+                .with_dry_run(true),
+        )
         .expect("dry-run force");
 
     let listed = repo

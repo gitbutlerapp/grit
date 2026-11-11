@@ -59,11 +59,7 @@ fn log_graph_order_matches_git_on_merge_fixture() {
         .commits(
             &["HEAD"],
             &{
-                let mut walk = (&RevWalkListOptions {
-                    limit: Some(100),
-                    ..Default::default()
-                })
-                    .clone();
+                let mut walk = (&RevWalkListOptions::default().with_limit(Some(100))).clone();
                 walk.graph = true;
                 walk
             },

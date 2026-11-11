@@ -8,8 +8,7 @@ use grit_lib::objects::parse_commit;
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions, RewritePlan, SquashMessage,
-    SquashOptions,
+    ApplyOptions, HistoryError, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
 };
 
 use support::{
@@ -31,13 +30,7 @@ fn committer(seq: i64) -> String {
 fn squash_opts(scope: RefScope) -> SquashOptions {
     SquashOptions {
         message: SquashMessage::Oldest,
-        rewrite: RewriteOptions {
-            scope,
-            empty: EmptyPolicy::Drop,
-            committer: committer(1).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
+        rewrite: RewriteOptions::new(committer(1).parse().expect("signature")).with_scope(scope),
     }
 }
 
@@ -45,12 +38,10 @@ fn apply_plan(repo: &Repository, plan: &RewritePlan) {
     repo.history()
         .apply(
             plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Squasher <s@grit.test>"),
-                reflog_message: "history squash".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Squasher <s@grit.test>"),
+                "history squash",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )

@@ -20,8 +20,8 @@ use grit_lib::refs;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, ExecSpec, HistoryError, PreRebase, RebaseOntoOptions, RebaseOutcome,
-    RebaseRequest, RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, ExecSpec, HistoryError, RebaseOntoOptions, RebaseOutcome, RebaseRequest,
+    RebaseSessionError, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use grit_test_support::{abort_branch_merge, git, git_cmd};
 use grit_test_support::{integrate_branch_with, plan_branch_merge};
@@ -315,26 +315,14 @@ fn rebase_opts(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
             onto: None,
             branch_tip: tip,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase: PreRebase::Skip,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: IDENT.parse().expect("signature"),
-                preserve_committer: false,
-                sign: false,
-            },
-            skip_applied: false,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-        apply: ApplyOptions {
-            identity: ident(),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new(IDENT.parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        )
+        .with_skip_applied(false),
+        apply: ApplyOptions::new(ident(), "rebase")
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
         exec: None,
     }
 }

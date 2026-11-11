@@ -141,7 +141,7 @@ fn push_tracking_remote_refs_one_reftable_transaction() {
 
 #[test]
 fn non_atomic_multi_ref_create_one_reftable_transaction() {
-    use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+    use grit_lib::refs::store::{RawRef, RefUpdate};
 
     each_backend(|backend, repo| {
         if backend != Backend::Reftable {
@@ -150,13 +150,7 @@ fn non_atomic_multi_ref_create_one_reftable_transaction() {
         let git_dir = repo.git_dir();
         let (_, tip) = two_commit_oids(&repo);
         let updates: Vec<RefUpdate> = (0..40)
-            .map(|i| RefUpdate {
-                name: format!("refs/heads/batch-{i}"),
-                new_value: Some(RawRef::Direct(tip)),
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            })
+            .map(|i| RefUpdate::new(format!("refs/heads/batch-{i}"), Some(RawRef::Direct(tip))))
             .collect();
         let (_, count_before) = reftable_tables_snapshot(&git_dir);
         grit_test_support::refs::at(&git_dir)

@@ -18,8 +18,8 @@ use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink}
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RebaseSessionError,
-    RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RebaseSessionError, RefScope,
+    RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::stash::{StashApplyOptions, StashError, StashMode, StashPushOptions};
 use grit_test_support::{integrate_branch, replay_commit};
@@ -667,26 +667,14 @@ fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
             onto: None,
             branch_tip: tip,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: IDENT.parse().expect("signature"),
-                preserve_committer: false,
-                sign: false,
-            },
-            skip_applied: false,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-        apply: ApplyOptions {
-            identity: IDENT.parse().expect("signature"),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new(IDENT.parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        )
+        .with_skip_applied(false),
+        apply: ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
         exec: None,
     }
 }

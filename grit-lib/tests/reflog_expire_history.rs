@@ -483,13 +483,11 @@ fn expire_many_refs_in_one_pass_judges_each_ref_by_its_own_tip_like_git() {
     std::thread::spawn(move || {
         let outcome = open_repo(&worktree)
             .reflogs()
-            .expire(&ExpireOptions {
-                now: NOW,
-                expire: Some("never".into()),
-                expire_unreachable: Some(UNREACHABLE_CUTOFF.to_string()),
-                all: false,
-                dry_run: false,
-            })
+            .expire(
+                &ExpireOptions::new(NOW)
+                    .with_expire(Some("never".into()))
+                    .with_expire_unreachable(Some(UNREACHABLE_CUTOFF.to_string())),
+            )
             .expect("expire");
         let _ = tx.send(outcome);
     });

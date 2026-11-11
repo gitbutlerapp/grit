@@ -43,16 +43,14 @@ fn grit_sorted_refnames(
     limit: Option<usize>,
     options: &RefQueryOptions,
 ) -> Vec<String> {
-    let query = RefQuery {
-        namespaces: vec![RefNamespace::Tags],
-        patterns,
-        sort: RefSort {
+    let query = RefQuery::default()
+        .with_namespaces(vec![RefNamespace::Tags])
+        .with_patterns(patterns)
+        .with_sort(RefSort {
             key: sort_key,
             reverse,
-        },
-        limit,
-        ..RefQuery::default()
-    };
+        })
+        .with_limit(limit);
     repo.references()
         .query(&query, options)
         .expect("query_refs")

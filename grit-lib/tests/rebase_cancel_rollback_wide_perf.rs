@@ -10,8 +10,8 @@ use grit_lib::progress::{CancelToken, NullProgress, ProgressPhase, ProgressSink}
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseRequest, RebaseSessionError, RefScope,
-    RewriteOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseRequest, RebaseSessionError, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 
 const FILES: usize = 300;
@@ -129,26 +129,14 @@ fn run_rebase(
             onto: None,
             branch_tip: topic,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: "T <t@t> 0 +0000".parse().expect("sig"),
-                preserve_committer: false,
-                sign: false,
-            },
-            skip_applied: false,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-        apply: ApplyOptions {
-            identity: "T <t@t> 0 +0000".parse().expect("sig"),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new("T <t@t> 0 +0000".parse().expect("sig"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        )
+        .with_skip_applied(false),
+        apply: ApplyOptions::new("T <t@t> 0 +0000".parse().expect("sig"), "rebase")
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
         exec: None,
     };
     let start = Instant::now();

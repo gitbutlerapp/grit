@@ -1279,6 +1279,8 @@ mod oid_abbrev_separate_pack_collision;
 mod oid_hashtable_api;
 #[path = "one_form_handles_git_compat.rs"]
 mod one_form_handles_git_compat;
+#[path = "options_request_builders_coverage.rs"]
+mod options_request_builders_coverage;
 #[cfg(feature = "full-tests")]
 #[path = "orig_head_git_compat.rs"]
 mod orig_head_git_compat;
@@ -2058,6 +2060,7 @@ mod status_guidance_git_compat;
 mod status_ignored_collapse_git_compat;
 #[path = "status_index_refresh_race.rs"]
 mod status_index_refresh_race;
+#[cfg(feature = "full-tests")]
 #[path = "status_long_path_windows_2586.rs"]
 mod status_long_path_windows_2586;
 #[cfg(feature = "full-tests")]

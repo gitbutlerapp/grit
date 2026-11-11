@@ -64,13 +64,11 @@ fn linked_worktree(root: &Path) -> (PathBuf, PathBuf) {
     let common_store = ReftableRefStore::open(common.clone()).expect("common store");
     commit(
         &common_store,
-        RefUpdate {
-            name: RefName::from_trusted("refs/heads/main"),
-            new_value: Some(RawRef::Direct(oid(1))),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        },
+        RefUpdate::new(
+            RefName::from_trusted("refs/heads/main"),
+            Some(RawRef::Direct(oid(1))),
+        )
+        .with_expected(Expected::Missing),
     );
 
     let wt_git_dir = common.join("worktrees").join("wt");
@@ -86,17 +84,12 @@ fn linked_worktree(root: &Path) -> (PathBuf, PathBuf) {
     let wt_store = ReftableRefStore::open(wt_git_dir.clone()).expect("worktree store");
     commit(
         &wt_store,
-        RefUpdate {
-            name: RefName::from_trusted("HEAD"),
-            new_value: Some(RawRef::Symbolic("refs/heads/main".into())),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags {
-                no_deref: true,
-                log_only: false,
-                ..Default::default()
-            },
-        },
+        RefUpdate::new(
+            RefName::from_trusted("HEAD"),
+            Some(RawRef::Symbolic("refs/heads/main".into())),
+        )
+        .with_expected(Expected::Missing)
+        .with_flags(RefUpdateFlags::default().with_no_deref(true)),
     );
     (common, wt_git_dir)
 }
@@ -109,13 +102,9 @@ fn head_update_in_linked_worktree_writes_and_logs_branch_in_common_stack() {
 
     commit(
         &wt_store,
-        RefUpdate {
-            name: RefName::from_trusted("HEAD"),
-            new_value: Some(RawRef::Direct(oid(2))),
-            expected: Expected::Oid(oid(1)),
-            reflog: log("commit: two"),
-            flags: RefUpdateFlags::default(),
-        },
+        RefUpdate::new(RefName::from_trusted("HEAD"), Some(RawRef::Direct(oid(2))))
+            .with_expected(Expected::Oid(oid(1)))
+            .with_reflog(log("commit: two")),
     );
 
     assert_eq!(
@@ -153,13 +142,11 @@ fn stale_head_update_in_linked_worktree_is_rejected() {
     let (common, wt_git_dir) = linked_worktree(dir.path());
     let wt_store = ReftableRefStore::open(wt_git_dir).expect("worktree store");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("HEAD"),
-            new_value: Some(RawRef::Direct(oid(3))),
-            expected: Expected::Oid(oid(9)),
-            reflog: log("stale"),
-            flags: RefUpdateFlags::default(),
-        })
+        .update(
+            RefUpdate::new(RefName::from_trusted("HEAD"), Some(RawRef::Direct(oid(3))))
+                .with_expected(Expected::Oid(oid(9)))
+                .with_reflog(log("stale")),
+        )
         .expect("txn");
     assert!(wt_store.prepare(txn).is_err(), "stale compare-and-swap");
     let common_store = ReftableRefStore::open(common).expect("common store");

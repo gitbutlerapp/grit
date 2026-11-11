@@ -42,17 +42,11 @@ fn grit_annotated_tag_round_trips_with_git() {
     let tagger = "Tagger <t@example.com> 946684800 +0000";
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: "v1".to_owned(),
-            target: head,
-            message: Some("release\n".to_owned()),
-            tagger: Some(tagger.to_owned()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v1".to_owned(), head)
+                .with_message(Some("release\n".to_owned()))
+                .with_tagger(Some(tagger.to_owned())),
+        )
         .expect("create annotated tag");
     assert_eq!(outcome.kind, TagKind::Annotated);
     assert_eq!(outcome.peeled, Some(head));

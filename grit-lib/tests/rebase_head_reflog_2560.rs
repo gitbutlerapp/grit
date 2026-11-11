@@ -8,8 +8,7 @@ mod support;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::history::{
-    EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions,
-    StartRebaseOptions,
+    RebaseOntoOptions, RebaseOutcome, RebaseRequest, RefScope, RewriteOptions, StartRebaseOptions,
 };
 use support::{git, git_rev_parse_verify, open_grit_repo, HistoryRepo};
 
@@ -52,26 +51,14 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
             onto,
             branch_tip: tip,
         },
-        rebase: RebaseOntoOptions {
-            pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: COMMITTER.parse().expect("signature"),
-                preserve_committer: false,
-                sign: false,
-            },
-            skip_applied: false,
-            flatten_leaf_merges: false,
-            favor: grit_lib::diff::merge_file::MergeFavor::default(),
-            drop: Vec::new(),
-        },
-        apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: test_ident(),
-            reflog_message: "rebase: onto".into(),
-            record_operation: Some("rebase".into()),
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new(COMMITTER.parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        )
+        .with_skip_applied(false),
+        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase: onto")
+            .with_record_operation(Some("rebase".into())),
         exec: None,
     }
 }

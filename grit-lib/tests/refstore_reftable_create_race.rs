@@ -7,8 +7,7 @@ use std::thread;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefName, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
-    ReftableRefStore,
+    Expected, RawRef, RefName, RefStore, RefTransaction, RefUpdate, ReftableRefStore,
 };
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -30,13 +29,10 @@ fn empty_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
     let git_dir = root.path().join(".git");
     let store = ReftableRefStore::open(git_dir.clone()).expect("open");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("refs/heads/main"),
-            new_value: None,
-            expected: Expected::Any,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        })
+        .update(RefUpdate::new(
+            RefName::from_trusted("refs/heads/main"),
+            None,
+        ))
         .expect("txn");
     store
         .prepare(txn)
@@ -49,13 +45,13 @@ fn empty_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
 
 fn missing_create_txn() -> RefTransaction {
     RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("refs/heads/cas-race"),
-            new_value: Some(RawRef::Direct(oid(1))),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        })
+        .update(
+            RefUpdate::new(
+                RefName::from_trusted("refs/heads/cas-race"),
+                Some(RawRef::Direct(oid(1))),
+            )
+            .with_expected(Expected::Missing),
+        )
         .expect("txn")
 }
 
@@ -103,13 +99,10 @@ fn concurrent_reftable_missing_create_single_winner_per_race() {
         total_wins += 1;
 
         let cleanup = RefTransaction::new()
-            .update(RefUpdate {
-                name: RefName::from_trusted("refs/heads/cas-race"),
-                new_value: None,
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            })
+            .update(RefUpdate::new(
+                RefName::from_trusted("refs/heads/cas-race"),
+                None,
+            ))
             .expect("cleanup txn");
         store_a
             .prepare(cleanup)

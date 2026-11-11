@@ -162,9 +162,7 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     use grit_lib::index::write_tree::write_tree_from_index;
     use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
     use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
-    use grit_lib::revwalk::history::{
-        ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
-    };
+    use grit_lib::revwalk::history::{ApplyOptions, CommitEdit, HistoryEdits, RewriteOptions};
 
     use support::{build_commit_dag, git_rev_parse, HistoryRepo};
 
@@ -173,12 +171,10 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     }
 
     fn apply_opts() -> ApplyOptions {
-        ApplyOptions {
-            identity: support::reflog_signature("Applier <apply@grit.test>"),
-            reflog_message: "history rewrite".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        }
+        ApplyOptions::new(
+            support::reflog_signature("Applier <apply@grit.test>"),
+            "history rewrite",
+        )
     }
 
     fn tree_plus_file(
@@ -255,15 +251,11 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
         .history()
         .plan_rewrite(
             &edits,
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: "Applier <apply@grit.test> 1 +0000"
+            &RewriteOptions::new(
+                "Applier <apply@grit.test> 1 +0000"
                     .parse()
                     .expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            ),
         )
         .expect("plan");
     let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");

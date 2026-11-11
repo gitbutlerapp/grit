@@ -57,19 +57,17 @@ fn repository_with_memory_ref_store() {
     store
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/injected".to_owned(),
-                    new_value: Some(RawRef::Direct(oid)),
-                    expected: Expected::Missing,
-                    reflog: Some(ReflogUpdate {
-                        identity: "Test User <test@example.com>".to_owned(),
-                        message: "create injected".to_owned(),
-                        time: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
-                        old_oid: None,
-                        new_oid: None,
-                    }),
-                    flags: grit_lib::refs::store::RefUpdateFlags::default(),
-                })
+                .update(
+                    RefUpdate::new("refs/heads/injected".to_owned(), Some(RawRef::Direct(oid)))
+                        .with_expected(Expected::Missing)
+                        .with_reflog(Some(ReflogUpdate {
+                            identity: "Test User <test@example.com>".to_owned(),
+                            message: "create injected".to_owned(),
+                            time: OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
+                            old_oid: None,
+                            new_oid: None,
+                        })),
+                )
                 .expect("txn"),
         )
         .expect("prepare")
@@ -128,19 +126,17 @@ fn repository_injected_head_reflog_uses_ref_store() {
     store
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/injected".to_owned(),
-                    new_value: Some(RawRef::Direct(oid)),
-                    expected: Expected::Missing,
-                    reflog: Some(ReflogUpdate {
-                        identity: "Test User <test@example.com>".to_owned(),
-                        message: "branch create".to_owned(),
-                        time: OffsetDateTime::from_unix_timestamp(1_700_000_001).expect("time"),
-                        old_oid: None,
-                        new_oid: None,
-                    }),
-                    flags: grit_lib::refs::store::RefUpdateFlags::default(),
-                })
+                .update(
+                    RefUpdate::new("refs/heads/injected".to_owned(), Some(RawRef::Direct(oid)))
+                        .with_expected(Expected::Missing)
+                        .with_reflog(Some(ReflogUpdate {
+                            identity: "Test User <test@example.com>".to_owned(),
+                            message: "branch create".to_owned(),
+                            time: OffsetDateTime::from_unix_timestamp(1_700_000_001).expect("time"),
+                            old_oid: None,
+                            new_oid: None,
+                        })),
+                )
                 .expect("txn"),
         )
         .expect("prepare")
@@ -149,13 +145,10 @@ fn repository_injected_head_reflog_uses_ref_store() {
     store
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "HEAD".to_owned(),
-                    new_value: Some(RawRef::Symbolic("refs/heads/injected".to_owned())),
-                    expected: Expected::Any,
-                    reflog: None,
-                    flags: grit_lib::refs::store::RefUpdateFlags::default(),
-                })
+                .update(RefUpdate::new(
+                    "HEAD".to_owned(),
+                    Some(RawRef::Symbolic("refs/heads/injected".to_owned())),
+                ))
                 .expect("txn"),
         )
         .expect("prepare")
@@ -217,13 +210,10 @@ fn resolve_merge_source_uses_injected_branch_refs() {
     store
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/topic".to_owned(),
-                    new_value: Some(RawRef::Direct(tip)),
-                    expected: Expected::Missing,
-                    reflog: None,
-                    flags: grit_lib::refs::store::RefUpdateFlags::default(),
-                })
+                .update(
+                    RefUpdate::new("refs/heads/topic".to_owned(), Some(RawRef::Direct(tip)))
+                        .with_expected(Expected::Missing),
+                )
                 .expect("txn"),
         )
         .expect("prepare")

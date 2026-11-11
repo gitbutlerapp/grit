@@ -597,10 +597,11 @@ fn mailmap_author_matches_git() {
             .revwalk()
             .count(
                 &["main"],
-                &grit_lib::revwalk::RevWalkListOptions {
-                    commit_filter: Some(filter.clone(), &mut NullProgress, &CancelToken::never()),
-                    ..Default::default()
-                },
+                &grit_lib::revwalk::RevWalkListOptions::default().with_commit_filter(Some(
+                    filter.clone(),
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )),
             )
             .expect("filtered count with mailmap");
         assert_eq!(count, git_oids.len());
@@ -845,10 +846,11 @@ fn filtered_counts_across_shared_ancestry_and_exclusions_match_git() {
             .revwalk()
             .count(
                 &["main", "side"],
-                &grit_lib::revwalk::RevWalkListOptions {
-                    commit_filter: Some(filter, &mut NullProgress, &CancelToken::never()),
-                    ..Default::default()
-                },
+                &grit_lib::revwalk::RevWalkListOptions::default().with_commit_filter(Some(
+                    filter,
+                    &mut NullProgress,
+                    &CancelToken::never(),
+                )),
             )
             .expect("public count");
         assert_eq!(
@@ -1603,10 +1605,7 @@ fn left_right_count_with_author_filter_matches_git() {
         .revwalk()
         .left_right_counts(
             &["left...right"],
-            &RevWalkListOptions {
-                commit_filter: Some(filter),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_commit_filter(Some(filter)),
             &mut NullProgress,
             &CancelToken::never(),
         )

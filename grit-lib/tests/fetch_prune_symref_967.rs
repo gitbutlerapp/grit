@@ -5,7 +5,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::store::{Expected, RefUpdate};
+use grit_lib::refs::store::RefUpdate;
 use grit_lib::remote::transfer::{FetchOptions, TagMode, UpdateMode};
 use grit_lib::test_support::refs::pack_remote_tracking_refs_for_clone;
 use grit_test_support::git;
@@ -59,16 +59,10 @@ fn batch_delete_origin_head_keeps_packed_main() {
 
     grit_test_support::refs::at(&local_git)
         .references()
-        .apply(&[RefUpdate {
-            name: "refs/remotes/origin/HEAD".to_owned(),
-            new_value: None,
-            expected: Expected::Any,
-            reflog: None,
-            flags: grit_lib::refs::store::RefUpdateFlags {
-                no_deref: true,
-                ..Default::default()
-            },
-        }])
+        .apply(
+            &[RefUpdate::new("refs/remotes/origin/HEAD".to_owned(), None)
+                .with_flags(grit_lib::refs::store::RefUpdateFlags::default().with_no_deref(true))],
+        )
         .expect("delete HEAD symref without peeling target");
 
     let packed_after = fs::read_to_string(local_git.join("packed-refs")).unwrap();

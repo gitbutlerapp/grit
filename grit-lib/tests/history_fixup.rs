@@ -40,13 +40,9 @@ fn fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
     FixupOptions {
         message: None,
         empty,
-        rewrite: RewriteOptions {
-            scope,
-            empty,
-            committer: committer(1).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
+        rewrite: RewriteOptions::new(committer(1).parse().expect("signature"))
+            .with_scope(scope)
+            .with_empty(empty),
         selection: None,
         pathspecs: Vec::new(),
     }
@@ -56,25 +52,19 @@ fn harness_fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
     FixupOptions {
         message: None,
         empty,
-        rewrite: RewriteOptions {
-            scope,
-            empty,
-            committer: harness_committer_line().parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
+        rewrite: RewriteOptions::new(harness_committer_line().parse().expect("signature"))
+            .with_scope(scope)
+            .with_empty(empty),
         selection: None,
         pathspecs: Vec::new(),
     }
 }
 
 fn apply_opts() -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("Fixup <f@grit.test>"),
-        reflog_message: "history fixup".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("Fixup <f@grit.test>"),
+        "history fixup",
+    )
 }
 
 fn plan_and_apply(grit: &Repository, wt: &std::path::Path, target: ObjectId, opts: &FixupOptions) {
@@ -623,13 +613,9 @@ fn fixup_opts_with_selection(
     FixupOptions {
         message: None,
         empty,
-        rewrite: RewriteOptions {
-            scope,
-            empty,
-            committer: committer(1).parse().expect("signature"),
-            preserve_committer: false,
-            sign: true,
-        },
+        rewrite: RewriteOptions::new(committer(1).parse().expect("signature"))
+            .with_scope(scope)
+            .with_empty(empty),
         selection: Some(selection),
         pathspecs: Vec::new(),
     }

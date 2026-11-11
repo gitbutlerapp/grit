@@ -52,16 +52,14 @@ fn refs_fsck_reports_bad_symref_and_formats_line() {
     )
     .expect("good ref");
     let dangling = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("refs/heads/dangling"),
-            new_value: Some(RawRef::Direct(ObjectId::from_bytes(&[1; 20]).expect("oid"))),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags {
-                skip_oid_verification: true,
-                ..RefUpdateFlags::default()
-            },
-        })
+        .update(
+            RefUpdate::new(
+                RefName::from_trusted("refs/heads/dangling"),
+                Some(RawRef::Direct(ObjectId::from_bytes(&[1; 20]).expect("oid"))),
+            )
+            .with_expected(Expected::Missing)
+            .with_flags(RefUpdateFlags::default().with_skip_oid_verification(true)),
+        )
         .expect("txn");
     repo.ref_store()
         .prepare(dangling)
@@ -237,16 +235,14 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
     assert!(healthy.is_empty(), "{healthy:?}");
 
     let dangling = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("refs/heads/dangling"),
-            new_value: Some(RawRef::Direct(ObjectId::from_bytes(&[2; 20]).expect("oid"))),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags {
-                skip_oid_verification: true,
-                ..RefUpdateFlags::default()
-            },
-        })
+        .update(
+            RefUpdate::new(
+                RefName::from_trusted("refs/heads/dangling"),
+                Some(RawRef::Direct(ObjectId::from_bytes(&[2; 20]).expect("oid"))),
+            )
+            .with_expected(Expected::Missing)
+            .with_flags(RefUpdateFlags::default().with_skip_oid_verification(true)),
+        )
         .expect("txn");
     repo.ref_store()
         .prepare(dangling)
@@ -329,16 +325,14 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
     .expect("linked repo");
 
     let wt_dangling = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("refs/worktree/dangling"),
-            new_value: Some(RawRef::Direct(ObjectId::from_bytes(&[3; 20]).expect("oid"))),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags {
-                skip_oid_verification: true,
-                ..RefUpdateFlags::default()
-            },
-        })
+        .update(
+            RefUpdate::new(
+                RefName::from_trusted("refs/worktree/dangling"),
+                Some(RawRef::Direct(ObjectId::from_bytes(&[3; 20]).expect("oid"))),
+            )
+            .with_expected(Expected::Missing)
+            .with_flags(RefUpdateFlags::default().with_skip_oid_verification(true)),
+        )
         .expect("txn");
     wt_repo
         .ref_store()
@@ -363,16 +357,14 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
     );
 
     let common_dangling = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted("refs/heads/common-dangling"),
-            new_value: Some(RawRef::Direct(ObjectId::from_bytes(&[4; 20]).expect("oid"))),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags {
-                skip_oid_verification: true,
-                ..RefUpdateFlags::default()
-            },
-        })
+        .update(
+            RefUpdate::new(
+                RefName::from_trusted("refs/heads/common-dangling"),
+                Some(RawRef::Direct(ObjectId::from_bytes(&[4; 20]).expect("oid"))),
+            )
+            .with_expected(Expected::Missing)
+            .with_flags(RefUpdateFlags::default().with_skip_oid_verification(true)),
+        )
         .expect("txn");
     repo.ref_store()
         .prepare(common_dangling)

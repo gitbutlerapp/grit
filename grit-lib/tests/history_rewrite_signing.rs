@@ -16,9 +16,7 @@ use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{ApplyOptions, HistoryError, RewriteOptions};
 use grit_test_support::git;
 
 use support::{build_commit_dag, git_fsck_strict, HistoryRepo};
@@ -70,13 +68,7 @@ fn configure_ssh_signing(root: &Path, key: &Path, allowed: &Path) {
 }
 
 fn rewrite_opts(committer: &str, sign: bool) -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: committer.parse().expect("signature"),
-        preserve_committer: false,
-        sign,
-    }
+    RewriteOptions::new(committer.parse().expect("signature")).with_sign(sign)
 }
 
 fn open_grit(wt: &Path) -> Repository {
@@ -185,12 +177,10 @@ fn history_rewrite_resigns_when_gpgsign() {
     grit.history()
         .apply(
             &plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "history reword".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <r@grit.test>"),
+                "history reword",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )

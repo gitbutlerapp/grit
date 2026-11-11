@@ -104,6 +104,7 @@ impl ReflogUpdate {
 /// Per-update flags (Git `REF_NO_DEREF` / `REF_LOG_ONLY` / `REF_SKIP_OID_VERIFICATION`
 /// semantics).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct RefUpdateFlags {
     /// Do not dereference symbolic refs when computing reflog old/new oids.
     pub no_deref: bool,
@@ -116,6 +117,29 @@ pub struct RefUpdateFlags {
     /// other caller should leave this off so a lost race with a prune fails at the update
     /// instead of leaving a broken ref.
     pub skip_oid_verification: bool,
+}
+
+impl RefUpdateFlags {
+    /// Sets [`no_deref`](Self::no_deref).
+    #[must_use]
+    pub const fn with_no_deref(mut self, no_deref: bool) -> Self {
+        self.no_deref = no_deref;
+        self
+    }
+
+    /// Sets [`log_only`](Self::log_only).
+    #[must_use]
+    pub const fn with_log_only(mut self, log_only: bool) -> Self {
+        self.log_only = log_only;
+        self
+    }
+
+    /// Sets [`skip_oid_verification`](Self::skip_oid_verification).
+    #[must_use]
+    pub const fn with_skip_oid_verification(mut self, skip_oid_verification: bool) -> Self {
+        self.skip_oid_verification = skip_oid_verification;
+        self
+    }
 }
 
 /// Rename a loose ref when only letter case changes (case-insensitive filesystems).
@@ -139,7 +163,10 @@ pub struct RefReflogRename {
 }
 
 /// One ref create, update, delete, or reflog-only touch in a transaction.
+///
+/// Build with [`RefUpdate::new`] and the `with_*` setters.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefUpdate {
     /// Full ref name.
     pub name: RefName,
@@ -153,6 +180,61 @@ pub struct RefUpdate {
     pub reflog: Option<ReflogUpdate>,
     /// Update modifiers.
     pub flags: RefUpdateFlags,
+}
+
+impl RefUpdate {
+    /// An update that stores `new_value` at `name` (`None` deletes the ref), accepting any
+    /// current value, writing no reflog line and using default [`RefUpdateFlags`].
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: full ref name to update.
+    /// - `new_value`: value to store, or `None` to delete the ref.
+    #[must_use]
+    pub fn new(name: RefName, new_value: Option<RawRef>) -> Self {
+        Self {
+            name,
+            new_value,
+            expected: Expected::Any,
+            reflog: None,
+            flags: RefUpdateFlags::default(),
+        }
+    }
+
+    /// Sets [`name`](Self::name).
+    #[must_use]
+    pub fn with_name(mut self, name: RefName) -> Self {
+        self.name = name;
+        self
+    }
+
+    /// Sets [`new_value`](Self::new_value).
+    #[must_use]
+    pub fn with_new_value(mut self, new_value: Option<RawRef>) -> Self {
+        self.new_value = new_value;
+        self
+    }
+
+    /// Sets [`expected`](Self::expected).
+    #[must_use]
+    pub fn with_expected(mut self, expected: Expected) -> Self {
+        self.expected = expected;
+        self
+    }
+
+    /// Sets [`reflog`](Self::reflog).
+    #[must_use]
+    pub fn with_reflog(mut self, reflog: Option<ReflogUpdate>) -> Self {
+        self.reflog = reflog;
+        self
+    }
+
+    /// Sets [`flags`](Self::flags).
+    #[must_use]
+    pub fn with_flags(mut self, flags: RefUpdateFlags) -> Self {
+        self.flags = flags;
+        self
+    }
 }
 
 /// Which physical backend backs a [`super::RefStore`].

@@ -156,28 +156,25 @@ impl Rewrite {
             context::signature(&repo, IdentRole::Committer, context::wall_clock_now(env))?;
         Ok(Self {
             repo,
-            options: RewriteOptions {
-                scope: shared.update_refs.into(),
-                empty: shared.empty.into(),
-                committer,
-                preserve_committer: shared.keep_committer,
-                sign: !shared.dry_run,
-            },
+            options: RewriteOptions::new(committer)
+                .with_scope(shared.update_refs.into())
+                .with_empty(shared.empty.into())
+                .with_preserve_committer(shared.keep_committer)
+                .with_sign(!shared.dry_run),
         })
     }
 
     fn apply_options(&self, operation: &str, reflog_message: String) -> Result<ApplyOptions> {
         let now = context::wall_clock_now(self.repo.environment());
-        Ok(ApplyOptions {
-            identity: context::signature(
+        Ok(ApplyOptions::new(
+            context::signature(
                 &self.repo,
                 grit_lib::config::ident_resolve::IdentRole::Committer,
                 now,
             )?,
             reflog_message,
-            record_operation: Some(operation.into()),
-            hooks: PostOperationHooks::Run,
-        })
+        )
+        .with_record_operation(Some(operation.into())))
     }
 
     fn subject(&self, oid: ObjectId) -> Result<String> {
@@ -942,16 +939,15 @@ pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryUndoOutcome> {
     let repo = context::discover()?;
     let rewrite = Rewrite::new(repo, shared)?;
     let now = context::wall_clock_now(rewrite.repo.environment());
-    let apply_opts = ApplyOptions {
-        identity: context::signature(
+    let apply_opts = ApplyOptions::new(
+        context::signature(
             &rewrite.repo,
             grit_lib::config::ident_resolve::IdentRole::Committer,
             now,
         )?,
-        reflog_message: "history undo".into(),
-        record_operation: None,
-        hooks: PostOperationHooks::Skip,
-    };
+        "history undo",
+    )
+    .with_hooks(PostOperationHooks::Skip);
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let mode = if shared.dry_run {
         UndoMode::DryRun

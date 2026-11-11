@@ -33,7 +33,7 @@ use grit_lib::refs::store::{
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::NotesWriteOptions;
-use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, ExecSpec, RefScope, RewriteOptions};
+use grit_lib::revwalk::history::{ApplyOptions, ExecSpec, RefScope, RewriteOptions};
 
 #[derive(Clone, Default)]
 struct DurabilityState {
@@ -368,22 +368,13 @@ fn seed_commit(repo: &Repository) -> ObjectId {
 }
 
 fn rewrite_options() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: ident(),
-        preserve_committer: false,
-        sign: false,
-    }
+    RewriteOptions::new(ident())
+        .with_scope(RefScope::Head)
+        .with_sign(false)
 }
 
 fn apply_options() -> ApplyOptions {
-    ApplyOptions {
-        identity: ident(),
-        reflog_message: "history".into(),
-        record_operation: None,
-        hooks: PostOperationHooks::Skip,
-    }
+    ApplyOptions::new(ident(), "history").with_hooks(PostOperationHooks::Skip)
 }
 
 #[test]
@@ -396,17 +387,12 @@ fn create_tag_flushes_before_ref_update() {
     store.clear_events();
 
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: tip,
-            message: Some("release\n".into()),
-            tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-            sign: Some(false),
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v1", tip)
+                .with_message(Some("release\n".into()))
+                .with_tagger(Some("T <t@example.com> 1700000000 +0000".into()))
+                .with_sign(Some(false)),
+        )
         .expect("tag");
 
     let tag_oid = repo

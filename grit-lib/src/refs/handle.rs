@@ -513,18 +513,16 @@ impl<'repo> References<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
-    /// use grit_lib::refs::store::{Expected, RawRef, RefName, RefUpdate, RefUpdateFlags};
+    /// use grit_lib::refs::store::{Expected, RawRef, RefName, RefUpdate};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     /// let target = RefName::try_from("refs/heads/main").expect("valid ref");
-    /// repo.references().apply(&[RefUpdate {
-    ///     name: RefName::try_from("refs/heads/alias").expect("valid ref"),
-    ///     new_value: Some(RawRef::Symbolic(target.as_str().to_owned())),
-    ///     expected: Expected::Missing,
-    ///     reflog: None,
-    ///     flags: RefUpdateFlags::default(),
-    /// }])?;
+    /// repo.references().apply(&[RefUpdate::new(
+    ///     RefName::try_from("refs/heads/alias").expect("valid ref"),
+    ///     Some(RawRef::Symbolic(target.as_str().to_owned())),
+    /// )
+    /// .with_expected(Expected::Missing)])?;
     /// assert_eq!(repo.references().symbolic("refs/heads/alias")?, Some(target));
     /// # Ok(())
     /// # }

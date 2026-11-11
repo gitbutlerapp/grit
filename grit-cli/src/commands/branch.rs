@@ -317,18 +317,16 @@ fn build_ref_query(repo: &Repository, args: &BranchListArgs) -> Result<RefQuery>
             )));
         }
     };
-    Ok(RefQuery {
-        patterns: args.patterns.clone(),
-        sort: RefSort {
+    Ok(RefQuery::default()
+        .with_patterns(args.patterns.clone())
+        .with_sort(RefSort {
             key: sort_key,
             reverse: args.reverse,
-        },
-        limit: grit_lib::list_limit::fetch_plus_one(args.limit.get()),
-        contains: resolve_filter_revs(repo, args.contains.as_deref())?,
-        merged: resolve_filter_revs(repo, args.merged.as_deref())?,
-        no_merged: resolve_filter_revs(repo, args.no_merged.as_deref())?,
-        ..RefQuery::default()
-    })
+        })
+        .with_limit(grit_lib::list_limit::fetch_plus_one(args.limit.get()))
+        .with_contains(resolve_filter_revs(repo, args.contains.as_deref())?)
+        .with_merged(resolve_filter_revs(repo, args.merged.as_deref())?)
+        .with_no_merged(resolve_filter_revs(repo, args.no_merged.as_deref())?))
 }
 
 fn resolve_filter_revs(

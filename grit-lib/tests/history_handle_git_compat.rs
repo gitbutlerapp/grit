@@ -20,8 +20,8 @@ use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     ApplyOptions, EmptyPolicy, ExecSpec, FixupOptions, HistoryError, PreRebase, RebaseCheckPlan,
-    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RefScope, RewordOptions,
-    RewriteOptions, StartRebaseOptions, UndoMode,
+    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RewordOptions, RewriteOptions,
+    StartRebaseOptions, UndoMode,
 };
 
 use support::{assert_git_fsck_strict, commit_file, git, git_rev_parse, HistoryRepo};
@@ -33,22 +33,16 @@ fn open(wt: &Path) -> Repository {
 }
 
 fn rewrite_opts() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: IDENT.parse().expect("committer"),
-        preserve_committer: false,
-        sign: false,
-    }
+    RewriteOptions::new(IDENT.parse().expect("committer")).with_sign(false)
 }
 
 fn apply_opts(operation: &str) -> ApplyOptions {
-    ApplyOptions {
-        identity: IDENT.parse().expect("identity"),
-        reflog_message: format!("history {operation}"),
-        record_operation: Some(operation.into()),
-        hooks: PostOperationHooks::Skip,
-    }
+    ApplyOptions::new(
+        IDENT.parse().expect("identity"),
+        format!("history {operation}"),
+    )
+    .with_record_operation(Some(operation.into()))
+    .with_hooks(PostOperationHooks::Skip)
 }
 
 fn rev(wt: &Path, spec: &str) -> ObjectId {

@@ -177,13 +177,7 @@ fn sample_log() -> ReflogUpdate {
 }
 
 fn update(name: &str, new_value: Option<RawRef>, expected: Expected) -> RefUpdate {
-    RefUpdate {
-        name: RefName::from_trusted(name),
-        new_value,
-        expected,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
-    }
+    RefUpdate::new(RefName::from_trusted(name), new_value).with_expected(expected)
 }
 
 fn commit_txn(store: &dyn RefStore, txn: RefTransaction) {
@@ -487,11 +481,9 @@ pub fn pseudoref_and_log_only_null_oid_accepted(store: Arc<dyn RefStore>) {
         Expected::Any,
     );
     log_only.reflog = Some(sample_log());
-    log_only.flags = RefUpdateFlags {
-        log_only: true,
-        no_deref: true,
-        ..Default::default()
-    };
+    log_only.flags = RefUpdateFlags::default()
+        .with_log_only(true)
+        .with_no_deref(true);
     commit_txn(
         store.as_ref(),
         RefTransaction::new().update(log_only).expect("txn"),
@@ -1477,19 +1469,20 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
     let appender = thread::spawn(move || {
         signal_rx.recv().expect("signal");
         let txn = RefTransaction::new()
-            .update(RefUpdate {
-                name: RefName::from_trusted("refs/heads/r"),
-                new_value: Some(RawRef::Direct(oid(3))),
-                expected: Expected::Oid(oid(1)),
-                reflog: Some(ReflogUpdate {
+            .update(
+                RefUpdate::new(
+                    RefName::from_trusted("refs/heads/r"),
+                    Some(RawRef::Direct(oid(3))),
+                )
+                .with_expected(Expected::Oid(oid(1)))
+                .with_reflog(Some(ReflogUpdate {
                     identity: "A <a@a.com> 3 +0000".into(),
                     message: CONCURRENT_APPEND_MARKER.into(),
                     time: time::OffsetDateTime::from_unix_timestamp(1_700_000_003).expect("ts"),
                     old_oid: Some(oid(1)),
                     new_oid: Some(oid(3)),
-                }),
-                flags: RefUpdateFlags::default(),
-            })
+                })),
+            )
             .expect("txn");
         commit_txn_retry_lock(store2.as_ref(), txn);
         finished_tx.send(()).expect("send");

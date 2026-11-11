@@ -28,12 +28,10 @@ fn open_grit(wt: &std::path::Path) -> Repository {
 }
 
 fn apply_opts() -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("OptsHarness <opts@grit.test>"),
-        reflog_message: "history options".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("OptsHarness <opts@grit.test>"),
+        "history options",
+    )
 }
 
 fn write_tree_with_blob(
@@ -111,13 +109,9 @@ fn drop_keep_empty_keeps_replayed_empty_commit() {
         .history()
         .drop_commit(
             b,
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Keep,
-                committer: committer(1).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(1).parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_empty(EmptyPolicy::Keep),
         )
         .expect("drop with keep");
     let c_row = plan.commits.iter().find(|r| r.old == c).expect("c row");
@@ -152,13 +146,9 @@ fn squash_empty_abort_at_head_fast_path() {
         &[&range],
         &SquashOptions {
             message: SquashMessage::Oldest,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Abort,
-                committer: committer(3).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            rewrite: RewriteOptions::new(committer(3).parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_empty(EmptyPolicy::Abort),
         },
     ) {
         Err(HistoryError::BecameEmpty { .. }) => {}
@@ -188,13 +178,9 @@ fn squash_keep_committer_at_head_fast_path() {
             &[&range],
             &SquashOptions {
                 message: SquashMessage::Oldest,
-                rewrite: RewriteOptions {
-                    scope: RefScope::Head,
-                    empty: EmptyPolicy::Drop,
-                    committer: committer(1800).parse().expect("signature"),
-                    preserve_committer: true,
-                    sign: true,
-                },
+                rewrite: RewriteOptions::new(committer(1800).parse().expect("signature"))
+                    .with_scope(RefScope::Head)
+                    .with_preserve_committer(true),
             },
         )
         .expect("squash at head");
@@ -229,13 +215,9 @@ fn squash_empty_abort_returns_became_empty() {
         &[&range],
         &SquashOptions {
             message: SquashMessage::Oldest,
-            rewrite: RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Abort,
-                committer: committer(2).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            rewrite: RewriteOptions::new(committer(2).parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_empty(EmptyPolicy::Abort),
         },
     ) {
         Err(HistoryError::BecameEmpty { .. }) => {}
@@ -257,13 +239,9 @@ fn reword_keep_committer_preserves_committer_line() {
             b,
             &grit_lib::revwalk::history::RewordOptions::default()
                 .with_message("new subject line\n"),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: committer(99).parse().expect("signature"),
-                preserve_committer: true,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(99).parse().expect("signature"))
+                .with_scope(RefScope::Head)
+                .with_preserve_committer(true),
         )
         .expect("reword");
     let new_b = plan.replacement(b).expect("replacement");

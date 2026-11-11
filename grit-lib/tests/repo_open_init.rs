@@ -154,13 +154,13 @@ fn open_discover_and_init_roundtrip_fsck() {
     store
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/builder-injected".to_owned(),
-                    new_value: Some(RawRef::Direct(oid)),
-                    expected: Expected::Missing,
-                    reflog: None,
-                    flags: grit_lib::refs::store::RefUpdateFlags::default(),
-                })
+                .update(
+                    RefUpdate::new(
+                        "refs/heads/builder-injected".to_owned(),
+                        Some(RawRef::Direct(oid)),
+                    )
+                    .with_expected(Expected::Missing),
+                )
                 .expect("txn"),
         )
         .expect("prepare")

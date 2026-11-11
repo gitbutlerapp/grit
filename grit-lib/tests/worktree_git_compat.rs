@@ -293,10 +293,7 @@ fn grit_ref_listing(repo: &Repository) -> Vec<String> {
     use grit_lib::refs::listing::{RefNamespace, RefQuery, RefQueryOptions};
     repo.references()
         .query(
-            &RefQuery {
-                namespaces: vec![RefNamespace::Custom("refs/".into())],
-                ..RefQuery::default()
-            },
+            &RefQuery::default().with_namespaces(vec![RefNamespace::Custom("refs/".into())]),
             &RefQueryOptions::default(),
         )
         .expect("query refs")

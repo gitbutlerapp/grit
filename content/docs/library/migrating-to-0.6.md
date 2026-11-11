@@ -131,6 +131,35 @@ let bytes = serialize_commit(&commit);
 
 Records fixed by a Git format (`TreeEntry`, `ReflogEntry`, `ObjectKindCounts`, `LeftRightCounts`, …) stay exhaustive.
 
+### Options and request structs are `#[non_exhaustive]`
+
+Input structs that grow with new flags are `#[non_exhaustive]`, so struct literals and `..Default::default()` no longer compile outside grit-lib. Start from `default()`, or from `new(…)` when a field has no sensible default, and chain one `with_<field>` setter per field you change:
+
+| Struct | Start from |
+| --- | --- |
+| [`RevWalkListOptions`](rustdoc:grit_lib::revwalk::RevWalkListOptions), [`RefQuery`](rustdoc:grit_lib::refs::listing::RefQuery), [`RefUpdateFlags`](rustdoc:grit_lib::refs::store::RefUpdateFlags) | `default()` |
+| [`RefUpdate`](rustdoc:grit_lib::refs::store::RefUpdate) | `new(name, new_value)` |
+| [`CreateTagRequest`](rustdoc:grit_lib::porcelain::tag::CreateTagRequest) | `new(name, target)` |
+| [`ExpireOptions`](rustdoc:grit_lib::repo_handles::ExpireOptions) | `new(now)` |
+| [`RewriteOptions`](rustdoc:grit_lib::revwalk::history::RewriteOptions) | `new(committer)` |
+| [`ApplyOptions`](rustdoc:grit_lib::revwalk::history::ApplyOptions) | `new(identity, reflog_message)` |
+| [`RebaseOntoOptions`](rustdoc:grit_lib::revwalk::history::RebaseOntoOptions) | `new(rewrite)` |
+
+```rust
+// 0.5.x
+let update = RefUpdate {
+    name: RefName::from_trusted("refs/heads/topic"),
+    new_value: Some(RawRef::Direct(oid)),
+    expected: Expected::Missing,
+    reflog: None,
+    flags: RefUpdateFlags::default(),
+};
+
+// 0.6
+let update = RefUpdate::new(RefName::from_trusted("refs/heads/topic"), Some(RawRef::Direct(oid)))
+    .with_expected(Expected::Missing);
+```
+
 ### Custom object store via `RepositoryOptions`
 
 Injection moved into [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions): use [`with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store) and [`with_ref_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_ref_store) on open/discover/init, not ad hoc parameters on individual calls.

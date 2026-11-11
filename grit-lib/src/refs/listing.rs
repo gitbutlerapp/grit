@@ -16,10 +16,7 @@
 //! # fn main() -> Result<(), Box<dyn std::error::Error>> {
 //! let dir = tempfile::tempdir()?;
 //! let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! let query = RefQuery {
-//!     namespaces: vec![RefNamespace::Heads],
-//!     ..RefQuery::default()
-//! };
+//! let query = RefQuery::default().with_namespaces(vec![RefNamespace::Heads]);
 //! let _branches = repo.references().query(&query, &RefQueryOptions::default())?;
 //! # Ok(())
 //! # }
@@ -97,6 +94,7 @@ impl Default for RefSort {
 
 /// Filters and ordering for a ref listing query.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct RefQuery {
     /// Namespaces to scan (union). When empty, defaults to [`RefNamespace::Heads`].
     pub namespaces: Vec<RefNamespace>,
@@ -116,6 +114,71 @@ pub struct RefQuery {
     pub no_merged: Vec<ObjectId>,
     /// Keep refs whose oid or tag peel chain matches any listed object (`--points-at`).
     pub points_at: Vec<ObjectId>,
+}
+
+impl RefQuery {
+    /// Sets [`namespaces`](Self::namespaces).
+    #[must_use]
+    pub fn with_namespaces(mut self, namespaces: Vec<RefNamespace>) -> Self {
+        self.namespaces = namespaces;
+        self
+    }
+
+    /// Sets [`patterns`](Self::patterns).
+    #[must_use]
+    pub fn with_patterns(mut self, patterns: Vec<String>) -> Self {
+        self.patterns = patterns;
+        self
+    }
+
+    /// Sets [`sort`](Self::sort).
+    #[must_use]
+    pub fn with_sort(mut self, sort: RefSort) -> Self {
+        self.sort = sort;
+        self
+    }
+
+    /// Sets [`limit`](Self::limit).
+    #[must_use]
+    pub fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Sets [`contains`](Self::contains).
+    #[must_use]
+    pub fn with_contains(mut self, contains: Vec<ObjectId>) -> Self {
+        self.contains = contains;
+        self
+    }
+
+    /// Sets [`no_contains`](Self::no_contains).
+    #[must_use]
+    pub fn with_no_contains(mut self, no_contains: Vec<ObjectId>) -> Self {
+        self.no_contains = no_contains;
+        self
+    }
+
+    /// Sets [`merged`](Self::merged).
+    #[must_use]
+    pub fn with_merged(mut self, merged: Vec<ObjectId>) -> Self {
+        self.merged = merged;
+        self
+    }
+
+    /// Sets [`no_merged`](Self::no_merged).
+    #[must_use]
+    pub fn with_no_merged(mut self, no_merged: Vec<ObjectId>) -> Self {
+        self.no_merged = no_merged;
+        self
+    }
+
+    /// Sets [`points_at`](Self::points_at).
+    #[must_use]
+    pub fn with_points_at(mut self, points_at: Vec<ObjectId>) -> Self {
+        self.points_at = points_at;
+        self
+    }
 }
 
 /// Class of ref for display and JSON (`head`, `remote`, `tag`, …).

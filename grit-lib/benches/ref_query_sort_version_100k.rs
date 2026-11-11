@@ -53,16 +53,12 @@ fn bench_version_sort(c: &mut Criterion) {
     group.bench_function("grit_version_sort", |b| {
         b.iter(|| {
             let store = open_ref_store(&git_dir).expect("open store");
-            let query = RefQuery {
-                namespaces: vec![RefNamespace::Heads],
-                patterns: vec![],
-                sort: RefSort {
+            let query = RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Heads])
+                .with_sort(RefSort {
                     key: SortKey::Version,
                     reverse: false,
-                },
-                limit: None,
-                ..RefQuery::default()
-            };
+                });
             let rows =
                 query_listings_on_store(store.as_ref(), &query, &RefQueryOptions::default(), None)
                     .expect("query");

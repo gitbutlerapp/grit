@@ -21,13 +21,14 @@ fn grit_follow_commits_with(
     repo.revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(vec![path.to_owned()], PathspecGlobalFlags::default()),
-                follow: true,
-                full_history,
-                limit,
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default()
+                .with_pathspec(Pathspec::scoped(
+                    vec![path.to_owned()],
+                    PathspecGlobalFlags::default(),
+                ))
+                .with_follow(true)
+                .with_full_history(full_history)
+                .with_limit(limit),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -199,10 +200,10 @@ fn follow_without_flag_stops_at_rename() {
         .revwalk()
         .commits(
             &["HEAD"],
-            &RevWalkListOptions {
-                pathspec: Pathspec::scoped(["new.txt"], PathspecGlobalFlags::default()),
-                ..RevWalkListOptions::default()
-            },
+            &RevWalkListOptions::default().with_pathspec(Pathspec::scoped(
+                ["new.txt"],
+                PathspecGlobalFlags::default(),
+            )),
             &mut NullProgress,
             &CancelToken::never(),
         )

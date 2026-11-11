@@ -16,7 +16,10 @@ use crate::repo::Repository;
 use crate::worktree_ref::resolve_ref_dwim;
 
 /// Options for [`RepositoryReflogs::expire`].
+///
+/// Build with [`ExpireOptions::new`] and the `with_*` setters.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ExpireOptions {
     /// Current time as Unix seconds (never read from the system clock inside the library).
     pub now: i64,
@@ -28,6 +31,60 @@ pub struct ExpireOptions {
     pub all: bool,
     /// When true, report what would be pruned without rewriting reflog files.
     pub dry_run: bool,
+}
+
+impl ExpireOptions {
+    /// Expire options evaluated at `now`: expiry from `gc.reflogExpire` /
+    /// `gc.reflogExpireUnreachable` config, only refs that have reflogs, and reflogs rewritten.
+    ///
+    /// # Parameters
+    ///
+    /// - `now`: current time as Unix seconds (the library never reads the clock).
+    #[must_use]
+    pub fn new(now: i64) -> Self {
+        Self {
+            now,
+            expire: None,
+            expire_unreachable: None,
+            all: false,
+            dry_run: false,
+        }
+    }
+
+    /// Sets [`now`](Self::now).
+    #[must_use]
+    pub fn with_now(mut self, now: i64) -> Self {
+        self.now = now;
+        self
+    }
+
+    /// Sets [`expire`](Self::expire).
+    #[must_use]
+    pub fn with_expire(mut self, expire: Option<String>) -> Self {
+        self.expire = expire;
+        self
+    }
+
+    /// Sets [`expire_unreachable`](Self::expire_unreachable).
+    #[must_use]
+    pub fn with_expire_unreachable(mut self, expire_unreachable: Option<String>) -> Self {
+        self.expire_unreachable = expire_unreachable;
+        self
+    }
+
+    /// Sets [`all`](Self::all).
+    #[must_use]
+    pub fn with_all(mut self, all: bool) -> Self {
+        self.all = all;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// Per-ref prune count from [`RepositoryReflogs::expire`].

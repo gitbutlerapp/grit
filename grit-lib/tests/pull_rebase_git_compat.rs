@@ -11,8 +11,8 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
-    RefScope, RewriteOptions, StartRebaseOptions,
+    ApplyOptions, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RefScope,
+    RewriteOptions, StartRebaseOptions,
 };
 use grit_lib::worktree::WorktreeError;
 use grit_test_support::{git, git_fsck, unique_tmp, write_file};
@@ -476,19 +476,13 @@ fn pull_rebase_conflict_stops_like_git_and_continues() {
             onto: None,
             branch_tip: local_tip,
         },
-        rebase: RebaseOntoOptions::new(RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: "T <t@example.com> 1700000000 +0000".parse().expect("sig"),
-            preserve_committer: false,
-            sign: false,
-        }),
-        apply: ApplyOptions {
-            identity: test_sig(),
-            reflog_message: "rebase: continue".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-        },
+        rebase: RebaseOntoOptions::new(
+            RewriteOptions::new("T <t@example.com> 1700000000 +0000".parse().expect("sig"))
+                .with_scope(RefScope::Head)
+                .with_sign(false),
+        ),
+        apply: ApplyOptions::new(test_sig(), "rebase: continue")
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
         exec: None,
     };
     let done = open(&grit_dir)
@@ -870,13 +864,11 @@ fn pull_rebase_implicit_upstream_up_to_date_after_fetch() {
         .history()
         .rebase_run_request(head, upstream, None, None, false, None)
         .expect("request");
-    let opts = RebaseOntoOptions::new(RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: test_sig(),
-        preserve_committer: false,
-        sign: false,
-    });
+    let opts = RebaseOntoOptions::new(
+        RewriteOptions::new(test_sig())
+            .with_scope(RefScope::Head)
+            .with_sign(false),
+    );
     let plan = repo.history().plan_rebase(&request, &opts).expect("plan");
     assert!(
         matches!(plan, RebasePlan::UpToDate),

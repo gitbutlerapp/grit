@@ -22,8 +22,7 @@ use grit_lib::porcelain::tag::CreateTagRequest;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
-    RefUpdateFlags,
+    MemoryRefStore, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
@@ -221,17 +220,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     assert!(wt.join("b.txt").exists());
 
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: merged,
-            message: None,
-            tagger: None,
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(&CreateTagRequest::new("v1", merged))
         .expect("tag");
 
     repo.branches()
@@ -418,13 +407,10 @@ fn porcelain_battery_keeps_refs_head_and_reflogs_in_injected_store() {
     store
         .prepare(
             RefTransaction::new()
-                .update(RefUpdate {
-                    name: "HEAD".into(),
-                    new_value: Some(RawRef::Symbolic("refs/heads/main".into())),
-                    expected: Expected::Any,
-                    reflog: None,
-                    flags: RefUpdateFlags::default(),
-                })
+                .update(RefUpdate::new(
+                    "HEAD".into(),
+                    Some(RawRef::Symbolic("refs/heads/main".into())),
+                ))
                 .expect("txn"),
         )
         .expect("prepare")

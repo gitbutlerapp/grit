@@ -110,13 +110,7 @@ fn write_commit(repo: &Repository, message: &str, content: &[u8]) -> (ObjectId, 
 }
 
 fn put(refname: &str, oid: ObjectId) -> RefUpdate {
-    RefUpdate {
-        name: name(refname),
-        new_value: Some(RawRef::Direct(oid)),
-        expected: Expected::Any,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
-    }
+    RefUpdate::new(name(refname), Some(RawRef::Direct(oid)))
 }
 
 fn commit_updates(store: &dyn RefStore, updates: Vec<RefUpdate>) -> Result<(), RefStoreError> {
@@ -250,23 +244,13 @@ fn tags_and_remote_tracking_refs_may_point_at_any_object() {
 fn deletes_and_well_formed_symbolic_updates_commit_without_object_lookup() {
     each_format(|format, fx| {
         commit_updates(fx.repo.ref_store(), vec![put("refs/heads/gone", fx.commit)]).expect("seed");
-        let delete = RefUpdate {
-            name: name("refs/heads/gone"),
-            new_value: None,
-            expected: Expected::Oid(fx.commit),
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        };
-        let symbolic = RefUpdate {
-            name: name("refs/heads/alias"),
-            new_value: Some(RawRef::Symbolic("refs/heads/not-yet".to_owned())),
-            expected: Expected::Any,
-            reflog: None,
-            flags: RefUpdateFlags {
-                no_deref: true,
-                ..RefUpdateFlags::default()
-            },
-        };
+        let delete =
+            RefUpdate::new(name("refs/heads/gone"), None).with_expected(Expected::Oid(fx.commit));
+        let symbolic = RefUpdate::new(
+            name("refs/heads/alias"),
+            Some(RawRef::Symbolic("refs/heads/not-yet".to_owned())),
+        )
+        .with_flags(RefUpdateFlags::default().with_no_deref(true));
         commit_updates(fx.repo.ref_store(), vec![delete, symbolic])
             .unwrap_or_else(|err| panic!("{format:?}: {err}"));
         assert_eq!(fx.raw("refs/heads/gone"), None, "{format:?}");
@@ -314,22 +298,15 @@ fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
                 .map_or(0, |e| e.len())
         };
         let before = log_len();
-        let log_only = RefUpdate {
-            name: name("refs/heads/main"),
-            new_value: None,
-            expected: Expected::Any,
-            reflog: Some(ReflogUpdate {
+        let log_only = RefUpdate::new(name("refs/heads/main"), None)
+            .with_reflog(Some(ReflogUpdate {
                 identity: "Ref Verify <verify@example.com>".to_owned(),
                 message: "log only".to_owned(),
                 time: time::OffsetDateTime::UNIX_EPOCH,
                 old_oid: Some(fx.commit),
                 new_oid: Some(bogus()),
-            }),
-            flags: RefUpdateFlags {
-                log_only: true,
-                ..RefUpdateFlags::default()
-            },
-        };
+            }))
+            .with_flags(RefUpdateFlags::default().with_log_only(true));
         let err =
             commit_ref_update_on_store(fx.repo.ref_store(), log_only).expect_err("{format:?}");
         assert!(
@@ -353,13 +330,7 @@ fn invalid_symref(name: &str, target: &str) -> RefStoreError {
 }
 
 fn symref_update(refname: &str, target: &str) -> RefUpdate {
-    RefUpdate {
-        name: name(refname),
-        new_value: Some(RawRef::Symbolic(target.to_owned())),
-        expected: Expected::Any,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
-    }
+    RefUpdate::new(name(refname), Some(RawRef::Symbolic(target.to_owned())))
 }
 
 #[test]

@@ -124,13 +124,13 @@ pub fn run_expire(
     let now = context::wall_clock_now(env).unix_timestamp();
     let outcome = repo
         .reflogs()
-        .expire(&ExpireOptions {
-            now,
-            expire,
-            expire_unreachable,
-            all,
-            dry_run,
-        })
+        .expire(
+            &ExpireOptions::new(now)
+                .with_expire(expire)
+                .with_expire_unreachable(expire_unreachable)
+                .with_all(all)
+                .with_dry_run(dry_run),
+        )
         .context("reflog expire failed")?;
     Ok(ReflogExpireOutcome {
         entries_pruned: outcome.entries_pruned,

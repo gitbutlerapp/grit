@@ -13,7 +13,7 @@ use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
+    ApplyOptions, CommitEdit, HistoryEdits, RefScope, RewriteOptions,
 };
 
 use support::{
@@ -26,12 +26,10 @@ fn committer(seq: i64) -> String {
 }
 
 fn apply_opts() -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("Applier <apply@grit.test>"),
-        reflog_message: "history rewrite".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("Applier <apply@grit.test>"),
+        "history rewrite",
+    )
 }
 
 fn open_grit(wt: &std::path::Path) -> Repository {
@@ -171,13 +169,7 @@ fn plan_reword_tree_from_commit(
     grit.history()
         .plan_rewrite(
             &edits,
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(1).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(1).parse().expect("signature")),
         )
         .expect("plan")
 }
@@ -201,13 +193,7 @@ fn plan_reword(
     grit.history()
         .plan_rewrite(
             &edits,
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(1).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(1).parse().expect("signature")),
         )
         .expect("plan")
 }
@@ -237,13 +223,7 @@ fn plan_reword_with_tree(
     grit.history()
         .plan_rewrite(
             &edits,
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(1).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(1).parse().expect("signature")),
         )
         .expect("plan")
 }
@@ -347,13 +327,8 @@ fn apply_rewrite_refuses_when_head_moved_since_plan() {
         grit.history()
             .plan_rewrite(
                 &edits,
-                &RewriteOptions {
-                    scope: RefScope::Head,
-                    empty: EmptyPolicy::Drop,
-                    committer: committer(1).parse().expect("signature"),
-                    preserve_committer: false,
-                    sign: true,
-                },
+                &RewriteOptions::new(committer(1).parse().expect("signature"))
+                    .with_scope(RefScope::Head),
             )
             .expect("plan")
     };
@@ -502,13 +477,8 @@ fn apply_rewrite_bare_repository() {
         .history()
         .plan_rewrite(
             &edits,
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: committer(2).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(2).parse().expect("signature"))
+                .with_scope(RefScope::Head),
         )
         .expect("plan");
     grit.history()
@@ -894,13 +864,7 @@ fn plan_tip_tree_edits(
     grit.history()
         .plan_rewrite(
             &edits,
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(1).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(1).parse().expect("signature")),
         )
         .expect("plan")
 }

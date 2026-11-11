@@ -10,9 +10,7 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::history::{
-    EmptyPolicy, RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions};
 use grit_lib::test_support::inject::{
     test_patch_id_compute_call_count, test_reset_patch_id_compute_call_count,
 };
@@ -128,13 +126,11 @@ fn build_rebase_plan_fixture(
 fn bench_history_plan_rebase(c: &mut Criterion) {
     let onto_side = history_commit_count().max(10_000);
     let (_dir, repo, fork, onto, tip) = build_rebase_plan_fixture(onto_side);
-    let opts = RebaseOntoOptions::new(RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: "Bench <b@grit.test> 2 +0000".parse().expect("signature"),
-        preserve_committer: false,
-        sign: false,
-    });
+    let opts = RebaseOntoOptions::new(
+        RewriteOptions::new("Bench <b@grit.test> 2 +0000".parse().expect("signature"))
+            .with_scope(RefScope::Head)
+            .with_sign(false),
+    );
     let request = RebaseRequest {
         upstream: fork,
         onto: Some(onto),

@@ -33,13 +33,9 @@
 //!         parents: None,
 //!     },
 //! );
-//! let opts = RewriteOptions {
-//!     scope: RefScope::Branches,
-//!     empty: EmptyPolicy::Drop,
-//!     committer: "Rewriter <r@example.com> 1 +0000".parse()?,
-//!     preserve_committer: false,
-//!     sign: true,
-//! };
+//! let opts = RewriteOptions::new("Rewriter <r@example.com> 1 +0000".parse()?)
+//!     .with_scope(RefScope::Branches)
+//!     .with_empty(EmptyPolicy::Drop);
 //! let _plan = repo.history().plan_rewrite(&edits, &opts)?;
 //! # Ok(())
 //! # }

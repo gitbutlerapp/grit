@@ -35,20 +35,12 @@ fn git_oid(wt: &std::path::Path, spec: &str) -> ObjectId {
 }
 
 fn rebase_opts() -> RebaseOntoOptions {
-    RebaseOntoOptions {
-        pre_rebase: grit_lib::revwalk::history::PreRebase::Skip,
-        rewrite: RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: COMMITTER.parse().expect("signature"),
-            preserve_committer: false,
-            sign: false,
-        },
-        skip_applied: false,
-        flatten_leaf_merges: false,
-        favor: grit_lib::diff::merge_file::MergeFavor::default(),
-        drop: Vec::new(),
-    }
+    RebaseOntoOptions::new(
+        RewriteOptions::new(COMMITTER.parse().expect("signature"))
+            .with_scope(RefScope::Head)
+            .with_sign(false),
+    )
+    .with_skip_applied(false)
 }
 
 fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> StartRebaseOptions {
@@ -59,12 +51,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
             branch_tip: tip,
         },
         rebase: rebase_opts(),
-        apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: test_ident(),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
         exec: None,
     }
 }
@@ -124,12 +111,8 @@ fn assert_head_reflog_chain(wt: &std::path::Path) {
 fn rebase_apply_opts(
     reflog_message: impl Into<String>,
 ) -> grit_lib::revwalk::history::ApplyOptions {
-    grit_lib::revwalk::history::ApplyOptions {
-        identity: test_ident(),
-        reflog_message: reflog_message.into(),
-        record_operation: Some("rebase".into()),
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    grit_lib::revwalk::history::ApplyOptions::new(test_ident(), reflog_message)
+        .with_record_operation(Some("rebase".into()))
 }
 
 fn commit_file(wt: &std::path::Path, path: &str, contents: &str, msg: &str) {
@@ -1986,12 +1969,7 @@ fn stacked_branches_move_atomically_after_continue() {
             branch_tip,
         },
         rebase: opts,
-        apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: test_ident(),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
         exec: None,
     };
     let main_before = grit.references().resolve("refs/heads/main").unwrap();
@@ -2063,12 +2041,7 @@ fn git_rebase_continue_leaves_stacked_branch_untouched_on_primary_conflict() {
             branch_tip: a_tip,
         },
         rebase: opts.clone(),
-        apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: test_ident(),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
         exec: None,
     };
 
@@ -2149,12 +2122,7 @@ fn git_rebase_continue_todo_excludes_descendant_merge_commit() {
             branch_tip: a_tip,
         },
         rebase: opts,
-        apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: test_ident(),
-            reflog_message: "rebase".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
         exec: None,
     };
 
@@ -4402,21 +4370,12 @@ fn rebase_merge_replay_one_conflict_keeps_merge_parents_issue_2245() {
 }
 
 fn rebase_apply_with_record() -> grit_lib::revwalk::history::ApplyOptions {
-    grit_lib::revwalk::history::ApplyOptions {
-        identity: test_ident(),
-        reflog_message: "rebase".into(),
-        record_operation: Some("rebase".into()),
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase")
+        .with_record_operation(Some("rebase".into()))
 }
 
 fn undo_opts() -> grit_lib::revwalk::history::ApplyOptions {
-    grit_lib::revwalk::history::ApplyOptions {
-        identity: test_ident(),
-        reflog_message: "history undo".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "history undo")
 }
 
 fn finish_conflict_rebase_with_record(

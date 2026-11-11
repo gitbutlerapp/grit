@@ -27,13 +27,8 @@ fn repo_with_many_loose_tags(dir: &Path, count: usize) -> (PathBuf, ObjectId) {
 }
 
 fn prepare_branch_zz(store: &FilesRefStore, tip: ObjectId) {
-    let update = RefUpdate {
-        name: "refs/heads/zz".to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
+    let update = RefUpdate::new("refs/heads/zz".to_owned(), Some(RawRef::Direct(tip)))
+        .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
     store.prepare(txn).expect("prepare branch create");
 }
@@ -69,13 +64,8 @@ fn create_tag_with_many_loose_tags_still_rejects_casefold_collision() {
         common_dir: git_dir,
         namespace_prefix: None,
     });
-    let update = RefUpdate {
-        name: "refs/tags/foo".to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
+    let update = RefUpdate::new("refs/tags/foo".to_owned(), Some(RawRef::Direct(tip)))
+        .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
     assert!(matches!(
         store.prepare(txn),
@@ -97,13 +87,8 @@ fn create_rejects_loose_nested_casefold_path_collision() {
         common_dir: git_dir,
         namespace_prefix: None,
     });
-    let update = RefUpdate {
-        name: "refs/heads/foo/baz".to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
+    let update = RefUpdate::new("refs/heads/foo/baz".to_owned(), Some(RawRef::Direct(tip)))
+        .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
     assert!(
         store.prepare(txn).is_err(),
@@ -134,13 +119,8 @@ fn create_rejects_packed_nested_casefold_path_collision() {
         common_dir: git_dir,
         namespace_prefix: None,
     });
-    let update = RefUpdate {
-        name: "refs/heads/foo/baz".to_owned(),
-        new_value: Some(RawRef::Direct(tip)),
-        expected: Expected::Missing,
-        reflog: None,
-        flags: Default::default(),
-    };
+    let update = RefUpdate::new("refs/heads/foo/baz".to_owned(), Some(RawRef::Direct(tip)))
+        .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
     assert!(matches!(
         store.prepare(txn),

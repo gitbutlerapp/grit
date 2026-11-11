@@ -58,12 +58,10 @@ fn grep_body_only_with_through_subject_retention_matches_git() {
             .expect("filter"),
     );
     let git_oids = git_rev_list(wt, &["--grep=needle-only-in-body", "main"]);
-    let walk = RevWalkListOptions {
-        commit_filter: Some(filter),
-        retain_commit_data: true,
-        retained_commit_extent: CommitExtent::ThroughSubject,
-        ..RevWalkListOptions::default()
-    };
+    let walk = RevWalkListOptions::default()
+        .with_commit_filter(Some(filter))
+        .with_retain_commit_data(true)
+        .with_retained_commit_extent(CommitExtent::ThroughSubject);
     let grit_oids = grit_rev_list_oids(&repo, &["main"], &walk);
     assert_eq!(
         grit_oids.iter().map(ObjectId::to_hex).collect::<Vec<_>>(),

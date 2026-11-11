@@ -730,7 +730,7 @@ fn reftable_transaction_one_table_single_update_index() {
 
 #[test]
 fn non_atomic_batch_create_one_reftable_table() {
-    use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+    use grit_lib::refs::store::{RawRef, RefUpdate};
 
     each_backend(|backend, repo| {
         if backend != Backend::Reftable {
@@ -739,13 +739,7 @@ fn non_atomic_batch_create_one_reftable_table() {
         let git_dir = repo.git_dir();
         let (_, tip) = two_commit_oids(&repo);
         let updates: Vec<RefUpdate> = (0..40)
-            .map(|i| RefUpdate {
-                name: format!("refs/heads/batch-{i}"),
-                new_value: Some(RawRef::Direct(tip)),
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            })
+            .map(|i| RefUpdate::new(format!("refs/heads/batch-{i}"), Some(RawRef::Direct(tip))))
             .collect();
         let (_, count_before) = reftable_tables_snapshot(&git_dir);
         grit_test_support::refs::at(&git_dir)
@@ -773,26 +767,17 @@ fn non_atomic_batch_create_one_reftable_table() {
 
 #[test]
 fn non_atomic_allow_failure_updates_siblings_in_one_table() {
-    use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+    use grit_lib::refs::store::{RawRef, RefUpdate};
 
     each_backend(|backend, repo| {
         let git_dir = repo.git_dir();
         let (_, tip) = two_commit_oids(&repo);
         let updates = vec![
-            RefUpdate {
-                name: "refs/heads/parent".to_owned(),
-                new_value: Some(RawRef::Direct(tip)),
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            },
-            RefUpdate {
-                name: "refs/heads/parent/child".to_owned(),
-                new_value: Some(RawRef::Direct(tip)),
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            },
+            RefUpdate::new("refs/heads/parent".to_owned(), Some(RawRef::Direct(tip))),
+            RefUpdate::new(
+                "refs/heads/parent/child".to_owned(),
+                Some(RawRef::Direct(tip)),
+            ),
         ];
         let count_before = if backend == Backend::Reftable {
             reftable_tables_snapshot(&git_dir).1
@@ -829,7 +814,7 @@ fn non_atomic_allow_failure_updates_siblings_in_one_table() {
 
 #[test]
 fn non_atomic_delete_then_create_two_reftable_tables() {
-    use grit_lib::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
+    use grit_lib::refs::store::{RawRef, RefUpdate};
 
     each_backend(|backend, repo| {
         if backend != Backend::Reftable {
@@ -844,20 +829,8 @@ fn non_atomic_delete_then_create_two_reftable_tables() {
         )
         .expect("seed delete");
         let updates = vec![
-            RefUpdate {
-                name: "refs/heads/to-drop".to_owned(),
-                new_value: None,
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            },
-            RefUpdate {
-                name: "refs/heads/fresh".to_owned(),
-                new_value: Some(RawRef::Direct(tip)),
-                expected: Expected::Any,
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            },
+            RefUpdate::new("refs/heads/to-drop".to_owned(), None),
+            RefUpdate::new("refs/heads/fresh".to_owned(), Some(RawRef::Direct(tip))),
         ];
         let (_, count_before) = reftable_tables_snapshot(&git_dir);
         grit_test_support::refs::at(&git_dir)

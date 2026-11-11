@@ -187,10 +187,7 @@ fn default_order_unlimited_matches_bounded_and_git() {
             &CancelToken::never(),
         )
         .expect("commits unlimited");
-    let huge_limit = RevWalkListOptions {
-        limit: Some(1_000_000),
-        ..RevWalkListOptions::default()
-    };
+    let huge_limit = RevWalkListOptions::default().with_limit(Some(1_000_000));
     let bounded = walk
         .commits(
             &["HEAD"],
@@ -239,10 +236,7 @@ fn default_order_unlimited_matches_bounded_and_git() {
         let limited = walk
             .commits(
                 &["HEAD"],
-                &RevWalkListOptions {
-                    limit: Some(n),
-                    ..RevWalkListOptions::default()
-                },
+                &RevWalkListOptions::default().with_limit(Some(n)),
                 &mut NullProgress,
                 &CancelToken::never(),
             )
@@ -977,10 +971,7 @@ fn symmetric_diff_left_right_cherry_mark_match_git() {
 }
 
 fn cherry_mark_walk(repo: &grit_lib::repo::Repository, token: &str) -> RevListResult {
-    let opts = RevWalkListOptions {
-        cherry_mark: true,
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default().with_cherry_mark(true);
     repo.revwalk()
         .rev_list_result(&[token], &opts, &mut NullProgress, &CancelToken::never())
         .expect("cherry-mark walk")
@@ -1097,15 +1088,10 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
     let grit = open_grit_repo(wt);
     let walk = grit.revwalk();
     for opts in [
-        RevWalkListOptions {
-            cherry_mark: true,
-            ..RevWalkListOptions::default()
-        },
-        RevWalkListOptions {
-            left_right: true,
-            limit: Some(1),
-            ..RevWalkListOptions::default()
-        },
+        RevWalkListOptions::default().with_cherry_mark(true),
+        RevWalkListOptions::default()
+            .with_left_right(true)
+            .with_limit(Some(1)),
     ] {
         for tokens in [&["feat"][..], &["main..feat"], &["old-feat...feat", "main"]] {
             let err = walk
@@ -1140,10 +1126,7 @@ fn cherry_mark_and_left_right_require_one_symmetric_range() {
         )
     );
 
-    let opts = RevWalkListOptions {
-        left_right: true,
-        ..RevWalkListOptions::default()
-    };
+    let opts = RevWalkListOptions::default().with_left_right(true);
     let result = walk
         .rev_list_result(
             &["old-feat...feat"],

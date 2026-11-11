@@ -8,7 +8,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::reftable::ReftableStack;
 use grit_lib::refs::store::ReftableRefStore;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate, ReflogUpdate,
 };
 
 use support::{
@@ -48,13 +48,11 @@ fn reftable_store_git_roundtrip() {
     for i in 0..1000_u16 {
         let name = format!("refs/heads/rt-{i:04}");
         txn = txn
-            .update(RefUpdate {
-                name,
-                new_value: Some(RawRef::Direct(oid(((i % 199) + 1) as u8))),
-                expected: Expected::Missing,
-                reflog: Some(sample_log(((i % 199) + 1) as u8)),
-                flags: RefUpdateFlags::default(),
-            })
+            .update(
+                RefUpdate::new(name, Some(RawRef::Direct(oid(((i % 199) + 1) as u8))))
+                    .with_expected(Expected::Missing)
+                    .with_reflog(Some(sample_log(((i % 199) + 1) as u8))),
+            )
             .expect("queue update");
     }
     store
@@ -201,13 +199,13 @@ fn reftable_reflog_identity_with_digits_in_name_visible_to_git() {
     let identity = "Alice2 <alice@example.com>";
 
     let seed = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/digit-name".to_owned(),
-            new_value: Some(RawRef::Direct(oid_a)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: RefUpdateFlags::default(),
-        })
+        .update(
+            RefUpdate::new(
+                "refs/heads/digit-name".to_owned(),
+                Some(RawRef::Direct(oid_a)),
+            )
+            .with_expected(Expected::Missing),
+        )
         .expect("seed txn");
     store
         .prepare(seed)
@@ -216,19 +214,19 @@ fn reftable_reflog_identity_with_digits_in_name_visible_to_git() {
         .expect("seed commit");
 
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/digit-name".to_owned(),
-            new_value: Some(RawRef::Direct(oid_b)),
-            expected: Expected::Any,
-            reflog: Some(ReflogUpdate {
+        .update(
+            RefUpdate::new(
+                "refs/heads/digit-name".to_owned(),
+                Some(RawRef::Direct(oid_b)),
+            )
+            .with_reflog(Some(ReflogUpdate {
                 identity: identity.to_owned(),
                 message: String::new(),
                 time,
                 old_oid: None,
                 new_oid: None,
-            }),
-            flags: RefUpdateFlags::default(),
-        })
+            })),
+        )
         .expect("txn");
     store
         .prepare(txn)

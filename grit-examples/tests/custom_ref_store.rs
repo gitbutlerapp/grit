@@ -38,13 +38,13 @@ fn counting_ref_store_tracks_operations() -> grit_lib::error::Result<()> {
     assert!(listed.iter().any(|(n, _)| n == "refs/heads/wrapped"));
     assert!(counting.for_each_ref_calls() >= 1);
 
-    let txn = RefTransaction::new().update(RefUpdate {
-        name: RefName::from_trusted("refs/heads/wrapped"),
-        new_value: Some(RawRef::Direct(oid)),
-        expected: Expected::Oid(oid),
-        reflog: None,
-        flags: grit_lib::refs::store::RefUpdateFlags::default(),
-    })?;
+    let txn = RefTransaction::new().update(
+        RefUpdate::new(
+            RefName::from_trusted("refs/heads/wrapped"),
+            Some(RawRef::Direct(oid)),
+        )
+        .with_expected(Expected::Oid(oid)),
+    )?;
     counting.prepare(txn)?.commit()?;
     assert_eq!(counting.prepare_calls(), 1);
     Ok(())

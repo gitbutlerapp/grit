@@ -108,7 +108,10 @@ pub enum EmptyPolicy {
 }
 
 /// Inputs for [`History::plan_rewrite`](super::History::plan_rewrite) and the other history edits.
+///
+/// Build with [`RewriteOptions::new`] and the `with_*` setters.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct RewriteOptions {
     /// Which refs to consider when collecting tips and ref updates.
     pub scope: RefScope,
@@ -127,10 +130,63 @@ pub struct RewriteOptions {
 }
 
 impl RewriteOptions {
+    /// Rewrite options with `committer` for new commits: update every descendant branch
+    /// ([`RefScope::Branches`]), drop commits that become empty ([`EmptyPolicy::Drop`]), write
+    /// `committer` on replayed commits and honor `commit.gpgsign` (`sign` is `true`).
+    ///
+    /// # Parameters
+    ///
+    /// - `committer`: identity and timestamp recorded on every commit the rewrite writes.
+    #[must_use]
+    pub fn new(committer: Signature) -> Self {
+        Self {
+            scope: RefScope::default(),
+            empty: EmptyPolicy::default(),
+            committer,
+            preserve_committer: false,
+            sign: true,
+        }
+    }
+
     /// The validated header line for [`Self::committer`], checked before any object is written.
     pub(crate) fn committer_line(&self) -> crate::error::Result<String> {
         self.committer.validate()?;
         Ok(self.committer.header_line())
+    }
+
+    /// Sets [`scope`](Self::scope).
+    #[must_use]
+    pub fn with_scope(mut self, scope: RefScope) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    /// Sets [`empty`](Self::empty).
+    #[must_use]
+    pub fn with_empty(mut self, empty: EmptyPolicy) -> Self {
+        self.empty = empty;
+        self
+    }
+
+    /// Sets [`committer`](Self::committer).
+    #[must_use]
+    pub fn with_committer(mut self, committer: Signature) -> Self {
+        self.committer = committer;
+        self
+    }
+
+    /// Sets [`preserve_committer`](Self::preserve_committer).
+    #[must_use]
+    pub fn with_preserve_committer(mut self, preserve_committer: bool) -> Self {
+        self.preserve_committer = preserve_committer;
+        self
+    }
+
+    /// Sets [`sign`](Self::sign).
+    #[must_use]
+    pub fn with_sign(mut self, sign: bool) -> Self {
+        self.sign = sign;
+        self
     }
 }
 
@@ -253,7 +309,10 @@ impl RewritePlan {
 }
 
 /// Identity and reflog text recorded when [`History::apply`](super::History::apply) moves refs.
+///
+/// Build with [`ApplyOptions::new`] and the `with_*` setters.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct ApplyOptions {
     /// Committer identity for reflog entries (timestamp is taken from the signature).
     #[serde(with = "signature_header_line")]
@@ -270,6 +329,53 @@ pub struct ApplyOptions {
     /// after the rewrite is applied.
     #[serde(default)]
     pub hooks: crate::hooks::PostOperationHooks,
+}
+
+impl ApplyOptions {
+    /// Apply options that record `identity` and `reflog_message` on every ref update, write no
+    /// operation record and run post-operation hooks.
+    ///
+    /// # Parameters
+    ///
+    /// - `identity`: committer identity (and timestamp) for the reflog entries.
+    /// - `reflog_message`: reflog message for every ref update in the batch.
+    #[must_use]
+    pub fn new(identity: Signature, reflog_message: impl Into<String>) -> Self {
+        Self {
+            identity,
+            reflog_message: reflog_message.into(),
+            record_operation: None,
+            hooks: crate::hooks::PostOperationHooks::default(),
+        }
+    }
+
+    /// Sets [`identity`](Self::identity).
+    #[must_use]
+    pub fn with_identity(mut self, identity: Signature) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Sets [`reflog_message`](Self::reflog_message).
+    #[must_use]
+    pub fn with_reflog_message(mut self, reflog_message: String) -> Self {
+        self.reflog_message = reflog_message;
+        self
+    }
+
+    /// Sets [`record_operation`](Self::record_operation).
+    #[must_use]
+    pub fn with_record_operation(mut self, record_operation: Option<String>) -> Self {
+        self.record_operation = record_operation;
+        self
+    }
+
+    /// Sets [`hooks`](Self::hooks).
+    #[must_use]
+    pub fn with_hooks(mut self, hooks: crate::hooks::PostOperationHooks) -> Self {
+        self.hooks = hooks;
+        self
+    }
 }
 
 /// Whether [`History::undo_last`](super::History::undo_last) moves refs or only reports what it

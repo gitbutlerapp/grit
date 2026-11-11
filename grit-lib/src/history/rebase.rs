@@ -238,6 +238,7 @@ pub enum RebasePlan {
 
 /// Options for [`History::rebase_onto`](super::History::rebase_onto) and [`History::plan_rebase`](super::History::plan_rebase).
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[non_exhaustive]
 pub struct RebaseOntoOptions {
     /// Scope, empty-commit policy, and committer ident for replayed commits.
     pub rewrite: RewriteOptions,
@@ -291,6 +292,48 @@ impl RebaseOntoOptions {
             drop: Vec::new(),
             pre_rebase: PreRebase::Skip,
         }
+    }
+
+    /// Sets [`rewrite`](Self::rewrite).
+    #[must_use]
+    pub fn with_rewrite(mut self, rewrite: RewriteOptions) -> Self {
+        self.rewrite = rewrite;
+        self
+    }
+
+    /// Sets [`skip_applied`](Self::skip_applied).
+    #[must_use]
+    pub fn with_skip_applied(mut self, skip_applied: bool) -> Self {
+        self.skip_applied = skip_applied;
+        self
+    }
+
+    /// Sets [`flatten_leaf_merges`](Self::flatten_leaf_merges).
+    #[must_use]
+    pub fn with_flatten_leaf_merges(mut self, flatten_leaf_merges: bool) -> Self {
+        self.flatten_leaf_merges = flatten_leaf_merges;
+        self
+    }
+
+    /// Sets [`favor`](Self::favor).
+    #[must_use]
+    pub fn with_favor(mut self, favor: MergeFavor) -> Self {
+        self.favor = favor;
+        self
+    }
+
+    /// Sets [`drop`](Self::drop).
+    #[must_use]
+    pub fn with_drop(mut self, drop: Vec<ObjectId>) -> Self {
+        self.drop = drop;
+        self
+    }
+
+    /// Sets [`pre_rebase`](Self::pre_rebase).
+    #[must_use]
+    pub fn with_pre_rebase(mut self, pre_rebase: PreRebase) -> Self {
+        self.pre_rebase = pre_rebase;
+        self
     }
 }
 

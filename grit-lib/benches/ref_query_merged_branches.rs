@@ -70,11 +70,9 @@ fn bench_merged_branches(c: &mut Criterion) {
     let mut group = c.benchmark_group("ref_query_merged_branches");
     group.bench_function("grit_merged_branches", |b| {
         b.iter(|| {
-            let query = RefQuery {
-                namespaces: vec![RefNamespace::Heads],
-                merged: vec![merged],
-                ..RefQuery::default()
-            };
+            let query = RefQuery::default()
+                .with_namespaces(vec![RefNamespace::Heads])
+                .with_merged(vec![merged]);
             let n = repo
                 .references()
                 .query(&query, &RefQueryOptions::default())

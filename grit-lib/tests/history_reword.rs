@@ -8,8 +8,7 @@ use grit_lib::objects::{parse_commit, parse_tree, ObjectId};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    normalize_rewrite_message, ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewordOptions,
-    RewriteOptions,
+    normalize_rewrite_message, ApplyOptions, HistoryError, RefScope, RewordOptions, RewriteOptions,
 };
 
 use support::{
@@ -47,13 +46,7 @@ fn reword_changes_only_message_and_replays_descendants() {
         .reword(
             oids["b"],
             &RewordOptions::default().with_message("second reworded\n"),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(1).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(1).parse().expect("signature")),
         )
         .expect("reword");
     let b_row = plan
@@ -101,13 +94,7 @@ fn reword_rejects_unwritable_committer_before_writing_objects() {
         .reword(
             oids["b"],
             &RewordOptions::default().with_message("second reworded\n"),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: injected,
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(injected),
         )
         .expect_err("unwritable committer");
     assert!(
@@ -127,13 +114,7 @@ fn reword_rejects_unwritable_committer_before_writing_objects() {
 }
 
 fn rewrite_opts(seq: i64) -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: committer(seq).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    }
+    RewriteOptions::new(committer(seq).parse().expect("signature"))
 }
 
 fn git_log_author_fields(wt: &std::path::Path, rev: &str) -> String {
@@ -166,12 +147,10 @@ fn reword_author_only_keeps_message_and_date() {
     grit.history()
         .apply(
             &plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "history reword".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <r@grit.test>"),
+                "history reword",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -215,12 +194,10 @@ fn reword_author_and_message() {
     grit.history()
         .apply(
             &plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "history reword".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <r@grit.test>"),
+                "history reword",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -302,13 +279,8 @@ fn reword_rejects_empty_message() {
         .reword(
             oids["b"],
             &RewordOptions::default().with_message("  \t\n"),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: committer(1).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(1).parse().expect("signature"))
+                .with_scope(RefScope::Head),
         )
         .unwrap_err();
     assert!(matches!(err, HistoryError::EmptyMessage));
@@ -347,13 +319,8 @@ fn reword_in_bare_repository() {
         .reword(
             oid,
             &RewordOptions::default().with_message("bare reword\n"),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: committer(2).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(2).parse().expect("signature"))
+                .with_scope(RefScope::Head),
         )
         .expect("reword bare");
     let new = plan
@@ -414,24 +381,16 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
         .reword(
             root,
             &RewordOptions::default().with_message("rewritten root\n"),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(10).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(10).parse().expect("signature")),
         )
         .expect("reword root");
     grit.history()
         .apply(
             &plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <rewriter@test>"),
-                reflog_message: "history reword".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <rewriter@test>"),
+                "history reword",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -461,12 +420,10 @@ fn apply_reword(grit: &Repository, plan: &grit_lib::revwalk::history::RewritePla
     grit.history()
         .apply(
             plan,
-            &ApplyOptions {
-                identity: support::reflog_signature("Rewriter <r@grit.test>"),
-                reflog_message: "history reword".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(
+                support::reflog_signature("Rewriter <r@grit.test>"),
+                "history reword",
+            ),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )

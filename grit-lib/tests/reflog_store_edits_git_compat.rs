@@ -121,13 +121,11 @@ fn files_repo_reflog_edits_stay_readable_by_git() {
 
     let out = repo
         .reflogs()
-        .expire(&ExpireOptions {
-            now: 1_800_000_000,
-            expire: Some("now".into()),
-            expire_unreachable: Some("now".into()),
-            all: false,
-            dry_run: false,
-        })
+        .expire(
+            &ExpireOptions::new(1_800_000_000)
+                .with_expire(Some("now".into()))
+                .with_expire_unreachable(Some("now".into())),
+        )
         .expect("expire");
     assert_eq!(out.entries_pruned, 7);
     assert!(

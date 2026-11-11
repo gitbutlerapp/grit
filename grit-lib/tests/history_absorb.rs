@@ -24,22 +24,15 @@ fn open_grit(wt: &std::path::Path) -> Repository {
 }
 
 fn rewrite_opts() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Head,
-        empty: EmptyPolicy::Drop,
-        committer: "Absorb <a@grit.test> 1 +0000".parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    }
+    RewriteOptions::new("Absorb <a@grit.test> 1 +0000".parse().expect("signature"))
+        .with_scope(RefScope::Head)
 }
 
 fn apply_opts() -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("Absorb <a@grit.test>"),
-        reflog_message: "history absorb".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("Absorb <a@grit.test>"),
+        "history absorb",
+    )
 }
 
 fn fixup_opts() -> FixupOptions {

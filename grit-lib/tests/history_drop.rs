@@ -12,9 +12,7 @@ use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, HistoryError, RefScope, RewriteOptions,
-};
+use grit_lib::revwalk::history::{ApplyOptions, HistoryError, RefScope, RewriteOptions};
 
 use support::{build_commit_dag, commit_file, git, git_fsck_strict, git_rev_parse, HistoryRepo};
 
@@ -31,22 +29,14 @@ fn open_grit(wt: &std::path::Path) -> Repository {
 }
 
 fn opts(seq: i64) -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: EmptyPolicy::Drop,
-        committer: committer(seq).parse().expect("signature"),
-        preserve_committer: false,
-        sign: true,
-    }
+    RewriteOptions::new(committer(seq).parse().expect("signature"))
 }
 
 fn apply_opts() -> ApplyOptions {
-    ApplyOptions {
-        identity: support::reflog_signature("Dropper <drop@grit.test>"),
-        reflog_message: "history drop".into(),
-        record_operation: None,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-    }
+    ApplyOptions::new(
+        support::reflog_signature("Dropper <drop@grit.test>"),
+        "history drop",
+    )
 }
 
 fn write_tree_with_blob(
@@ -361,13 +351,7 @@ fn drop_with_head_scope_leaves_conflicting_sibling_alone() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .drop_commit(
-            fx.c2,
-            &RewriteOptions {
-                scope: RefScope::Head,
-                ..opts(11)
-            },
-        )
+        .drop_commit(fx.c2, &opts(11).with_scope(RefScope::Head))
         .expect("HEAD's branch replays cleanly");
     grit.history()
         .apply(
@@ -441,13 +425,8 @@ fn history_drop_matches_git_rebase_drop() {
         .history()
         .drop_commit(
             b.parse().expect("oid"),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: replay_committer.parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(replay_committer.parse().expect("signature"))
+                .with_scope(RefScope::Head),
         )
         .expect("plan");
     grit.history()
@@ -531,13 +510,8 @@ fn history_drop_matches_git_history_when_available() {
         .history()
         .drop_commit(
             b.parse().expect("oid"),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: replay_committer.parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(replay_committer.parse().expect("signature"))
+                .with_scope(RefScope::Head),
         )
         .expect("plan");
     grit.history()

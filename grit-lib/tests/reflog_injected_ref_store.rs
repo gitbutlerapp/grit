@@ -92,13 +92,11 @@ fn head() -> RefName {
 }
 
 fn expire_now(all: bool, dry_run: bool) -> ExpireOptions {
-    ExpireOptions {
-        now: 1_800_000_000,
-        expire: Some("now".into()),
-        expire_unreachable: Some("now".into()),
-        all,
-        dry_run,
-    }
+    ExpireOptions::new(1_800_000_000)
+        .with_expire(Some("now".into()))
+        .with_expire_unreachable(Some("now".into()))
+        .with_all(all)
+        .with_dry_run(dry_run)
 }
 
 #[test]
@@ -262,13 +260,11 @@ fn injected_store_unreachable_expiry_keeps_reachable_entries() {
     // (which needs those tips) applies and nothing is pruned.
     let out = repo
         .reflogs()
-        .expire(&ExpireOptions {
-            now: 1_800_000_000,
-            expire: Some("never".into()),
-            expire_unreachable: Some("now".into()),
-            all: false,
-            dry_run: false,
-        })
+        .expire(
+            &ExpireOptions::new(1_800_000_000)
+                .with_expire(Some("never".into()))
+                .with_expire_unreachable(Some("now".into())),
+        )
         .expect("expire unreachable");
     assert_eq!(out.entries_pruned, 0);
     assert_eq!(store_count(store.as_ref(), "HEAD"), 3);

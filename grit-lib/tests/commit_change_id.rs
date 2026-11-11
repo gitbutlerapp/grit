@@ -677,7 +677,7 @@ fn signed_commit_with_change_id_verifies() {
 
 #[test]
 fn rewritten_commit_records_change_id_on_reword() {
-    use grit_lib::revwalk::history::{EmptyPolicy, RefScope, RewriteOptions};
+    use grit_lib::revwalk::history::{RefScope, RewriteOptions};
 
     let root = grit_test_support::unique_tmp("rewrite-change-id", "lib");
     let repo = init_repo(&root, "");
@@ -718,13 +718,9 @@ fn rewritten_commit_records_change_id_on_reword() {
         .reword(
             target,
             &grit_lib::revwalk::history::RewordOptions::default().with_message("first reworded\n"),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: ident(),
-                preserve_committer: false,
-                sign: false,
-            },
+            &RewriteOptions::new(ident())
+                .with_scope(RefScope::Head)
+                .with_sign(false),
         )
         .expect("reword plan");
     let row = plan
@@ -742,9 +738,7 @@ fn rewritten_commit_records_change_id_on_reword() {
 
 #[test]
 fn squash_fold_preserves_oldest_change_id() {
-    use grit_lib::revwalk::history::{
-        EmptyPolicy, RefScope, RewriteOptions, SquashMessage, SquashOptions,
-    };
+    use grit_lib::revwalk::history::{RefScope, RewriteOptions, SquashMessage, SquashOptions};
 
     let root = grit_test_support::unique_tmp("squash-change-id", "lib");
     let gen: Arc<dyn ChangeIdGenerator> = Arc::new(SeqGenerator(Arc::new(AtomicUsize::new(0))));
@@ -812,13 +806,9 @@ fn squash_fold_preserves_oldest_change_id() {
             &[range.as_str()],
             &SquashOptions {
                 message: SquashMessage::Custom("squashed\n".into()),
-                rewrite: RewriteOptions {
-                    scope: RefScope::Head,
-                    empty: EmptyPolicy::Drop,
-                    committer: ident(),
-                    preserve_committer: false,
-                    sign: false,
-                },
+                rewrite: RewriteOptions::new(ident())
+                    .with_scope(RefScope::Head)
+                    .with_sign(false),
             },
         )
         .expect("squash plan");
@@ -840,7 +830,7 @@ fn squash_fold_preserves_oldest_change_id() {
 #[test]
 fn reword_preserves_derived_change_id_for_headerless_git_commit() {
     use grit_lib::change_id::ChangeId;
-    use grit_lib::revwalk::history::{ApplyOptions, EmptyPolicy, RefScope, RewriteOptions};
+    use grit_lib::revwalk::history::{ApplyOptions, RefScope, RewriteOptions};
 
     let root = grit_test_support::unique_tmp("reword-derived-id", "lib");
     git(&root, &["init", "-q", "-b", "main"]);
@@ -862,13 +852,9 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
         .reword(
             target,
             &grit_lib::revwalk::history::RewordOptions::default().with_message("first reworded\n"),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: ident(),
-                preserve_committer: false,
-                sign: false,
-            },
+            &RewriteOptions::new(ident())
+                .with_scope(RefScope::Head)
+                .with_sign(false),
         )
         .expect("reword");
     let row = plan
@@ -883,12 +869,7 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
     repo.history()
         .apply(
             &plan,
-            &ApplyOptions {
-                identity: ident(),
-                reflog_message: "reword".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &ApplyOptions::new(ident(), "reword"),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )

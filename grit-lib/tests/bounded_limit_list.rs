@@ -952,10 +952,7 @@ fn merge_tip_limit_two_uses_date_order_not_first_parent() {
         .revwalk()
         .rev_list_result(
             &[merge_hex.as_str()],
-            &RevWalkListOptions {
-                limit: Some(2),
-                ..Default::default()
-            },
+            &RevWalkListOptions::default().with_limit(Some(2)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -990,10 +987,7 @@ fn non_commit_tip_skips_fast_path_and_matches_rev_list() {
     );
     let walk = repo.revwalk().rev_list_result(
         &["tree-tag"],
-        &RevWalkListOptions {
-            limit: Some(1),
-            ..Default::default()
-        },
+        &RevWalkListOptions::default().with_limit(Some(1)),
         &mut NullProgress,
         &CancelToken::never(),
     );
@@ -1017,10 +1011,7 @@ fn rev_walk_single_positive_limit_one_matches_git() {
         .revwalk()
         .rev_list_result(
             &["HEAD~20"],
-            &RevWalkListOptions {
-                limit: Some(1),
-                ..Default::default()
-            },
+            &RevWalkListOptions::default().with_limit(Some(1)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1038,11 +1029,9 @@ fn rev_walk_forwards_retain_commit_data() {
         .revwalk()
         .rev_list_result(
             &[tip_hex.as_str()],
-            &RevWalkListOptions {
-                limit: Some(10),
-                retain_commit_data: true,
-                ..Default::default()
-            },
+            &RevWalkListOptions::default()
+                .with_limit(Some(10))
+                .with_retain_commit_data(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1096,11 +1085,9 @@ fn retained_page_from_git_pack_matches_git_order_and_commit_bodies() {
             .revwalk()
             .rev_list_result(
                 &["HEAD"],
-                &RevWalkListOptions {
-                    limit: Some(limit),
-                    retain_commit_data: true,
-                    ..Default::default()
-                },
+                &RevWalkListOptions::default()
+                    .with_limit(Some(limit))
+                    .with_retain_commit_data(true),
                 &mut NullProgress,
                 &CancelToken::never(),
             )
@@ -1267,15 +1254,13 @@ fn bounded_parent_filter_rev_walk_matches_git() {
             .revwalk()
             .rev_list_result(
                 &["HEAD"],
-                &RevWalkListOptions {
-                    limit: Some(limit),
-                    merges: if merges_only {
+                &RevWalkListOptions::default()
+                    .with_limit(Some(limit))
+                    .with_merges(if merges_only {
                         grit_lib::revwalk::MergeFilter::OnlyMerges
                     } else {
                         grit_lib::revwalk::MergeFilter::NoMerges
-                    },
-                    ..Default::default()
-                },
+                    }),
                 &mut NullProgress,
                 &CancelToken::never(),
             )

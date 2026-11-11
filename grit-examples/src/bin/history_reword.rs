@@ -7,9 +7,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{
-    ApplyOptions, EmptyPolicy, RefScope, RewordOptions, RewriteOptions,
-};
+use grit_lib::revwalk::history::{ApplyOptions, RefScope, RewordOptions, RewriteOptions};
 use grit_lib::revwalk::{Peel, ResolveOptions};
 
 use std::path::{Path, PathBuf};
@@ -44,13 +42,8 @@ fn main() -> Result<()> {
     let plan = history.reword(
         commit,
         &RewordOptions::default().with_message(message),
-        &RewriteOptions {
-            scope: RefScope::Head,
-            empty: EmptyPolicy::Drop,
-            committer: "History Guide <guide@grit.test> 1 +0000".parse()?,
-            preserve_committer: false,
-            sign: true,
-        },
+        &RewriteOptions::new("History Guide <guide@grit.test> 1 +0000".parse()?)
+            .with_scope(RefScope::Head),
     )?;
 
     for update in &plan.ref_updates {
@@ -64,13 +57,11 @@ fn main() -> Result<()> {
 
     let applied = history.apply(
         &plan,
-        &ApplyOptions {
-            identity: grit_lib::ident::parse_signature("History Guide <guide@grit.test> 1 +0000")
+        &ApplyOptions::new(
+            grit_lib::ident::parse_signature("History Guide <guide@grit.test> 1 +0000")
                 .unwrap_or_else(|| panic!("guide identity must parse as a signature")),
-            reflog_message: "history reword".into(),
-            record_operation: None,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+            "history reword",
+        ),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )?;

@@ -339,17 +339,15 @@ fn list(
     }
     list_with_query(
         repo,
-        RefQuery {
-            patterns,
-            sort: RefSort {
+        RefQuery::default()
+            .with_patterns(patterns)
+            .with_sort(RefSort {
                 key: sort.sort_key(),
                 reverse,
-            },
-            limit: output.limit,
-            contains: contains_ids,
-            points_at: resolve_points_at(repo, &points_at)?,
-            ..RefQuery::default()
-        },
+            })
+            .with_limit(output.limit)
+            .with_contains(contains_ids)
+            .with_points_at(resolve_points_at(repo, &points_at)?),
         output.detail,
     )
 }
@@ -463,17 +461,16 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
 
     let outcome = repo
         .tags()
-        .create(&CreateTagRequest {
-            name: name.to_owned(),
-            target: target_oid,
-            message,
-            tagger,
-            sign: opts.sign,
-            signing_key: opts.signing_key.clone(),
-            tree_sha256: tree_sha256_opts,
-            force: opts.force,
-            dry_run: opts.dry_run,
-        })
+        .create(
+            &CreateTagRequest::new(name.to_owned(), target_oid)
+                .with_message(message)
+                .with_tagger(tagger)
+                .with_sign(opts.sign)
+                .with_signing_key(opts.signing_key.clone())
+                .with_tree_sha256(tree_sha256_opts)
+                .with_force(opts.force)
+                .with_dry_run(opts.dry_run),
+        )
         .map_err(map_tag_error)?;
 
     let (

@@ -8,9 +8,7 @@ use std::process::Command;
 
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{
-    EmptyPolicy, HistoryError, RefScope, RewriteOptions, SplitOptions,
-};
+use grit_lib::revwalk::history::{HistoryError, RefScope, RewriteOptions, SplitOptions};
 
 use support::{build_commit_dag, commit_file, git, git_fsck_strict, HistoryRepo};
 
@@ -44,13 +42,7 @@ fn split_plan(
             &specs,
             split_message.to_string(),
             &opts,
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer_line.parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer_line.parse().expect("signature")),
         )
         .expect("split plan")
 }
@@ -145,13 +137,8 @@ fn split_keep_committer_preserves_source_committer_line() {
             &["foo".to_string()],
             "split side\n".into(),
             &SplitOptions::default(),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(999).parse().expect("signature"),
-                preserve_committer: true,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(999).parse().expect("signature"))
+                .with_preserve_committer(true),
         )
         .expect("split");
     let new_head = plan.replacement(head).expect("rest commit");
@@ -188,13 +175,7 @@ fn split_rejects_all_or_nothing_selection() {
             &["nonexistent".to_string()],
             "x\n".into(),
             &SplitOptions::default(),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(3).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(3).parse().expect("signature")),
         )
         .unwrap_err();
     assert!(matches!(err, HistoryError::SplitSelectsNothing));
@@ -206,13 +187,7 @@ fn split_rejects_all_or_nothing_selection() {
             &["foo".to_string(), "bar".to_string()],
             "x\n".into(),
             &SplitOptions::default(),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(4).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(4).parse().expect("signature")),
         )
         .unwrap_err();
     assert!(matches!(err, HistoryError::SplitSelectsEverything));
@@ -235,13 +210,7 @@ fn split_rejects_merge_commit() {
             &["any".to_string()],
             "split\n".into(),
             &SplitOptions::default(),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(5).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(5).parse().expect("signature")),
         )
         .unwrap_err();
     assert!(matches!(err, HistoryError::InsertBeforeOnMerge { .. }));
@@ -261,13 +230,7 @@ fn split_rejects_non_commit_with_typed_error() {
             &["any".to_string()],
             "split\n".into(),
             &SplitOptions::default(),
-            &RewriteOptions {
-                scope: RefScope::Branches,
-                empty: EmptyPolicy::Drop,
-                committer: committer(5).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(5).parse().expect("signature")),
         )
         .unwrap_err();
     assert!(matches!(
@@ -359,13 +322,8 @@ fn split_in_bare_repository() {
             &["f".to_string()],
             "split side\n".into(),
             &SplitOptions::default(),
-            &RewriteOptions {
-                scope: RefScope::Head,
-                empty: EmptyPolicy::Drop,
-                committer: committer(2).parse().expect("signature"),
-                preserve_committer: false,
-                sign: true,
-            },
+            &RewriteOptions::new(committer(2).parse().expect("signature"))
+                .with_scope(RefScope::Head),
         )
         .expect("bare split");
     assert!(plan.commits.iter().any(|r| r.old == tip && r.new.is_some()));

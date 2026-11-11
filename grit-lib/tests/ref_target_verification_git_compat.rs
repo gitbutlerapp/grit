@@ -11,7 +11,6 @@ use grit_lib::ident::Signature;
 use grit_lib::objects::{NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::store::{
     Expected, RawRef, RefName, RefNameRef, RefStore, RefStoreError, RefTransaction, RefUpdate,
-    RefUpdateFlags,
 };
 use grit_lib::repo::Repository;
 
@@ -31,13 +30,7 @@ fn bogus() -> ObjectId {
 }
 
 fn put(name: &str, oid: ObjectId) -> RefUpdate {
-    RefUpdate {
-        name: name.to_owned(),
-        new_value: Some(RawRef::Direct(oid)),
-        expected: Expected::Any,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
-    }
+    RefUpdate::new(name.to_owned(), Some(RawRef::Direct(oid)))
 }
 
 fn commit_one(store: &dyn RefStore, update: RefUpdate) -> Result<(), RefStoreError> {
@@ -47,13 +40,7 @@ fn commit_one(store: &dyn RefStore, update: RefUpdate) -> Result<(), RefStoreErr
 }
 
 fn symref(name: &str, target: &str) -> RefUpdate {
-    RefUpdate {
-        name: name.to_owned(),
-        new_value: Some(RawRef::Symbolic(target.to_owned())),
-        expected: Expected::Any,
-        reflog: None,
-        flags: RefUpdateFlags::default(),
-    }
+    RefUpdate::new(name.to_owned(), Some(RawRef::Symbolic(target.to_owned())))
 }
 
 fn head_tree(repo: &TestRepo) -> ObjectId {

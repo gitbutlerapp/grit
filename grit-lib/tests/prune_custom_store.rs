@@ -128,19 +128,17 @@ fn commit(repo: &Repository, tree: ObjectId, parent: Option<ObjectId>, message: 
 
 fn set_ref(repo: &Repository, name: &str, new: ObjectId, expected: Expected, message: &str) {
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: RefName::from_trusted(name),
-            new_value: Some(RawRef::Direct(new)),
-            expected,
-            flags: Default::default(),
-            reflog: Some(ReflogUpdate {
-                identity: "T <t@example.com>".into(),
-                message: message.into(),
-                time: fixed_now(),
-                old_oid: None,
-                new_oid: None,
-            }),
-        })
+        .update(
+            RefUpdate::new(RefName::from_trusted(name), Some(RawRef::Direct(new)))
+                .with_expected(expected)
+                .with_reflog(Some(ReflogUpdate {
+                    identity: "T <t@example.com>".into(),
+                    message: message.into(),
+                    time: fixed_now(),
+                    old_oid: None,
+                    new_oid: None,
+                })),
+        )
         .expect("transaction");
     repo.ref_store()
         .prepare(txn)

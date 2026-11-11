@@ -21,7 +21,7 @@ use grit_lib::refs::reftable::{
 };
 use grit_lib::refs::store::{
     open_ref_store, Expected, RawRef, RefNameRef, RefStore, RefTransaction, RefUpdate,
-    RefUpdateFlags, ReftableRefStore,
+    ReftableRefStore,
 };
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::HeadState;
@@ -806,17 +806,14 @@ fn ref_store_cas_updates_trigger_geometric_auto_compaction() {
     const UPDATES: u32 = 100;
     for i in 0..UPDATES {
         let txn = RefTransaction::new()
-            .update(RefUpdate {
-                name: "refs/heads/hot".into(),
-                new_value: Some(RawRef::Direct(cas_oid(i))),
-                expected: if i == 0 {
-                    Expected::Missing
-                } else {
-                    Expected::Oid(cas_oid(i - 1))
-                },
-                reflog: None,
-                flags: RefUpdateFlags::default(),
-            })
+            .update(
+                RefUpdate::new("refs/heads/hot".into(), Some(RawRef::Direct(cas_oid(i))))
+                    .with_expected(if i == 0 {
+                        Expected::Missing
+                    } else {
+                        Expected::Oid(cas_oid(i - 1))
+                    }),
+            )
             .expect("txn");
         store
             .prepare(txn)
@@ -867,17 +864,14 @@ fn geometric_factor_two_compacts_more_than_large_factor() {
         let store = repo.ref_store();
         for i in 0..60u32 {
             let txn = RefTransaction::new()
-                .update(RefUpdate {
-                    name: "refs/heads/hot".into(),
-                    new_value: Some(RawRef::Direct(cas_oid(i))),
-                    expected: if i == 0 {
-                        Expected::Missing
-                    } else {
-                        Expected::Oid(cas_oid(i - 1))
-                    },
-                    reflog: None,
-                    flags: RefUpdateFlags::default(),
-                })
+                .update(
+                    RefUpdate::new("refs/heads/hot".into(), Some(RawRef::Direct(cas_oid(i))))
+                        .with_expected(if i == 0 {
+                            Expected::Missing
+                        } else {
+                            Expected::Oid(cas_oid(i - 1))
+                        }),
+                )
                 .expect("txn");
             store
                 .prepare(txn)

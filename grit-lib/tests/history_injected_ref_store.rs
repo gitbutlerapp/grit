@@ -30,22 +30,14 @@ use grit_lib::state::HeadState;
 const TS: &str = "T <t@e.x> 1700000000 +0000";
 
 fn rewrite_opts() -> RewriteOptions {
-    RewriteOptions {
-        scope: RefScope::Branches,
-        empty: Default::default(),
-        committer: TS.parse().expect("signature"),
-        preserve_committer: false,
-        sign: false,
-    }
+    RewriteOptions::new(TS.parse().expect("signature"))
+        .with_empty(Default::default())
+        .with_sign(false)
 }
 
 fn apply_opts(message: &str, record: Option<&str>) -> ApplyOptions {
-    ApplyOptions {
-        identity: TS.parse().expect("signature"),
-        reflog_message: message.into(),
-        record_operation: record.map(Into::into),
-        hooks: Default::default(),
-    }
+    ApplyOptions::new(TS.parse().expect("signature"), message)
+        .with_record_operation(record.map(Into::into))
 }
 
 fn apply(
@@ -314,10 +306,7 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
                     onto: None,
                     branch_tip: main_only,
                 },
-                rebase: RebaseOntoOptions::new(RewriteOptions {
-                    scope: RefScope::Head,
-                    ..rewrite_opts()
-                }),
+                rebase: RebaseOntoOptions::new(rewrite_opts().with_scope(RefScope::Head)),
                 apply: apply_opts("rebase", Some("rebase")),
                 exec: None,
             },

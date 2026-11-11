@@ -50,13 +50,10 @@ fn files_store_applies_explicit_namespace_prefix() {
     let oid = sample_oid();
 
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/main".to_owned(),
-            new_value: Some(RawRef::Direct(oid)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new("refs/heads/main".to_owned(), Some(RawRef::Direct(oid)))
+                .with_expected(Expected::Missing),
+        )
         .expect("txn");
     store
         .prepare(txn)
@@ -91,13 +88,10 @@ fn files_store_rejects_traversal_refname_before_io() {
     let config_before = fs::read(git_dir.join("config")).expect("config");
 
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: TRAVERSAL_REF.to_owned(),
-            new_value: Some(RawRef::Direct(sample_oid())),
-            expected: Expected::Any,
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(RefUpdate::new(
+            TRAVERSAL_REF.to_owned(),
+            Some(RawRef::Direct(sample_oid())),
+        ))
         .expect("txn");
 
     let err = match store.prepare(txn) {
@@ -128,13 +122,10 @@ fn files_store_rejects_invalid_refname_corpus() {
 
     for name in samples {
         let txn = RefTransaction::new()
-            .update(RefUpdate {
-                name: name.to_owned(),
-                new_value: Some(RawRef::Direct(sample_oid())),
-                expected: Expected::Any,
-                reflog: None,
-                flags: Default::default(),
-            })
+            .update(RefUpdate::new(
+                name.to_owned(),
+                Some(RawRef::Direct(sample_oid())),
+            ))
             .expect("txn");
         let err = match store.prepare(txn) {
             Err(err) => err,
@@ -162,13 +153,10 @@ fn files_store_commit_uses_prepare_time_symref_target_not_raced_target() {
 
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "HEAD".to_owned(),
-            new_value: Some(RawRef::Direct(new_oid)),
-            expected: Expected::Any,
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(RefUpdate::new(
+            "HEAD".to_owned(),
+            Some(RawRef::Direct(new_oid)),
+        ))
         .expect("txn");
     let prepared = store.prepare(txn).expect("prepare");
 
@@ -250,13 +238,10 @@ fn files_store_rejects_stale_cas_after_interleaved_commit() {
     let store_b = FilesRefStore::from_git_dir(&git_dir).expect("store b");
 
     let txn_a = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/target".to_owned(),
-            new_value: Some(RawRef::Direct(oid_new)),
-            expected: Expected::Any,
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(RefUpdate::new(
+            "refs/heads/target".to_owned(),
+            Some(RawRef::Direct(oid_new)),
+        ))
         .expect("txn a");
     store_a
         .prepare(txn_a)
@@ -265,13 +250,13 @@ fn files_store_rejects_stale_cas_after_interleaved_commit() {
         .expect("commit a");
 
     let txn_b = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/target".to_owned(),
-            new_value: Some(RawRef::Direct(oid_old)),
-            expected: Expected::Oid(oid_old),
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new(
+                "refs/heads/target".to_owned(),
+                Some(RawRef::Direct(oid_old)),
+            )
+            .with_expected(Expected::Oid(oid_old)),
+        )
         .expect("txn b");
     let err = match store_b.prepare(txn_b) {
         Err(err) => err,
@@ -306,19 +291,17 @@ fn files_store_reflog_identity_with_digits_in_name_gets_timestamp() {
         OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid unix time for test");
     let identity = "Alice2 <alice@example.com>";
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/main".to_owned(),
-            new_value: Some(RawRef::Direct(oid_b)),
-            expected: Expected::Any,
-            reflog: Some(ReflogUpdate {
-                identity: identity.to_owned(),
-                message: String::new(),
-                time,
-                old_oid: None,
-                new_oid: None,
-            }),
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new("refs/heads/main".to_owned(), Some(RawRef::Direct(oid_b))).with_reflog(
+                Some(ReflogUpdate {
+                    identity: identity.to_owned(),
+                    message: String::new(),
+                    time,
+                    old_oid: None,
+                    new_oid: None,
+                }),
+            ),
+        )
         .expect("txn");
     store
         .prepare(txn)
@@ -372,13 +355,7 @@ fn files_store_symref_expected_oid_update_reflog_old_oid() {
         ),
     ] {
         let txn = RefTransaction::new()
-            .update(RefUpdate {
-                name: name.to_owned(),
-                new_value: Some(value),
-                expected: Expected::Missing,
-                reflog: None,
-                flags: Default::default(),
-            })
+            .update(RefUpdate::new(name.to_owned(), Some(value)).with_expected(Expected::Missing))
             .expect("seed");
         store
             .prepare(txn)
@@ -390,19 +367,17 @@ fn files_store_symref_expected_oid_update_reflog_old_oid() {
     let time =
         OffsetDateTime::from_unix_timestamp(1_700_000_002).expect("valid unix time for test");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/sym".to_owned(),
-            new_value: Some(RawRef::Direct(oid_new)),
-            expected: Expected::Oid(oid_old),
-            reflog: Some(ReflogUpdate {
-                identity: "Tester <t@example.com>".to_owned(),
-                message: "update through symref".to_owned(),
-                time,
-                old_oid: None,
-                new_oid: None,
-            }),
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new("refs/heads/sym".to_owned(), Some(RawRef::Direct(oid_new)))
+                .with_expected(Expected::Oid(oid_old))
+                .with_reflog(Some(ReflogUpdate {
+                    identity: "Tester <t@example.com>".to_owned(),
+                    message: "update through symref".to_owned(),
+                    time,
+                    old_oid: None,
+                    new_oid: None,
+                })),
+        )
         .expect("txn");
     store
         .prepare(txn)
@@ -441,13 +416,10 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
 
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     let seed = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/main".to_owned(),
-            new_value: Some(RawRef::Direct(oid_main)),
-            expected: Expected::Missing,
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new("refs/heads/main".to_owned(), Some(RawRef::Direct(oid_main)))
+                .with_expected(Expected::Missing),
+        )
         .expect("seed txn");
     store
         .prepare(seed)
@@ -470,19 +442,17 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
     let time =
         OffsetDateTime::from_unix_timestamp(1_700_000_001).expect("valid unix time for test");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "HEAD".to_owned(),
-            new_value: Some(RawRef::Direct(oid_next)),
-            expected: Expected::Any,
-            reflog: Some(ReflogUpdate {
-                identity: "Tester <t@example.com>".to_owned(),
-                message: "move head".to_owned(),
-                time,
-                old_oid: None,
-                new_oid: None,
-            }),
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new("HEAD".to_owned(), Some(RawRef::Direct(oid_next))).with_reflog(Some(
+                ReflogUpdate {
+                    identity: "Tester <t@example.com>".to_owned(),
+                    message: "move head".to_owned(),
+                    time,
+                    old_oid: None,
+                    new_oid: None,
+                },
+            )),
+        )
         .expect("txn");
     store
         .prepare(txn)
@@ -557,13 +527,10 @@ fn files_store_oid_prepare_abort_lists_all_packed_refs() {
 
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     let txn = RefTransaction::new()
-        .update(RefUpdate {
-            name: "refs/heads/alpha".to_owned(),
-            new_value: Some(RawRef::Direct(oid2)),
-            expected: Expected::Oid(oid),
-            reflog: None,
-            flags: Default::default(),
-        })
+        .update(
+            RefUpdate::new("refs/heads/alpha".to_owned(), Some(RawRef::Direct(oid2)))
+                .with_expected(Expected::Oid(oid)),
+        )
         .expect("txn");
     store.prepare(txn).expect("prepare").abort().expect("abort");
 

@@ -244,17 +244,11 @@ fn detach_at_annotated_tag_matches_git() {
     git_config(dir.path());
     let tip = grit_commit(&repo, "a.txt", "hi\n", None);
     repo.tags()
-        .create(&CreateTagRequest {
-            name: "v1".into(),
-            target: tip,
-            message: Some("annotated".into()),
-            tagger: Some("A <a@b.c> 0 +0000".into()),
-            sign: None,
-            signing_key: None,
-            tree_sha256: None,
-            force: false,
-            dry_run: false,
-        })
+        .create(
+            &CreateTagRequest::new("v1", tip)
+                .with_message(Some("annotated".into()))
+                .with_tagger(Some("A <a@b.c> 0 +0000".into())),
+        )
         .expect("annotated tag");
 
     let commit = repo
