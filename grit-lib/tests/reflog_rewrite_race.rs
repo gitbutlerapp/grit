@@ -82,7 +82,7 @@ fn race_on_repo(repo: Arc<Repository>) {
     let mut kept = 0usize;
     repo.ref_store()
         .for_each_reflog_entry(
-            RefNameRef::from_trusted("refs/heads/race"),
+            RefNameRef::new("refs/heads/race").expect("valid ref name"),
             false,
             &mut |_| {
                 kept += 1;

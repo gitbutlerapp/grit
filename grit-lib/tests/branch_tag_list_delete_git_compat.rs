@@ -598,7 +598,7 @@ fn list_and_delete_use_injected_memory_ref_store() {
     assert_current_branch_deletion_refused(&repo, "main");
 
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
+        .reflog_exists(RefNameRef::new("refs/heads/topic").expect("valid ref name"))
         .unwrap());
     let deleted = repo
         .branches()
@@ -613,18 +613,18 @@ fn list_and_delete_use_injected_memory_ref_store() {
     assert_eq!(deleted.oid, tip);
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .read_raw(RefNameRef::new("refs/heads/topic").expect("valid ref name"))
             .unwrap(),
         None
     );
     assert!(!store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
+        .reflog_exists(RefNameRef::new("refs/heads/topic").expect("valid ref name"))
         .unwrap());
 
     assert_eq!(repo.tags().delete("injected", false).unwrap(), tip);
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/tags/injected"))
+            .read_raw(RefNameRef::new("refs/tags/injected").expect("valid ref name"))
             .unwrap(),
         None
     );
@@ -665,12 +665,14 @@ fn delete_current_branch_uses_injected_head_when_disk_differs() {
 
     assert_current_branch_deletion_refused(&repo, "topic");
     assert_eq!(
-        store.resolve(RefNameRef::from_trusted("HEAD")).unwrap(),
+        store
+            .resolve(RefNameRef::new("HEAD").expect("valid ref name"))
+            .unwrap(),
         tip
     );
     assert_eq!(
         store
-            .resolve(RefNameRef::from_trusted("refs/heads/main"))
+            .resolve(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .unwrap(),
         tip
     );

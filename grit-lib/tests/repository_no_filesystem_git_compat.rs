@@ -94,7 +94,11 @@ fn git_history_fetched_into_memory_round_trips_through_an_in_memory_bundle() {
         )
         .expect("commit");
     repo.references()
-        .compare_and_swap(&RefName::from_trusted("refs/heads/main"), &fetched, &tip)
+        .compare_and_swap(
+            &RefName::new("refs/heads/main").expect("valid ref name"),
+            &fetched,
+            &tip,
+        )
         .expect("advance main");
 
     let mut bundle = Vec::new();

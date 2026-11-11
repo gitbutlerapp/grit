@@ -53,8 +53,11 @@ fn commit(repo: &Repository, parent: Option<ObjectId>, message: &str) -> ObjectI
 fn advance_head(refs: &dyn RefStore, old: Option<ObjectId>, new: ObjectId) {
     let txn = RefTransaction::new()
         .update(
-            RefUpdate::new(RefName::from_trusted("HEAD"), Some(RawRef::Direct(new)))
-                .with_expected(old.map_or(Expected::Any, Expected::Oid)),
+            RefUpdate::new(
+                RefName::new("HEAD").expect("valid ref name"),
+                Some(RawRef::Direct(new)),
+            )
+            .with_expected(old.map_or(Expected::Any, Expected::Oid)),
         )
         .expect("txn");
     refs.prepare(txn)
@@ -65,7 +68,7 @@ fn advance_head(refs: &dyn RefStore, old: Option<ObjectId>, new: ObjectId) {
 
 fn exercise(repo: &Repository, refs: &MemoryRefStore) {
     assert_eq!(
-        refs.read_raw(RefNameRef::from_trusted("HEAD"))
+        refs.read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("read HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned())),
         "initial_branch seeds HEAD in the injected store"
@@ -150,7 +153,7 @@ fn initial_branch_keeps_an_existing_head() {
     .expect("open");
     assert_eq!(
         repo.ref_store()
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/trunk".to_owned()))
     );

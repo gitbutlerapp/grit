@@ -135,15 +135,20 @@ fn two_worktrees() -> Fixture {
 }
 
 fn stored(refs: &MemoryRefStore, name: &str) -> Option<RawRef> {
-    refs.read_raw(RefNameRef::from_trusted(name)).expect("read")
+    refs.read_raw(RefNameRef::new(name).expect("valid ref name"))
+        .expect("read")
 }
 
 fn shared_head_reflog(refs: &MemoryRefStore) -> Vec<(ObjectId, ObjectId)> {
     let mut entries = Vec::new();
-    refs.for_each_reflog_entry(RefNameRef::from_trusted("HEAD"), false, &mut |entry| {
-        entries.push((entry.old_oid, entry.new_oid));
-        ControlFlow::Continue(())
-    })
+    refs.for_each_reflog_entry(
+        RefNameRef::new("HEAD").expect("valid ref name"),
+        false,
+        &mut |entry| {
+            entries.push((entry.old_oid, entry.new_oid));
+            ControlFlow::Continue(())
+        },
+    )
     .expect("shared HEAD reflog");
     entries
 }

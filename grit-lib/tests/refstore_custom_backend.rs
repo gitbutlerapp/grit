@@ -71,7 +71,7 @@ impl RefStore for MapStore {
                 RawRef::Symbolic(_) => resolve_symbolic(&state.refs, name).ok(),
             };
             let entry = {
-                let mut entry = RefEntry::new(RefName::from_trusted(name.clone()), value.clone());
+                let mut entry = RefEntry::new(RefName::new(name)?, value.clone());
                 entry.peeled = peeled;
                 entry
             };
@@ -168,7 +168,7 @@ impl RefStore for MapStore {
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&RefNameRef) -> ControlFlow<()>) -> Result<()> {
         let state = self.snapshot();
         for key in state.reflogs.keys() {
-            if f(RefNameRef::from_trusted(key)).is_break() {
+            if f(RefNameRef::new(key)?).is_break() {
                 break;
             }
         }
@@ -388,7 +388,7 @@ impl RefStore for Offline {
 #[test]
 fn backend_errors_stay_typed_and_downcastable() {
     let err = Offline
-        .resolve(RefNameRef::from_trusted("HEAD"))
+        .resolve(RefNameRef::new("HEAD").expect("valid ref name"))
         .expect_err("offline");
     let Error::Ref(RefError::Store(RefStoreError::Backend(inner))) = &err else {
         panic!("expected a backend error, got {err:?}");

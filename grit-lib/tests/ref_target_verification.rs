@@ -60,7 +60,7 @@ impl Fixture {
     fn raw(&self, refname: &str) -> Option<RawRef> {
         self.repo
             .ref_store()
-            .read_raw(RefNameRef::from_trusted(refname))
+            .read_raw(RefNameRef::new(refname).expect("valid ref name"))
             .expect("read ref")
     }
 }
@@ -586,19 +586,19 @@ fn injected_ref_store_is_checked_against_the_repository_objects() {
         .expect("branch at a commit");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/bogus"))
+            .read_raw(RefNameRef::new("refs/heads/bogus").expect("valid ref name"))
             .expect("read"),
         None
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/tree"))
+            .read_raw(RefNameRef::new("refs/heads/tree").expect("valid ref name"))
             .expect("read"),
         None
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/ok"))
+            .read_raw(RefNameRef::new("refs/heads/ok").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(fx.commit))
     );
@@ -610,7 +610,7 @@ fn injected_ref_store_is_checked_against_the_repository_objects() {
 
 fn branch_commit<'a>(expected_old: ObjectId, new_oid: ObjectId) -> BranchCommitRefUpdate<'a> {
     BranchCommitRefUpdate {
-        branch_ref: RefNameRef::from_trusted("refs/heads/main"),
+        branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
         expected_old: Some(expected_old),
         new_oid,
         identity: "Ref Verify <verify@example.com> 1700000000 +0000",

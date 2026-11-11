@@ -602,7 +602,7 @@ fn update_branch_for_commit_writes_head_and_branch_reflogs() {
         update_branch_for_commit(
             &git_dir,
             &BranchCommitRefUpdate {
-                branch_ref: RefNameRef::from_trusted("refs/heads/main"),
+                branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
                 expected_old: Some(c1),
                 new_oid: c2,
                 identity: "Refs Tx Author <refs-harness@example.com> 1700000000 +0000",
@@ -662,7 +662,7 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
             let err = update_branch_for_commit(
                 &git_dir,
                 &BranchCommitRefUpdate {
-                    branch_ref: RefNameRef::from_trusted("refs/heads/main"),
+                    branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
                     expected_old,
                     new_oid: c1,
                     identity: "Refs Tx Author <refs-harness@example.com> 1700000000 +0000",

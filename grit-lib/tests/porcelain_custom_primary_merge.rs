@@ -139,7 +139,7 @@ fn integrate_branch_disjoint_files_on_custom_primary() {
 
     assert_eq!(
         ref_store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main ref"),
         Some(RawRef::Direct(merge_oid))
     );
@@ -185,7 +185,7 @@ fn integrate_branch_clean_content_merge_on_custom_primary() {
 
     assert_eq!(
         ref_store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main ref"),
         Some(RawRef::Direct(merge_oid))
     );

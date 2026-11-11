@@ -121,7 +121,7 @@ fn assert_no_tracking_ref_for_traversal(git_dir: &Path) {
     assert!(
         grit_test_support::refs::at(git_dir)
             .references()
-            .resolve(grit_lib::refs::store::RefNameRef::from_trusted(
+            .resolve(grit_lib::test_support::refs::unchecked_ref_name(
                 "refs/remotes/origin/../../../config"
             ))
             .is_err(),

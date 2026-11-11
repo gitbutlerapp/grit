@@ -177,7 +177,16 @@ fn sample_log() -> ReflogUpdate {
 }
 
 fn update(name: &str, new_value: Option<RawRef>, expected: Expected) -> RefUpdate {
-    RefUpdate::new(RefName::from_trusted(name), new_value).with_expected(expected)
+    RefUpdate::new(RefName::new(name).expect("valid ref name"), new_value).with_expected(expected)
+}
+
+/// Like [`update`] for a name the store must reject, so it skips client-side validation.
+fn unchecked_update(name: &str, new_value: Option<RawRef>, expected: Expected) -> RefUpdate {
+    RefUpdate::new(
+        grit_lib::test_support::refs::unchecked_ref_name(name),
+        new_value,
+    )
+    .with_expected(expected)
 }
 
 fn commit_txn(store: &dyn RefStore, txn: RefTransaction) {
@@ -232,10 +241,14 @@ fn prepare_err(store: &dyn RefStore, txn: RefTransaction) -> RefStoreError {
 fn newest_reflog_entry(store: &dyn RefStore, name: &str) -> Option<ReflogEntry> {
     let mut last = None;
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted(name), true, &mut |e| {
-            last = Some(e.clone());
-            ControlFlow::Break(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new(name).expect("valid ref name"),
+            true,
+            &mut |e| {
+                last = Some(e.clone());
+                ControlFlow::Break(())
+            },
+        )
         .expect("reflog");
     last
 }
@@ -253,7 +266,7 @@ pub fn cas_success(store: Arc<dyn RefStore>) {
     commit_txn(store.as_ref(), txn);
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -273,7 +286,7 @@ pub fn cas_failure(store: Arc<dyn RefStore>) {
     assert!(matches!(err, RefStoreError::ExpectedMismatch { .. }));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/x"))
+            .read_raw(RefNameRef::new("refs/heads/x").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -284,7 +297,7 @@ pub fn create_only_missing(store: Arc<dyn RefStore>) {
     seed_direct(store.as_ref(), "refs/heads/new", oid(3));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/new"))
+            .read_raw(RefNameRef::new("refs/heads/new").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(3)))
     );
@@ -316,7 +329,7 @@ pub fn delete_missing_ref(store: Arc<dyn RefStore>) {
 /// Resolving a missing ref, or a symref whose target is missing, names the missing ref.
 pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
     let missing = store
-        .resolve(RefNameRef::from_trusted("refs/heads/absent"))
+        .resolve(RefNameRef::new("refs/heads/absent").expect("valid ref name"))
         .expect_err("missing ref");
     assert!(
         matches!(
@@ -328,7 +341,7 @@ pub fn resolve_missing_ref_is_not_found(store: Arc<dyn RefStore>) {
 
     seed_symref(store.as_ref(), "refs/heads/alias", "refs/heads/unborn");
     let dangling = store
-        .resolve(RefNameRef::from_trusted("refs/heads/alias"))
+        .resolve(RefNameRef::new("refs/heads/alias").expect("valid ref name"))
         .expect_err("dangling symref");
     assert!(
         matches!(
@@ -361,7 +374,11 @@ pub fn unsafe_names_rejected_at_prepare(store: Arc<dyn RefStore>) {
     seed_direct(store.as_ref(), "refs/heads/main", oid(1));
     for &name in UNSAFE_NAMES {
         let txn = RefTransaction::new()
-            .update(update(name, Some(RawRef::Direct(oid(2))), Expected::Any))
+            .update(unchecked_update(
+                name,
+                Some(RawRef::Direct(oid(2))),
+                Expected::Any,
+            ))
             .expect("txn");
         let err = prepare_err(store.as_ref(), txn);
         assert_eq!(
@@ -380,7 +397,7 @@ pub fn unsafe_names_rejected_at_prepare(store: Arc<dyn RefStore>) {
             Expected::Missing,
         ))
         .expect("ok")
-        .update(update(
+        .update(unchecked_update(
             "refs/heads/a b",
             Some(RawRef::Direct(oid(3))),
             Expected::Any,
@@ -406,8 +423,8 @@ pub fn unsafe_names_rejected_at_prepare(store: Arc<dyn RefStore>) {
 pub fn unsafe_rename_names_rejected_at_prepare(store: Arc<dyn RefStore>) {
     seed_direct(store.as_ref(), "refs/heads/topic", oid(1));
     let reflog_rename = RefTransaction::new().with_reflog_rename(RefReflogRename {
-        from: RefName::from_trusted("refs/heads/topic"),
-        to: RefName::from_trusted("refs/heads/../escape"),
+        from: RefName::new("refs/heads/topic").expect("valid ref name"),
+        to: grit_lib::test_support::refs::unchecked_ref_name("refs/heads/../escape"),
         append: sample_log(),
     });
     assert_eq!(
@@ -417,8 +434,8 @@ pub fn unsafe_rename_names_rejected_at_prepare(store: Arc<dyn RefStore>) {
         }
     );
     let case_only = RefTransaction::new().with_case_only_rename(RefCaseOnlyRename {
-        from: RefName::from_trusted("refs/heads/topic"),
-        to: RefName::from_trusted("refs/heads/Topic.lock"),
+        from: RefName::new("refs/heads/topic").expect("valid ref name"),
+        to: grit_lib::test_support::refs::unchecked_ref_name("refs/heads/Topic.lock"),
     });
     assert_eq!(
         prepare_err(store.as_ref(), case_only),
@@ -451,13 +468,13 @@ pub fn null_oid_rejected_at_prepare(store: Arc<dyn RefStore>) {
     }
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(1)))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/z"))
+            .read_raw(RefNameRef::new("refs/heads/z").expect("valid ref name"))
             .expect("z"),
         None
     );
@@ -470,7 +487,7 @@ pub fn pseudoref_and_log_only_null_oid_accepted(store: Arc<dyn RefStore>) {
     seed_direct(store.as_ref(), "ORIG_HEAD", oid(2));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("ORIG_HEAD"))
+            .read_raw(RefNameRef::new("ORIG_HEAD").expect("valid ref name"))
             .expect("orig head"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -490,13 +507,13 @@ pub fn pseudoref_and_log_only_null_oid_accepted(store: Arc<dyn RefStore>) {
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("head"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -523,7 +540,7 @@ pub fn df_conflict_in_batch(store: Arc<dyn RefStore>) {
     ));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/p"))
+            .read_raw(RefNameRef::new("refs/heads/p").expect("valid ref name"))
             .expect("read"),
         None
     );
@@ -545,7 +562,7 @@ pub fn df_conflict_against_stored_ancestor(store: Arc<dyn RefStore>) {
     ));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/parent/leaf"))
+            .read_raw(RefNameRef::new("refs/heads/parent/leaf").expect("valid ref name"))
             .expect("read"),
         None
     );
@@ -567,13 +584,13 @@ pub fn df_conflict_against_stored_descendant(store: Arc<dyn RefStore>) {
     ));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/a"))
+            .read_raw(RefNameRef::new("refs/heads/a").expect("valid ref name"))
             .expect("read"),
         None
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/a/b"))
+            .read_raw(RefNameRef::new("refs/heads/a/b").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -597,7 +614,7 @@ pub fn df_conflict_not_freed_by_delete_in_batch(store: Arc<dyn RefStore>) {
     ));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/a/b"))
+            .read_raw(RefNameRef::new("refs/heads/a/b").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -621,13 +638,13 @@ pub fn symref_deref_state_and_reflog(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/sym"))
+            .read_raw(RefNameRef::new("refs/heads/sym").expect("valid ref name"))
             .expect("sym"),
         Some(RawRef::Symbolic("refs/heads/target".to_owned()))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/target"))
+            .read_raw(RefNameRef::new("refs/heads/target").expect("valid ref name"))
             .expect("target"),
         Some(RawRef::Direct(oid(12)))
     );
@@ -651,7 +668,7 @@ pub fn symref_deref_reflog_on_symref_and_target(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -683,13 +700,13 @@ pub fn symref_log_only_reflog_on_symref_and_target(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(1)))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("head"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
@@ -719,13 +736,13 @@ pub fn symref_no_deref_state_and_reflog(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/s2"))
+            .read_raw(RefNameRef::new("refs/heads/s2").expect("valid ref name"))
             .expect("s2"),
         Some(RawRef::Direct(oid(12)))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/t2"))
+            .read_raw(RefNameRef::new("refs/heads/t2").expect("valid ref name"))
             .expect("t2"),
         Some(RawRef::Direct(oid(11)))
     );
@@ -779,7 +796,7 @@ pub fn delete_with_reflog_oids(store: Arc<dyn RefStore>) {
         RefTransaction::new().update(seed).expect("seed"),
     );
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/del"))
+        .reflog_exists(RefNameRef::new("refs/heads/del").expect("valid ref name"))
         .expect("seed log"));
 
     let mut upd = update("refs/heads/del", None, Expected::Any);
@@ -791,13 +808,13 @@ pub fn delete_with_reflog_oids(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/del"))
+            .read_raw(RefNameRef::new("refs/heads/del").expect("valid ref name"))
             .expect("read"),
         None
     );
     assert!(
         !store
-            .reflog_exists(RefNameRef::from_trusted("refs/heads/del"))
+            .reflog_exists(RefNameRef::new("refs/heads/del").expect("valid ref name"))
             .expect("exists"),
         "ref delete must drop the reflog even when a ReflogUpdate is present"
     );
@@ -816,7 +833,7 @@ pub fn delete_clears_reflog_then_nested_create(store: Arc<dyn RefStore>) {
         RefTransaction::new().update(create).expect("txn"),
     );
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/a"))
+        .reflog_exists(RefNameRef::new("refs/heads/a").expect("valid ref name"))
         .expect("exists"));
 
     commit_txn(
@@ -827,7 +844,7 @@ pub fn delete_clears_reflog_then_nested_create(store: Arc<dyn RefStore>) {
     );
     assert!(
         !store
-            .reflog_exists(RefNameRef::from_trusted("refs/heads/a"))
+            .reflog_exists(RefNameRef::new("refs/heads/a").expect("valid ref name"))
             .expect("exists"),
         "delete must remove the parent reflog file"
     );
@@ -844,12 +861,12 @@ pub fn delete_clears_reflog_then_nested_create(store: Arc<dyn RefStore>) {
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/a/b"))
+            .read_raw(RefNameRef::new("refs/heads/a/b").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/a/b"))
+        .reflog_exists(RefNameRef::new("refs/heads/a/b").expect("valid ref name"))
         .expect("nested log"));
 }
 
@@ -873,7 +890,7 @@ pub fn delete_deep_then_shallow_sibling_create(store: Arc<dyn RefStore>) {
             .expect("txn"),
     );
     assert!(!store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/a/b/c"))
+        .reflog_exists(RefNameRef::new("refs/heads/a/b/c").expect("valid ref name"))
         .expect("exists"));
 
     let mut shallow = update(
@@ -888,7 +905,7 @@ pub fn delete_deep_then_shallow_sibling_create(store: Arc<dyn RefStore>) {
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/a"))
+            .read_raw(RefNameRef::new("refs/heads/a").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -906,13 +923,13 @@ pub fn symref_deref_delete(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/sym"))
+            .read_raw(RefNameRef::new("refs/heads/sym").expect("valid ref name"))
             .expect("sym"),
         Some(RawRef::Symbolic("refs/heads/target".to_owned()))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/target"))
+            .read_raw(RefNameRef::new("refs/heads/target").expect("valid ref name"))
             .expect("target"),
         None
     );
@@ -936,13 +953,13 @@ pub fn symref_head_deref_delete_recreate_branch(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("head"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -962,7 +979,7 @@ pub fn symref_head_deref_delete_recreate_branch_with_reflog(store: Arc<dyn RefSt
     );
     seed_symref(store.as_ref(), "HEAD", "refs/heads/main");
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/main"))
+        .reflog_exists(RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("seed log"));
 
     let mut recreate = update(
@@ -980,13 +997,13 @@ pub fn symref_head_deref_delete_recreate_branch_with_reflog(store: Arc<dyn RefSt
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(2)))
     );
     assert!(
         store
-            .reflog_exists(RefNameRef::from_trusted("refs/heads/main"))
+            .reflog_exists(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("exists"),
         "recreate reflog must survive after deref delete of HEAD in the same batch"
     );
@@ -1006,13 +1023,13 @@ pub fn symref_no_deref_delete(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/sym"))
+            .read_raw(RefNameRef::new("refs/heads/sym").expect("valid ref name"))
             .expect("sym"),
         None
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/target"))
+            .read_raw(RefNameRef::new("refs/heads/target").expect("valid ref name"))
             .expect("target"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -1029,13 +1046,13 @@ pub fn symref_unborn_referent_created(store: Arc<dyn RefStore>) {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("head"),
         Some(RawRef::Symbolic("refs/heads/unborn".to_owned()))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/unborn"))
+            .read_raw(RefNameRef::new("refs/heads/unborn").expect("valid ref name"))
             .expect("unborn"),
         Some(RawRef::Direct(oid(7)))
     );
@@ -1052,13 +1069,13 @@ pub fn symref_unborn_referent_created(store: Arc<dyn RefStore>) {
     commit_txn(store.as_ref(), txn2);
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/first"))
+            .read_raw(RefNameRef::new("refs/heads/first").expect("valid ref name"))
             .expect("first"),
         Some(RawRef::Direct(oid(1)))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/unborn"))
+            .read_raw(RefNameRef::new("refs/heads/unborn").expect("valid ref name"))
             .expect("unborn"),
         Some(RawRef::Direct(oid(8)))
     );
@@ -1091,7 +1108,7 @@ pub fn symref_dual_deref_conflicting_target_rejected(store: Arc<dyn RefStore>) {
     ));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/target"))
+            .read_raw(RefNameRef::new("refs/heads/target").expect("valid ref name"))
             .expect("target"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -1117,13 +1134,13 @@ pub fn batch_apply_rejected_leaves_store_unchanged(store: Arc<dyn RefStore>) {
     ));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/target"))
+            .read_raw(RefNameRef::new("refs/heads/target").expect("valid ref name"))
             .expect("target"),
         Some(RawRef::Direct(oid(1)))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/sym"))
+            .read_raw(RefNameRef::new("refs/heads/sym").expect("valid ref name"))
             .expect("sym"),
         Some(RawRef::Symbolic("refs/heads/target".to_owned()))
     );
@@ -1132,23 +1149,26 @@ pub fn batch_apply_rejected_leaves_store_unchanged(store: Arc<dyn RefStore>) {
 /// An empty reflog (created or replaced with no entries) still exists.
 pub fn empty_reflog_exists(store: Arc<dyn RefStore>) {
     store
-        .create_reflog(RefNameRef::from_trusted("refs/heads/empty"))
+        .create_reflog(RefNameRef::new("refs/heads/empty").expect("valid ref name"))
         .expect("create");
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/empty"))
+        .reflog_exists(RefNameRef::new("refs/heads/empty").expect("valid ref name"))
         .expect("exists"));
 
     store
-        .replace_reflog(RefNameRef::from_trusted("refs/heads/empty2"), Vec::new())
+        .replace_reflog(
+            RefNameRef::new("refs/heads/empty2").expect("valid ref name"),
+            Vec::new(),
+        )
         .expect("replace empty");
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/empty2"))
+        .reflog_exists(RefNameRef::new("refs/heads/empty2").expect("valid ref name"))
         .expect("exists2"));
 
     let mut count = 0usize;
     store
         .for_each_reflog_entry(
-            RefNameRef::from_trusted("refs/heads/empty2"),
+            RefNameRef::new("refs/heads/empty2").expect("valid ref name"),
             false,
             &mut |_| {
                 count += 1;
@@ -1230,7 +1250,7 @@ pub fn abort_leaves_state_unchanged(store: Arc<dyn RefStore>) {
     store.prepare(txn).expect("prepare").abort().expect("abort");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/stay"))
+            .read_raw(RefNameRef::new("refs/heads/stay").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(5)))
     );
@@ -1249,7 +1269,7 @@ pub fn abort_releases_lock(store: Arc<dyn RefStore>) {
     seed_direct(store.as_ref(), "refs/heads/one", oid(2));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/one"))
+            .read_raw(RefNameRef::new("refs/heads/one").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -1269,7 +1289,7 @@ pub fn dropped_prepared_transaction_releases_lock(store: Arc<dyn RefStore>) {
     drop(store.prepare(txn).expect("prepare"));
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/kept"))
+            .read_raw(RefNameRef::new("refs/heads/kept").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -1287,7 +1307,7 @@ pub fn dropped_prepared_transaction_releases_lock(store: Arc<dyn RefStore>) {
     }
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/kept"))
+            .read_raw(RefNameRef::new("refs/heads/kept").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(3)))
     );
@@ -1328,7 +1348,7 @@ pub fn concurrent_prepare_lock_held(store: Arc<dyn RefStore>) {
     prepared.commit().expect("commit");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/c"))
+            .read_raw(RefNameRef::new("refs/heads/c").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -1337,7 +1357,7 @@ pub fn concurrent_prepare_lock_held(store: Arc<dyn RefStore>) {
 /// Reflogs replace, iterate in both directions, delete and list.
 pub fn reflog_roundtrip(store: Arc<dyn RefStore>) {
     store
-        .create_reflog(RefNameRef::from_trusted("refs/heads/r"))
+        .create_reflog(RefNameRef::new("refs/heads/r").expect("valid ref name"))
         .expect("create");
     let entries = vec![
         ReflogEntry {
@@ -1354,41 +1374,52 @@ pub fn reflog_roundtrip(store: Arc<dyn RefStore>) {
         },
     ];
     store
-        .replace_reflog(RefNameRef::from_trusted("refs/heads/r"), entries.clone())
+        .replace_reflog(
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
+            entries.clone(),
+        )
         .expect("replace");
 
     let mut forward = Vec::new();
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
-            forward.push(e.clone());
-            ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
+            false,
+            &mut |e| {
+                forward.push(e.clone());
+                ControlFlow::Continue(())
+            },
+        )
         .expect("forward");
     assert_eq!(forward, entries);
 
     let mut reverse = Vec::new();
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), true, &mut |e| {
-            reverse.push(e.clone());
-            ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
+            true,
+            &mut |e| {
+                reverse.push(e.clone());
+                ControlFlow::Continue(())
+            },
+        )
         .expect("reverse");
     assert_eq!(reverse, entries.iter().rev().cloned().collect::<Vec<_>>());
 
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/r"))
+        .reflog_exists(RefNameRef::new("refs/heads/r").expect("valid ref name"))
         .expect("exists"));
     store
-        .delete_reflog(RefNameRef::from_trusted("refs/heads/r"))
+        .delete_reflog(RefNameRef::new("refs/heads/r").expect("valid ref name"))
         .expect("delete");
     assert!(!store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/r"))
+        .reflog_exists(RefNameRef::new("refs/heads/r").expect("valid ref name"))
         .expect("exists"));
 
     let mut reflog_refs = Vec::new();
     store
         .replace_reflog(
-            RefNameRef::from_trusted("refs/heads/rr"),
+            RefNameRef::new("refs/heads/rr").expect("valid ref name"),
             vec![ReflogEntry {
                 old_oid: oid(1),
                 new_oid: oid(2),
@@ -1416,22 +1447,29 @@ pub fn rewrite_reflog_roundtrip(store: Arc<dyn RefStore>) {
     };
     store
         .replace_reflog(
-            RefNameRef::from_trusted("refs/heads/r"),
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
             vec![log(1), log(2), log(3)],
         )
         .expect("seed");
     store
-        .rewrite_reflog(RefNameRef::from_trusted("refs/heads/r"), &mut |entries| {
-            assert_eq!(entries.len(), 3);
-            Ok(vec![entries[0].clone(), entries[2].clone()])
-        })
+        .rewrite_reflog(
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
+            &mut |entries| {
+                assert_eq!(entries.len(), 3);
+                Ok(vec![entries[0].clone(), entries[2].clone()])
+            },
+        )
         .expect("rewrite");
     let mut kept = Vec::new();
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
-            kept.push(e.clone());
-            ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
+            false,
+            &mut |e| {
+                kept.push(e.clone());
+                ControlFlow::Continue(())
+            },
+        )
         .expect("read");
     assert_eq!(kept, vec![log(1), log(3)]);
 }
@@ -1457,7 +1495,7 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
     };
     store
         .replace_reflog(
-            RefNameRef::from_trusted("refs/heads/r"),
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
             vec![droppable, keep],
         )
         .expect("seed");
@@ -1471,7 +1509,7 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
         let txn = RefTransaction::new()
             .update(
                 RefUpdate::new(
-                    RefName::from_trusted("refs/heads/r"),
+                    RefName::new("refs/heads/r").expect("valid ref name"),
                     Some(RawRef::Direct(oid(3))),
                 )
                 .with_expected(Expected::Oid(oid(1)))
@@ -1489,14 +1527,17 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
     });
 
     store
-        .rewrite_reflog(RefNameRef::from_trusted("refs/heads/r"), &mut |entries| {
-            signal_tx.send(()).expect("signal");
-            thread::sleep(std::time::Duration::from_millis(300));
-            Ok(entries
-                .into_iter()
-                .filter(|e| e.message != "drop-me")
-                .collect())
-        })
+        .rewrite_reflog(
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
+            &mut |entries| {
+                signal_tx.send(()).expect("signal");
+                thread::sleep(std::time::Duration::from_millis(300));
+                Ok(entries
+                    .into_iter()
+                    .filter(|e| e.message != "drop-me")
+                    .collect())
+            },
+        )
         .expect("rewrite");
 
     appender.join().expect("join");
@@ -1506,10 +1547,14 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
 
     let mut messages = Vec::new();
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
-            messages.push(e.message.clone());
-            ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new("refs/heads/r").expect("valid ref name"),
+            false,
+            &mut |e| {
+                messages.push(e.message.clone());
+                ControlFlow::Continue(())
+            },
+        )
         .expect("read");
     assert!(
         messages.iter().any(|m| m == CONCURRENT_APPEND_MARKER),
@@ -1549,19 +1594,23 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
         message: format!("m{byte}"),
     };
     store
-        .replace_reflog(RefNameRef::from_trusted("refs/heads/main"), vec![log(1)])
+        .replace_reflog(
+            RefNameRef::new("refs/heads/main").expect("valid ref name"),
+            vec![log(1)],
+        )
         .expect("main log");
     store
-        .replace_reflog(RefNameRef::from_trusted("refs/heads/other"), vec![log(2)])
+        .replace_reflog(
+            RefNameRef::new("refs/heads/other").expect("valid ref name"),
+            vec![log(2)],
+        )
         .expect("other log");
 
     let mut resolved = Vec::new();
     store
         .for_each_ref("refs/heads/", &mut |entry| {
             assert_eq!(
-                store
-                    .read_raw(RefNameRef::from_trusted(entry.name.as_str()))
-                    .expect("read_raw"),
+                store.read_raw(&entry.name).expect("read_raw"),
                 Some(entry.value.clone())
             );
             let mut nested = 0usize;
@@ -1574,9 +1623,7 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
             assert!(nested >= 2, "nested walk saw {nested} refs");
             resolved.push((
                 entry.name.as_str().to_owned(),
-                store
-                    .resolve(RefNameRef::from_trusted(entry.name.as_str()))
-                    .expect("resolve"),
+                store.resolve(&entry.name).expect("resolve"),
             ));
             ControlFlow::Continue(())
         })
@@ -1593,14 +1640,10 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
     store
         .for_each_reflog_ref(&mut |name| {
             store
-                .for_each_reflog_entry(
-                    RefNameRef::from_trusted(name.as_str()),
-                    false,
-                    &mut |entry| {
-                        dump.push((name.as_str().to_owned(), entry.new_oid));
-                        ControlFlow::Continue(())
-                    },
-                )
+                .for_each_reflog_entry(name, false, &mut |entry| {
+                    dump.push((name.as_str().to_owned(), entry.new_oid));
+                    ControlFlow::Continue(())
+                })
                 .expect("for_each_reflog_entry");
             ControlFlow::Continue(())
         })
@@ -1621,7 +1664,7 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
                 seed_direct(store, "refs/tags/from-callback", oid(3));
                 store
                     .replace_reflog(
-                        RefNameRef::from_trusted("refs/heads/main"),
+                        RefNameRef::new("refs/heads/main").expect("valid ref name"),
                         vec![log(1), log(4)],
                     )
                     .expect("replace_reflog from callback");
@@ -1631,7 +1674,7 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
         .expect("for_each_ref with writes");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/tags/from-callback"))
+            .read_raw(RefNameRef::new("refs/tags/from-callback").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(3)))
     );
@@ -1639,11 +1682,14 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
     let mut reflog_len = 0usize;
     store
         .for_each_reflog_entry(
-            RefNameRef::from_trusted("refs/heads/main"),
+            RefNameRef::new("refs/heads/main").expect("valid ref name"),
             true,
             &mut |_| {
                 store
-                    .replace_reflog(RefNameRef::from_trusted("refs/heads/main"), vec![log(5)])
+                    .replace_reflog(
+                        RefNameRef::new("refs/heads/main").expect("valid ref name"),
+                        vec![log(5)],
+                    )
                     .expect("replace_reflog during reflog walk");
                 reflog_len += 1;
                 ControlFlow::Continue(())

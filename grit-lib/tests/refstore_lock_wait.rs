@@ -49,7 +49,11 @@ fn oid(n: u32) -> ObjectId {
 }
 
 fn set(name: &str, value: ObjectId, expected: Expected) -> RefUpdate {
-    RefUpdate::new(RefName::from_trusted(name), Some(RawRef::Direct(value))).with_expected(expected)
+    RefUpdate::new(
+        RefName::new(name).expect("valid ref name"),
+        Some(RawRef::Direct(value)),
+    )
+    .with_expected(expected)
 }
 
 fn txn(name: &str, value: ObjectId) -> RefTransaction {
@@ -88,7 +92,7 @@ fn concurrent_batches_on_disjoint_refs_all_commit() {
     for t in 0..THREADS {
         assert_eq!(
             store
-                .read_raw(RefNameRef::from_trusted(&format!("refs/heads/b{t}")))
+                .read_raw(RefNameRef::new(&format!("refs/heads/b{t}")).expect("valid ref name"))
                 .expect("read"),
             Some(RawRef::Direct(oid(t * UPDATES + UPDATES)))
         );
@@ -167,7 +171,7 @@ fn held_transaction_still_fails_after_the_budget() {
     held.commit().expect("commit holder");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/waiter"))
+            .read_raw(RefNameRef::new("refs/heads/waiter").expect("valid ref name"))
             .expect("read"),
         None
     );
@@ -201,13 +205,13 @@ fn waiter_proceeds_once_the_holder_releases() {
     });
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/waiter"))
+            .read_raw(RefNameRef::new("refs/heads/waiter").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/holder"))
+            .read_raw(RefNameRef::new("refs/heads/holder").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
@@ -466,7 +470,7 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
     for i in 0..THREADS {
         let mut depth = 0;
         let mut tip = Some(
-            refs.resolve(RefNameRef::from_trusted(&format!("refs/heads/b{i}")))
+            refs.resolve(RefNameRef::new(&format!("refs/heads/b{i}")).expect("valid ref name"))
                 .expect("branch"),
         );
         while let Some(commit) = tip {
@@ -568,13 +572,13 @@ fn files_prepare_disjoint_ref_while_another_transaction_is_open() {
     held.commit().expect("commit a");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/a"))
+            .read_raw(RefNameRef::new("refs/heads/a").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(1)))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/b"))
+            .read_raw(RefNameRef::new("refs/heads/b").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -596,7 +600,7 @@ fn files_create_over_stale_empty_directory_at_exact_ref_path() {
         .expect("empty directory at ref path must not block create");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/tags/empty"))
+            .read_raw(RefNameRef::new("refs/tags/empty").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(value))
     );

@@ -350,7 +350,7 @@ fn plan_rewrite_non_commit_tip_is_a_typed_engine_error() {
     let corrupt = grit_lib::refs::store::RefTransaction::new()
         .update(
             grit_lib::refs::store::RefUpdate::new(
-                grit_lib::refs::store::RefName::from_trusted("refs/heads/main"),
+                grit_lib::refs::store::RefName::new("refs/heads/main").expect("valid ref name"),
                 Some(grit_lib::refs::store::RawRef::Direct(blob)),
             )
             .with_flags(
@@ -1096,7 +1096,7 @@ fn history_public_api_coverage_smoke() {
             reused: false,
         }],
         ref_updates: vec![PlannedRefUpdate {
-            name: grit_lib::refs::store::RefName::from_trusted("refs/heads/x"),
+            name: grit_lib::refs::store::RefName::new("refs/heads/x").expect("valid ref name"),
             old: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
             new: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
         }],

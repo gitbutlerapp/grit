@@ -189,7 +189,7 @@ fn injected_ref_updates_never_write_head_or_refs_directory() {
     );
     assert_eq!(
         repo.ref_store()
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD")
             .and_then(|raw| match raw {
                 RawRef::Symbolic(target) => Some(target),

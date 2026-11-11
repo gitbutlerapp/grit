@@ -96,7 +96,7 @@ fn clone_into_injected_ref_store_keeps_clone_reflogs_in_store() {
     );
     assert_eq!(
         ref_store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );

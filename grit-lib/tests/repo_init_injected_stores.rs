@@ -61,7 +61,7 @@ fn set(items: &[&str]) -> BTreeSet<String> {
 }
 
 fn head(refs: &dyn RefStore) -> Option<RawRef> {
-    refs.read_raw(RefNameRef::from_trusted("HEAD"))
+    refs.read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
         .expect("read HEAD")
 }
 

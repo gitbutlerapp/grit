@@ -520,7 +520,9 @@ fn reftable_reflog_api_matches_git() {
     )
     .expect("seed ref");
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.create_reflog(RefNameRef::from_trusted("refs/heads/log-test")))
+        .and_then(|store| {
+            store.create_reflog(RefNameRef::new("refs/heads/log-test").expect("valid ref name"))
+        })
         .expect("create reflog");
     assert!(grit_test_support::refs::at(&git_dir)
         .reflogs()
@@ -560,7 +562,7 @@ fn reftable_reflog_api_matches_git() {
     ReftableRefStore::open(git_dir.to_path_buf())
         .and_then(|store| {
             store.replace_reflog(
-                RefNameRef::from_trusted("refs/heads/log-test"),
+                RefNameRef::new("refs/heads/log-test").expect("valid ref name"),
                 replaced.to_vec(),
             )
         })
@@ -588,7 +590,9 @@ fn reftable_reflog_api_matches_git() {
     );
 
     ReftableRefStore::open(git_dir.to_path_buf())
-        .and_then(|store| store.delete_reflog(RefNameRef::from_trusted("refs/heads/log-test")))
+        .and_then(|store| {
+            store.delete_reflog(RefNameRef::new("refs/heads/log-test").expect("valid ref name"))
+        })
         .expect("delete reflog");
     assert!(!grit_test_support::refs::at(&git_dir)
         .reflogs()
@@ -757,7 +761,7 @@ fn resolve_head_after_git_commit_tree_on_reftable() {
     );
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.resolve(RefNameRef::from_trusted("HEAD")))
+            .and_then(|store| store.resolve(RefNameRef::new("HEAD").expect("valid ref name")))
             .expect("HEAD"),
         tip
     );
@@ -843,7 +847,7 @@ fn ref_store_cas_updates_trigger_geometric_auto_compaction() {
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/hot"))
+            .read_raw(RefNameRef::new("refs/heads/hot").expect("valid ref name"))
             .expect("read hot")
             .and_then(|r| match r {
                 RawRef::Direct(oid) => Some(oid),
@@ -928,7 +932,7 @@ fn resolve_detached_head_after_git_checkout_detach_on_reftable() {
     );
     assert_eq!(
         ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.resolve(RefNameRef::from_trusted("HEAD")))
+            .and_then(|store| store.resolve(RefNameRef::new("HEAD").expect("valid ref name")))
             .expect("resolve HEAD"),
         tip
     );

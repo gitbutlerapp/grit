@@ -17,6 +17,17 @@ use crate::refs::{
     RefnameUnavailable,
 };
 
+/// Build a [`RefName`](crate::refs::store::RefName) without validating it.
+///
+/// For tests of rejection paths only: ref stores, transactions and other entry points must
+/// refuse a malformed or non-storable name, and the public constructors cannot build one.
+/// Never use it for a name a test expects to be valid; use `RefName::new` there.
+#[doc(hidden)]
+#[must_use]
+pub fn unchecked_ref_name(name: impl Into<String>) -> crate::refs::store::RefName {
+    crate::refs::store::RefName::from_trusted(name)
+}
+
 #[must_use]
 pub fn packed_refs_path(common_dir: &Path) -> PathBuf {
     crate::refs::store::paths::packed_refs_path(common_dir)

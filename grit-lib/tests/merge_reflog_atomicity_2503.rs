@@ -264,10 +264,14 @@ fn diverged_merge_fixture(repo: &Repository, wt: &std::path::Path) -> (ObjectId,
 fn last_reflog_message(store: &dyn RefStore, name: &str) -> Option<String> {
     let mut last = None;
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |e| {
-            last = Some(e.message.clone());
-            ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new(name).expect("valid ref name"),
+            false,
+            &mut |e| {
+                last = Some(e.message.clone());
+                ControlFlow::Continue(())
+            },
+        )
         .expect("reflog");
     last
 }
@@ -296,7 +300,7 @@ fn merge_ref_update_rolls_back_when_reflog_commit_fails() {
     assert_eq!(
         ref_store
             .inner
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main ref"),
         Some(RawRef::Direct(main_tip))
     );
@@ -341,7 +345,7 @@ fn merge_branch_move_and_reflogs_share_one_transaction() {
     assert_eq!(
         ref_store
             .inner
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main ref"),
         Some(RawRef::Direct(merge_oid))
     );

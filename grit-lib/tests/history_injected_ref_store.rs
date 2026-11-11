@@ -129,7 +129,7 @@ fn three_commits(repo: &Repository, wt: &Path) -> Vec<ObjectId> {
 
 fn main_tip(refs: &MemoryRefStore) -> ObjectId {
     match refs
-        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+        .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main")
     {
         Some(RawRef::Direct(oid)) => oid,
@@ -154,7 +154,7 @@ fn head_commit(repo: &Repository) -> ObjectId {
 fn reflog_messages(refs: &dyn RefStore, name: &str) -> Vec<String> {
     let mut out = Vec::new();
     refs.for_each_reflog_entry(
-        &grit_lib::refs::store::RefName::from_trusted(name),
+        grit_lib::refs::store::RefNameRef::new(name).expect("valid ref name"),
         false,
         &mut |entry| {
             out.push(entry.message.clone());
@@ -402,7 +402,7 @@ fn rebase_exec_detaches_and_restores_head_in_the_store() {
     assert_eq!(report.runs.len(), 2);
     assert!(report.runs.iter().all(|run| run.exit_code == 0));
     assert_eq!(
-        refs.read_raw(RefNameRef::from_trusted("HEAD"))
+        refs.read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into())),
         "exec restores the symbolic HEAD in the store"
@@ -438,7 +438,7 @@ fn head_moved_in_store_after_plan_fails_before_any_ref_moves() {
     );
     assert_eq!(main_tip(&refs), tips[2], "no ref may move");
     assert_eq!(
-        refs.read_raw(RefNameRef::from_trusted("HEAD"))
+        refs.read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Direct(tips[2]))
     );

@@ -80,10 +80,14 @@ fn commit_n(repo: &Repository, work_tree: &Path, n: usize) -> Vec<ObjectId> {
 fn store_count(store: &dyn RefStore, name: &str) -> usize {
     let mut n = 0;
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |_| {
-            n += 1;
-            ControlFlow::Continue(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new(name).expect("valid ref name"),
+            false,
+            &mut |_| {
+                n += 1;
+                ControlFlow::Continue(())
+            },
+        )
         .expect("read store reflog");
     n
 }

@@ -82,7 +82,7 @@ fn loose_rename_preserves_unrelated_packed_refs_and_roundtrips_through_git() {
     );
     assert!(repo
         .ref_store()
-        .read_raw(RefNameRef::from_trusted("refs/heads/renamed"))
+        .read_raw(RefNameRef::new("refs/heads/renamed").expect("valid ref name"))
         .unwrap()
         .is_none());
     assert_eq!(fs::read(&packed).unwrap(), before);
@@ -116,7 +116,7 @@ fn rename_removes_shadowed_packed_source_and_keeps_peeled_tags() {
     assert_eq!(git(dir, &["rev-parse", "renamed"]).trim(), tip.to_string());
     assert!(repo
         .ref_store()
-        .read_raw(RefNameRef::from_trusted("refs/heads/b1000"))
+        .read_raw(RefNameRef::new("refs/heads/b1000").expect("valid ref name"))
         .unwrap()
         .is_none());
     assert_eq!(

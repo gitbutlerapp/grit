@@ -249,7 +249,7 @@ fn memory_serve_repo(
             RefTransaction::new()
                 .update(
                     RefUpdate::new(
-                        RefName::from_trusted("refs/heads/master"),
+                        RefName::new("refs/heads/master").expect("valid ref name"),
                         Some(RawRef::Direct(commit)),
                     )
                     .with_expected(Expected::Missing),

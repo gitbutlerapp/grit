@@ -173,12 +173,11 @@ impl RefName {
 
     /// Wrap `name` without validating it.
     ///
-    /// Only for names that were already validated or were read back from ref storage (for
-    /// example by a [`RefStore`](crate::refs::store::RefStore) implementation listing its own
-    /// refs). Ref stores still validate names when writing, but reads trust the type, so never
-    /// pass user input here: use [`RefName::new`] instead.
+    /// Crate-internal: only for names that were already validated or were read back from the
+    /// built-in ref stores. Ref stores still validate names when writing, but reads trust the
+    /// type, so callers outside the crate build names with [`RefName::new`] and friends.
     #[must_use]
-    pub fn from_trusted(name: impl Into<String>) -> Self {
+    pub(crate) fn from_trusted(name: impl Into<String>) -> Self {
         Self(name.into())
     }
 
@@ -269,10 +268,10 @@ impl RefNameRef {
 
     /// Borrow `s` as a ref name without validating it.
     ///
-    /// The same contract as [`RefName::from_trusted`]: only for names already validated or
-    /// read back from ref storage. Use [`RefNameRef::new`] for anything else.
+    /// The same crate-internal contract as `RefName::from_trusted`: only for names already
+    /// validated or read back from ref storage. Use [`RefNameRef::new`] for anything else.
     #[must_use]
-    pub fn from_trusted(s: &str) -> &Self {
+    pub(crate) fn from_trusted(s: &str) -> &Self {
         Self::unchecked(s)
     }
 

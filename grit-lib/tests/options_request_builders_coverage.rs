@@ -90,7 +90,7 @@ fn rev_walk_list_options_setters_set_each_field() {
 
 #[test]
 fn ref_update_new_defaults_and_setters() {
-    let name = RefName::from_trusted("refs/heads/topic");
+    let name = RefName::new("refs/heads/topic").expect("valid ref name");
     let update = RefUpdate::new(name.clone(), Some(RawRef::Direct(oid(1))));
     assert_eq!(update.name, name);
     assert_eq!(update.new_value, Some(RawRef::Direct(oid(1))));
@@ -105,7 +105,7 @@ fn ref_update_new_defaults_and_setters() {
         .with_skip_oid_verification(true);
     assert!(flags.no_deref && flags.log_only && flags.skip_oid_verification);
 
-    let other = RefName::from_trusted("refs/heads/other");
+    let other = RefName::new("refs/heads/other").expect("valid ref name");
     let update = update
         .with_name(other.clone())
         .with_new_value(None)

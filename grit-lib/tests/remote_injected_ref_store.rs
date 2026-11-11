@@ -222,7 +222,7 @@ fn wire_fetch_stays_in_the_injected_store() {
     fetch_opts.prune = true;
     fetch(&repo, "origin", fetch_opts);
     assert!(store
-        .read_raw(RefNameRef::from_trusted("refs/remotes/origin/topic"))
+        .read_raw(RefNameRef::new("refs/remotes/origin/topic").expect("valid ref name"))
         .expect("read")
         .is_none());
     assert_no_disk_tracking_refs(&local);
@@ -369,7 +369,7 @@ fn remote_prune_set_head_and_inspect_use_the_injected_store() {
         .expect("remote prune");
     assert_eq!(pruned, ["refs/remotes/origin/topic"]);
     assert!(store
-        .read_raw(RefNameRef::from_trusted("refs/remotes/origin/topic"))
+        .read_raw(RefNameRef::new("refs/remotes/origin/topic").expect("valid ref name"))
         .expect("read")
         .is_none());
 
@@ -382,7 +382,7 @@ fn remote_prune_set_head_and_inspect_use_the_injected_store() {
         Some("refs/remotes/origin/main")
     );
     assert!(store
-        .read_raw(RefNameRef::from_trusted("refs/remotes/origin/HEAD"))
+        .read_raw(RefNameRef::new("refs/remotes/origin/HEAD").expect("valid ref name"))
         .expect("read")
         .is_none());
 
@@ -393,7 +393,7 @@ fn remote_prune_set_head_and_inspect_use_the_injected_store() {
     assert_eq!(set.previous_target, None);
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/remotes/origin/HEAD"))
+            .read_raw(RefNameRef::new("refs/remotes/origin/HEAD").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Symbolic("refs/remotes/origin/main".into()))
     );

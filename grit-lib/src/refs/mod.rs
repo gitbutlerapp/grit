@@ -224,22 +224,20 @@ pub(crate) fn commit_ref_update_on_store_with_wait(
 /// # fn main() -> grit_lib::error::Result<()> {
 /// let store = MemoryRefStore::new();
 /// let oid = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
-/// let txn = |name: &str| {
-///     RefTransaction::new().update(RefUpdate::new(
-///         RefName::from_trusted(name),
-///         Some(RawRef::Direct(oid)),
-///     ))
+/// let txn = |name: RefName| {
+///     RefTransaction::new().update(RefUpdate::new(name, Some(RawRef::Direct(oid))))
 /// };
+/// let (a, b) = (RefName::new("refs/heads/a")?, RefName::new("refs/heads/b")?);
 ///
-/// let held = store.prepare(txn("refs/heads/a")?)?;
-/// let busy = prepare_with_lock_wait(&store, txn("refs/heads/b")?, LockWait::Immediately);
+/// let held = store.prepare(txn(a)?)?;
+/// let busy = prepare_with_lock_wait(&store, txn(b.clone())?, LockWait::Immediately);
 /// assert!(matches!(
 ///     busy.map(|_| ()),
 ///     Err(RefStoreError::LockHeld { name }) if name.as_str() == "refs/heads/b"
 /// ));
 /// held.commit()?;
 ///
-/// prepare_with_lock_wait(&store, txn("refs/heads/b")?, LockWait::files_ref_lock(None))?.commit()?;
+/// prepare_with_lock_wait(&store, txn(b)?, LockWait::files_ref_lock(None))?.commit()?;
 /// assert_eq!(store.read_raw(RefNameRef::new("refs/heads/b")?)?, Some(RawRef::Direct(oid)));
 /// # Ok(())
 /// # }

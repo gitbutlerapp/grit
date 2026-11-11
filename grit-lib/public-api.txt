@@ -18661,7 +18661,6 @@ pub struct grit_lib::refs::check_ref_format::RefName(_)
 impl grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
-pub fn grit_lib::refs::store::RefName::from_trusted(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::refs::store::RefName::new(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
@@ -18737,7 +18736,6 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::
 impl grit_lib::refs::store::RefNameRef
 pub const grit_lib::refs::store::RefNameRef::HEAD: &'static grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::as_str(&self) -> &str
-pub fn grit_lib::refs::store::RefNameRef::from_trusted(&str) -> &Self
 pub fn grit_lib::refs::store::RefNameRef::new(&str) -> core::result::Result<&Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
 impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
@@ -19785,7 +19783,6 @@ pub struct grit_lib::refs::store::RefName(_)
 impl grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
-pub fn grit_lib::refs::store::RefName::from_trusted(impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::refs::store::RefName::new(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
@@ -19836,7 +19833,6 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefName
 impl grit_lib::refs::store::RefNameRef
 pub const grit_lib::refs::store::RefNameRef::HEAD: &'static grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::as_str(&self) -> &str
-pub fn grit_lib::refs::store::RefNameRef::from_trusted(&str) -> &Self
 pub fn grit_lib::refs::store::RefNameRef::new(&str) -> core::result::Result<&Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
 impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName

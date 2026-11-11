@@ -75,7 +75,7 @@ fn files_store_applies_explicit_namespace_prefix() {
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(oid))
     );
@@ -202,7 +202,7 @@ fn files_store_observes_external_packed_refs_without_reopen() {
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("read loose"),
         Some(RawRef::Direct(oid))
     );
@@ -220,7 +220,7 @@ fn files_store_observes_external_packed_refs_without_reopen() {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("read packed"),
         Some(RawRef::Direct(oid)),
         "long-lived store must reload packed-refs after external rewrite"
@@ -324,7 +324,7 @@ fn files_store_reflog_identity_with_digits_in_name_gets_timestamp() {
     let mut count = 0;
     store
         .for_each_reflog_entry(
-            RefNameRef::from_trusted("refs/heads/main"),
+            RefNameRef::new("refs/heads/main").expect("valid ref name"),
             false,
             &mut |entry| {
                 assert!(
@@ -387,10 +387,14 @@ fn files_store_symref_expected_oid_update_reflog_old_oid() {
 
     let mut last: Option<ReflogEntry> = None;
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/sym"), true, &mut |e| {
-            last = Some(e.clone());
-            ControlFlow::Break(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new("refs/heads/sym").expect("valid ref name"),
+            true,
+            &mut |e| {
+                last = Some(e.clone());
+                ControlFlow::Break(())
+            },
+        )
         .expect("sym reflog");
     let entry = last.expect("sym reflog entry");
     assert_eq!(
@@ -462,10 +466,14 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
 
     let mut head_entry: Option<ReflogEntry> = None;
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted("HEAD"), true, &mut |e| {
-            head_entry = Some(e.clone());
-            ControlFlow::Break(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new("HEAD").expect("valid ref name"),
+            true,
+            &mut |e| {
+                head_entry = Some(e.clone());
+                ControlFlow::Break(())
+            },
+        )
         .expect("HEAD reflog");
     let head_entry = head_entry.expect("HEAD reflog entry");
     assert_eq!(
@@ -476,7 +484,7 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid_next)),
         "deref update must move packed main to the new oid"
@@ -496,7 +504,7 @@ fn files_store_observes_new_packed_refs_file_without_reopen() {
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("missing"),
         None
     );
@@ -508,7 +516,7 @@ fn files_store_observes_new_packed_refs_file_without_reopen() {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("read new packed"),
         Some(RawRef::Direct(oid))
     );
@@ -565,7 +573,7 @@ fn files_store_sees_external_packed_refs_rewrite() {
     .expect("packed v1");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid1))
     );
@@ -579,7 +587,7 @@ fn files_store_sees_external_packed_refs_rewrite() {
     .expect("packed v2");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/other"))
+            .read_raw(RefNameRef::new("refs/heads/other").expect("valid ref name"))
             .expect("other"),
         Some(RawRef::Direct(oid2))
     );

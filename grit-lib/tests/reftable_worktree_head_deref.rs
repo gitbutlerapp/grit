@@ -43,10 +43,14 @@ fn commit(store: &dyn RefStore, update: RefUpdate) {
 fn newest(store: &dyn RefStore, name: &str) -> Option<ReflogEntry> {
     let mut last = None;
     store
-        .for_each_reflog_entry(RefNameRef::from_trusted(name), true, &mut |e| {
-            last = Some(e.clone());
-            ControlFlow::Break(())
-        })
+        .for_each_reflog_entry(
+            RefNameRef::new(name).expect("valid ref name"),
+            true,
+            &mut |e| {
+                last = Some(e.clone());
+                ControlFlow::Break(())
+            },
+        )
         .expect("reflog");
     last
 }
@@ -65,7 +69,7 @@ fn linked_worktree(root: &Path) -> (PathBuf, PathBuf) {
     commit(
         &common_store,
         RefUpdate::new(
-            RefName::from_trusted("refs/heads/main"),
+            RefName::new("refs/heads/main").expect("valid ref name"),
             Some(RawRef::Direct(oid(1))),
         )
         .with_expected(Expected::Missing),
@@ -85,7 +89,7 @@ fn linked_worktree(root: &Path) -> (PathBuf, PathBuf) {
     commit(
         &wt_store,
         RefUpdate::new(
-            RefName::from_trusted("HEAD"),
+            RefName::new("HEAD").expect("valid ref name"),
             Some(RawRef::Symbolic("refs/heads/main".into())),
         )
         .with_expected(Expected::Missing)
@@ -102,21 +106,24 @@ fn head_update_in_linked_worktree_writes_and_logs_branch_in_common_stack() {
 
     commit(
         &wt_store,
-        RefUpdate::new(RefName::from_trusted("HEAD"), Some(RawRef::Direct(oid(2))))
-            .with_expected(Expected::Oid(oid(1)))
-            .with_reflog(log("commit: two")),
+        RefUpdate::new(
+            RefName::new("HEAD").expect("valid ref name"),
+            Some(RawRef::Direct(oid(2))),
+        )
+        .with_expected(Expected::Oid(oid(1)))
+        .with_reflog(log("commit: two")),
     );
 
     assert_eq!(
         wt_store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );
     let common_store = ReftableRefStore::open(common.clone()).expect("common store");
     assert_eq!(
         common_store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(2)))
     );
@@ -143,16 +150,19 @@ fn stale_head_update_in_linked_worktree_is_rejected() {
     let wt_store = ReftableRefStore::open(wt_git_dir).expect("worktree store");
     let txn = RefTransaction::new()
         .update(
-            RefUpdate::new(RefName::from_trusted("HEAD"), Some(RawRef::Direct(oid(3))))
-                .with_expected(Expected::Oid(oid(9)))
-                .with_reflog(log("stale")),
+            RefUpdate::new(
+                RefName::new("HEAD").expect("valid ref name"),
+                Some(RawRef::Direct(oid(3))),
+            )
+            .with_expected(Expected::Oid(oid(9)))
+            .with_reflog(log("stale")),
         )
         .expect("txn");
     assert!(wt_store.prepare(txn).is_err(), "stale compare-and-swap");
     let common_store = ReftableRefStore::open(common).expect("common store");
     assert_eq!(
         common_store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(oid(1)))
     );

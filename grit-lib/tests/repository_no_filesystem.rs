@@ -211,7 +211,7 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
         .expect("create topic");
     assert_eq!(
         repo.references()
-            .resolve(&RefName::from_trusted("HEAD"))
+            .resolve(&RefName::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         ours
     );

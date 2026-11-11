@@ -5,9 +5,9 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Result;
 use grit_lib::objects::ObjectId;
-use grit_lib::refs::store::RefNameRef;
 use grit_lib::refs::update_direct_ref_on_store;
 use grit_lib::repo::Repository;
+use grit_lib::test_support::refs::unchecked_ref_name;
 
 /// Open the repository whose git directory is `git_dir` (a bare repository, a `.git`
 /// directory or a linked worktree's admin directory).
@@ -39,7 +39,7 @@ pub fn set_ref(repo: &Repository, name: impl AsRef<str>, oid: &ObjectId) -> Resu
     update_direct_ref_on_store(
         repo.ref_store(),
         repo.git_dir(),
-        RefNameRef::from_trusted(name.as_ref()),
+        unchecked_ref_name(name.as_ref()),
         oid,
     )
 }

@@ -98,7 +98,7 @@ fn store_rejects_casefold_create_against_packed_ref() {
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/Foo"))
+            .read_raw(RefNameRef::new("refs/heads/Foo").expect("valid ref name"))
             .expect("read")
             .unwrap(),
         RawRef::Direct(tip)

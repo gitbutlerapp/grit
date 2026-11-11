@@ -185,7 +185,7 @@ fn receive_pack_publishes_push_into_custom_primary() {
     git(export.path(), &["fsck", "--full", "--strict"]);
 
     let main = refs
-        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+        .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("read ref")
         .expect("main set");
     assert_eq!(
@@ -229,7 +229,7 @@ fn non_fast_forward_leaves_custom_store_unchanged() {
     ));
     assert!(count_store_objects(store.as_ref()) > 0);
     let kept = refs
-        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+        .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("read")
         .expect("main");
     assert_eq!(
@@ -263,7 +263,7 @@ fn truncated_pack_leaves_custom_store_empty() {
     ));
     assert_eq!(count_store_objects(store.as_ref()), 0);
     assert!(refs
-        .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+        .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("read")
         .is_none());
 }

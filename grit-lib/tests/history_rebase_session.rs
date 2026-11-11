@@ -3445,7 +3445,7 @@ fn assert_abort_restores_moved_branch(
     assert_eq!(
         abort.overwritten,
         [PlannedRefUpdate {
-            name: grit_lib::refs::store::RefName::from_trusted("refs/heads/topic"),
+            name: grit_lib::refs::store::RefName::new("refs/heads/topic").expect("valid ref name"),
             old: moved,
             new: opts.request.branch_tip,
         }]
@@ -3536,7 +3536,7 @@ fn conflict_stop_abort_reports_a_branch_moved_during_the_stop() {
     assert_eq!(
         abort.overwritten,
         [PlannedRefUpdate {
-            name: grit_lib::refs::store::RefName::from_trusted("refs/heads/topic"),
+            name: grit_lib::refs::store::RefName::new("refs/heads/topic").expect("valid ref name"),
             old: moved,
             new: orig_tip,
         }]

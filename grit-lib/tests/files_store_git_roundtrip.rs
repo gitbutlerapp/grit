@@ -44,9 +44,9 @@ fn files_store_git_roundtrip() {
     let mut txn = RefTransaction::new();
     for i in 0..1000 {
         let name = if i == 0 {
-            RefName::from_trusted("refs/heads/main")
+            RefName::new("refs/heads/main").expect("valid ref name")
         } else {
-            RefName::from_trusted(format!("refs/heads/branch-{i:04}"))
+            RefName::try_from(format!("refs/heads/branch-{i:04}")).expect("valid ref name")
         };
         txn = txn
             .update(
@@ -73,7 +73,9 @@ fn files_store_git_roundtrip() {
         .for_each_ref("refs/", &mut |entry| {
             let oid = match &entry.value {
                 RawRef::Direct(o) => *o,
-                RawRef::Symbolic(t) => store.resolve(RefNameRef::from_trusted(t)).expect("resolve"),
+                RawRef::Symbolic(t) => store
+                    .resolve(RefNameRef::new(t).expect("valid ref name"))
+                    .expect("resolve"),
             };
             grit_map.insert(entry.name.clone(), oid);
             ControlFlow::Continue(())
@@ -104,13 +106,13 @@ fn files_store_git_roundtrip() {
     let store2 = FilesRefStore::from_git_dir(&git_dir).expect("reopen");
     assert_eq!(
         store2
-            .read_raw(RefNameRef::from_trusted("refs/heads/from-git"))
+            .read_raw(RefNameRef::new("refs/heads/from-git").expect("valid ref name"))
             .expect("read"),
         Some(RawRef::Direct(tip))
     );
     assert_eq!(
         store2
-            .read_raw(RefNameRef::from_trusted("refs/heads/sym-git"))
+            .read_raw(RefNameRef::new("refs/heads/sym-git").expect("valid ref name"))
             .expect("sym"),
         Some(RawRef::Symbolic("refs/heads/from-git".to_owned()))
     );

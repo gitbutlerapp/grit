@@ -421,6 +421,8 @@
 "grit_lib::refs::store::MemoryRefStore::replace_reflog_str" = "grit_lib::refs::store::MemoryRefStore::replace_reflog"
 "grit_lib::refs::store::MemoryRefStore::resolve_str" = "grit_lib::refs::store::MemoryRefStore::resolve"
 "grit_lib::refs::store::MemoryRefStore::rewrite_reflog_str" = "grit_lib::refs::store::MemoryRefStore::rewrite_reflog"
+"grit_lib::refs::store::RefName::from_trusted" = "grit_lib::refs::store::RefName::new"
+"grit_lib::refs::store::RefNameRef::from_trusted" = "grit_lib::refs::store::RefNameRef::new"
 "grit_lib::refs::store::RefStore::create_reflog_str" = "grit_lib::refs::store::RefStore::create_reflog"
 "grit_lib::refs::store::RefStore::delete_reflog_str" = "grit_lib::refs::store::RefStore::delete_reflog"
 "grit_lib::refs::store::RefStore::for_each_reflog_entry_str" = "grit_lib::refs::store::RefStore::for_each_reflog_entry"

@@ -341,26 +341,26 @@ fn rename_on_injected_memory_ref_store() {
         .unwrap();
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/renamed"))
+            .read_raw(RefNameRef::new("refs/heads/renamed").expect("valid ref name"))
             .unwrap(),
         Some(RawRef::Direct(tip))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .read_raw(RefNameRef::new("refs/heads/topic").expect("valid ref name"))
             .unwrap(),
         None
     );
     assert!(store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/renamed"))
+        .reflog_exists(RefNameRef::new("refs/heads/renamed").expect("valid ref name"))
         .unwrap());
     assert!(!store
-        .reflog_exists(RefNameRef::from_trusted("refs/heads/topic"))
+        .reflog_exists(RefNameRef::new("refs/heads/topic").expect("valid ref name"))
         .unwrap());
     let mut last_message = None;
     store
         .for_each_reflog_entry(
-            RefNameRef::from_trusted("refs/heads/renamed"),
+            RefNameRef::new("refs/heads/renamed").expect("valid ref name"),
             true,
             &mut |entry| {
                 last_message = Some(entry.message.clone());
@@ -416,7 +416,9 @@ fn rename_retargets_head_on_injected_store_when_branch_checked_out() {
         })
         .unwrap();
     assert_eq!(
-        store.read_raw(RefNameRef::from_trusted("HEAD")).unwrap(),
+        store
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
+            .unwrap(),
         Some(RawRef::Symbolic("refs/heads/renamed".to_owned()))
     );
 }

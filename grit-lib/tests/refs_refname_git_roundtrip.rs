@@ -37,7 +37,7 @@ fn grit_ref_map(repo: &Repository) -> BTreeMap<String, ObjectId> {
             let oid = match &entry.value {
                 RawRef::Direct(o) => *o,
                 RawRef::Symbolic(t) => store
-                    .resolve(RefNameRef::from_trusted(t))
+                    .resolve(RefNameRef::new(t).expect("valid ref name"))
                     .expect("resolve symref"),
             };
             map.insert(entry.name.as_str().to_owned(), oid);

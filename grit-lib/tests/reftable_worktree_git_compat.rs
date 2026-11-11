@@ -55,7 +55,7 @@ fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
         assert_eq!(git(path, &["symbolic-ref", "HEAD"]).trim(), target);
         assert_eq!(
             repo.ref_store()
-                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
                 .unwrap(),
             Some(RawRef::Symbolic(target.clone()))
         );
@@ -63,7 +63,7 @@ fn assert_head(path: &Path, oid: ObjectId, branch: Option<&str>, status: &str) {
     } else {
         assert_eq!(
             repo.ref_store()
-                .read_raw(RefNameRef::from_trusted("HEAD"))
+                .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
                 .unwrap(),
             Some(RawRef::Direct(oid))
         );

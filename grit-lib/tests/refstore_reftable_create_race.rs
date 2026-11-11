@@ -30,7 +30,7 @@ fn empty_reftable_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
     let store = ReftableRefStore::open(git_dir.clone()).expect("open");
     let txn = RefTransaction::new()
         .update(RefUpdate::new(
-            RefName::from_trusted("refs/heads/main"),
+            RefName::new("refs/heads/main").expect("valid ref name"),
             None,
         ))
         .expect("txn");
@@ -47,7 +47,7 @@ fn missing_create_txn() -> RefTransaction {
     RefTransaction::new()
         .update(
             RefUpdate::new(
-                RefName::from_trusted("refs/heads/cas-race"),
+                RefName::new("refs/heads/cas-race").expect("valid ref name"),
                 Some(RawRef::Direct(oid(1))),
             )
             .with_expected(Expected::Missing),
@@ -100,7 +100,7 @@ fn concurrent_reftable_missing_create_single_winner_per_race() {
 
         let cleanup = RefTransaction::new()
             .update(RefUpdate::new(
-                RefName::from_trusted("refs/heads/cas-race"),
+                RefName::new("refs/heads/cas-race").expect("valid ref name"),
                 None,
             ))
             .expect("cleanup txn");

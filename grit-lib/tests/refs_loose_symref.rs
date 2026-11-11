@@ -416,7 +416,7 @@ fn t1401_symref_invalid_target_overwrite_both_backends() {
             .references()
             .update_symbolic(
                 grit_lib::refs::store::RefNameRef::new("refs/heads/over").expect("valid ref name"),
-                grit_lib::refs::store::RefNameRef::from_trusted("not a valid ref!!"),
+                grit_lib::test_support::refs::unchecked_ref_name("not a valid ref!!"),
             )
             .expect("bad symref");
         grit_test_support::refs::set_ref(
@@ -561,7 +561,7 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
             .ref_store();
         assert!(
             matches!(
-                store.resolve(RefNameRef::from_trusted("refs/heads/dangling")),
+                store.resolve(RefNameRef::new("refs/heads/dangling").expect("valid ref name")),
                 Err(Error::Ref(RefError::Store(RefStoreError::NotFound { ref name }))) if name == "refs/heads/gone"
             ),
             "{}",

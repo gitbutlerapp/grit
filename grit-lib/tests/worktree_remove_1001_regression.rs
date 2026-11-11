@@ -178,7 +178,7 @@ fn commit_staged_without_index_stat_refresh(
     update_branch_for_commit_with_config(
         repo.git_dir(),
         &BranchCommitRefUpdate {
-            branch_ref: RefNameRef::from_trusted(refname.as_str()),
+            branch_ref: RefNameRef::new(refname.as_str()).expect("valid ref name"),
             expected_old: parent,
             new_oid: oid,
             identity: &commit_data.committer,

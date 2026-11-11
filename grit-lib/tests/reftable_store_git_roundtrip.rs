@@ -156,7 +156,7 @@ fn reftable_store_git_roundtrip() {
     let mut git_written_log = 0;
     store2
         .for_each_reflog_entry(
-            RefNameRef::from_trusted("refs/heads/from-git"),
+            RefNameRef::new("refs/heads/from-git").expect("valid ref name"),
             false,
             &mut |_| {
                 git_written_log += 1;
@@ -241,7 +241,7 @@ fn reftable_reflog_identity_with_digits_in_name_visible_to_git() {
     let mut identity_line = String::new();
     store
         .for_each_reflog_entry(
-            RefNameRef::from_trusted("refs/heads/digit-name"),
+            RefNameRef::new("refs/heads/digit-name").expect("valid ref name"),
             false,
             &mut |e| {
                 identity_line = e.identity.clone();

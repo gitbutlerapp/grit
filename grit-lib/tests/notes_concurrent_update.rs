@@ -42,7 +42,10 @@ impl RacingStore {
     fn set(&self, oid: ObjectId) {
         commit_ref_update_on_store(
             &self.inner,
-            RefUpdate::new(RefName::from_trusted(NOTES), Some(RawRef::Direct(oid))),
+            RefUpdate::new(
+                RefName::new(NOTES).expect("valid ref name"),
+                Some(RawRef::Direct(oid)),
+            ),
         )
         .expect("move notes ref");
     }

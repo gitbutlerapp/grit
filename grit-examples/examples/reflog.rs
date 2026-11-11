@@ -5,7 +5,7 @@ use grit_lib::repo::Repository;
 
 fn main() -> grit_lib::error::Result<()> {
     let repo = Repository::discover(None, &RepositoryOptions::from_process())?;
-    let head = RefName::from_trusted("HEAD");
+    let head = RefName::new("HEAD")?;
     println!("HEAD has a reflog: {}", repo.reflogs().exists(&head)?);
 
     for row in repo.reflogs().entries(&head)?.iter().take(5) {

@@ -40,7 +40,7 @@ fn counting_ref_store_tracks_operations() -> grit_lib::error::Result<()> {
 
     let txn = RefTransaction::new().update(
         RefUpdate::new(
-            RefName::from_trusted("refs/heads/wrapped"),
+            RefName::new("refs/heads/wrapped")?,
             Some(RawRef::Direct(oid)),
         )
         .with_expected(Expected::Oid(oid)),

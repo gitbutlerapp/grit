@@ -105,7 +105,7 @@ fn prepared_refusal_leaves_ref_unchanged_and_logs_aborted() {
     assert!(matches!(err, Error::Hook(_)), "{err}");
     assert!(repo
         .ref_store()
-        .read_raw(RefNameRef::from_trusted("refs/heads/blocked"))
+        .read_raw(RefNameRef::new("refs/heads/blocked").expect("valid ref name"))
         .expect("read")
         .is_none());
     let text = read_log(&log);
@@ -137,7 +137,7 @@ fn files_backend_commit_emits_head_and_branch_lines() {
     update_branch_for_commit_on_store(
         repo.ref_store(),
         &BranchCommitRefUpdate {
-            branch_ref: RefNameRef::from_trusted("refs/heads/main"),
+            branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
             expected_old: Some(old),
             new_oid: new_commit,
             identity: "T <t@e.x> 1700000000 +0000",
@@ -248,7 +248,7 @@ fn branch_lock_held_during_prepared_blocks_nested_ref_update() {
     update_branch_for_commit_on_store(
         repo.ref_store(),
         &BranchCommitRefUpdate {
-            branch_ref: RefNameRef::from_trusted("refs/heads/main"),
+            branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
             expected_old: Some(old_oid),
             new_oid,
             identity: "T <t@e.x> 1700000000 +0000",

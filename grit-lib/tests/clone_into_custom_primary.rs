@@ -150,7 +150,7 @@ fn clone_into_memory_store_and_memory_ref_store_checks_out() {
     );
     assert_eq!(
         ref_store
-            .read_raw(RefNameRef::from_trusted("refs/remotes/origin/main"))
+            .read_raw(RefNameRef::new("refs/remotes/origin/main").expect("valid ref name"))
             .expect("read tracking"),
         Some(RawRef::Direct(tip)),
         "fetch must keep origin/main in the injected ref store"
@@ -159,13 +159,13 @@ fn clone_into_memory_store_and_memory_ref_store_checks_out() {
     assert!(matches!(outcome.checkout, CloneCheckout::CheckedOut(_)));
     assert_eq!(
         ref_store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("read local branch"),
         Some(RawRef::Direct(tip))
     );
     assert_eq!(
         ref_store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".to_owned()))
     );

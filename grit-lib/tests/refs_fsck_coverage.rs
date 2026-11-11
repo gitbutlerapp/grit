@@ -54,7 +54,7 @@ fn refs_fsck_reports_bad_symref_and_formats_line() {
     let dangling = RefTransaction::new()
         .update(
             RefUpdate::new(
-                RefName::from_trusted("refs/heads/dangling"),
+                RefName::new("refs/heads/dangling").expect("valid ref name"),
                 Some(RawRef::Direct(ObjectId::from_bytes(&[1; 20]).expect("oid"))),
             )
             .with_expected(Expected::Missing)
@@ -237,7 +237,7 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
     let dangling = RefTransaction::new()
         .update(
             RefUpdate::new(
-                RefName::from_trusted("refs/heads/dangling"),
+                RefName::new("refs/heads/dangling").expect("valid ref name"),
                 Some(RawRef::Direct(ObjectId::from_bytes(&[2; 20]).expect("oid"))),
             )
             .with_expected(Expected::Missing)
@@ -327,7 +327,7 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
     let wt_dangling = RefTransaction::new()
         .update(
             RefUpdate::new(
-                RefName::from_trusted("refs/worktree/dangling"),
+                RefName::new("refs/worktree/dangling").expect("valid ref name"),
                 Some(RawRef::Direct(ObjectId::from_bytes(&[3; 20]).expect("oid"))),
             )
             .with_expected(Expected::Missing)
@@ -359,7 +359,7 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
     let common_dangling = RefTransaction::new()
         .update(
             RefUpdate::new(
-                RefName::from_trusted("refs/heads/common-dangling"),
+                RefName::new("refs/heads/common-dangling").expect("valid ref name"),
                 Some(RawRef::Direct(ObjectId::from_bytes(&[4; 20]).expect("oid"))),
             )
             .with_expected(Expected::Missing)

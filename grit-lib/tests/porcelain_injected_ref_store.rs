@@ -414,31 +414,31 @@ fn porcelain_battery_keeps_refs_head_and_reflogs_in_injected_store() {
 
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into()))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(result.merged))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .read_raw(RefNameRef::new("refs/heads/topic").expect("valid ref name"))
             .expect("topic"),
         None
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/tags/v1"))
+            .read_raw(RefNameRef::new("refs/tags/v1").expect("valid ref name"))
             .expect("tag"),
         Some(RawRef::Direct(result.merged))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/stash"))
+            .read_raw(RefNameRef::new("refs/stash").expect("valid ref name"))
             .expect("stash"),
         None
     );
@@ -553,25 +553,25 @@ fn porcelain_battery_on_reftable_repository_keeps_refs_and_reflogs_in_reftable()
     let store = repo.ref_store();
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into()))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/main"))
+            .read_raw(RefNameRef::new("refs/heads/main").expect("valid ref name"))
             .expect("main"),
         Some(RawRef::Direct(result.merged))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/topic"))
+            .read_raw(RefNameRef::new("refs/heads/topic").expect("valid ref name"))
             .expect("topic"),
         None
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/stash"))
+            .read_raw(RefNameRef::new("refs/stash").expect("valid ref name"))
             .expect("stash"),
         None
     );
@@ -658,7 +658,7 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
     assert_eq!(outcome.commit, tip);
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/topic".into()))
     );
@@ -682,7 +682,7 @@ fn detached_switch_installs_head_when_store_has_none() {
         .expect("detach");
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Direct(tip))
     );

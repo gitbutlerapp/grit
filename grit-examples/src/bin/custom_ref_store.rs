@@ -39,7 +39,7 @@ fn main() -> grit_lib::error::Result<()> {
 
     let txn = RefTransaction::new().update(
         RefUpdate::new(
-            RefName::from_trusted("refs/heads/custom-demo"),
+            RefName::new("refs/heads/custom-demo")?,
             Some(RawRef::Direct(oid)),
         )
         .with_expected(Expected::Oid(oid)),

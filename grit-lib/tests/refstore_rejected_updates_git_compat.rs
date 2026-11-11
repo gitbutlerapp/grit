@@ -16,8 +16,10 @@ use support::{
 };
 
 fn put(store: &dyn RefStore, name: &str, value: RawRef) -> Result<(), RefStoreError> {
-    let txn =
-        RefTransaction::new().update(RefUpdate::new(RefName::from_trusted(name), Some(value)))?;
+    let txn = RefTransaction::new().update(RefUpdate::new(
+        grit_lib::test_support::refs::unchecked_ref_name(name),
+        Some(value),
+    ))?;
     store.prepare(txn)?.commit()
 }
 
@@ -77,7 +79,7 @@ fn rejected_updates_keep_repository_clean_for_git() {
         put(store.as_ref(), "refs/heads/kept", RawRef::Direct(commit)).expect("valid update");
         assert_eq!(
             store
-                .read_raw(RefNameRef::from_trusted("refs/heads/z"))
+                .read_raw(RefNameRef::new("refs/heads/z").expect("valid ref name"))
                 .expect("read z"),
             None,
             "{backend:?}"

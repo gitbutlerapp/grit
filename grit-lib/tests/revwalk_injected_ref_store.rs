@@ -291,13 +291,13 @@ fn assert_nothing_on_disk(git_dir: &Path) {
 fn assert_store(store: &MemoryRefStore, observed: &Observed) {
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("refs/heads/linked"))
+            .read_raw(RefNameRef::new("refs/heads/linked").expect("valid ref name"))
             .expect("linked"),
         Some(RawRef::Direct(observed.hello))
     );
     assert_eq!(
         store
-            .read_raw(RefNameRef::from_trusted("HEAD"))
+            .read_raw(RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("HEAD"),
         Some(RawRef::Symbolic("refs/heads/main".into())),
         "adding a linked worktree must not move the main worktree's HEAD"
