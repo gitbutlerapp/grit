@@ -277,13 +277,13 @@ fn branch_commit_writer_to_a_missing_object_is_refused_and_git_fsck_stays_clean(
         let grit = open(repo);
         let err = grit_lib::refs::update_branch_for_commit_on_store(
             grit.ref_store(),
-            &grit_lib::refs::BranchCommitRefUpdate {
-                branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
-                expected_old: Some(commit),
-                new_oid: bogus(),
-                identity: "Ref Verify <verify@example.com> 1700000000 +0000",
-                reflog_message: "commit: bogus",
-            },
+            &grit_lib::refs::BranchCommitRefUpdate::new(
+                RefNameRef::new("refs/heads/main").expect("valid ref name"),
+                Some(commit),
+                bogus(),
+                "Ref Verify <verify@example.com> 1700000000 +0000",
+                "commit: bogus",
+            ),
             &grit_lib::config::ConfigSet::new(),
         )
         .expect_err("missing tip");

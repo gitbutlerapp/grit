@@ -76,6 +76,7 @@ pub enum SortKey {
 
 /// Sort direction and key for ref listing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefSort {
     /// Which field to sort by.
     pub key: SortKey,
@@ -89,6 +90,22 @@ impl Default for RefSort {
             key: SortKey::Name,
             reverse: false,
         }
+    }
+}
+
+impl RefSort {
+    /// Sets [`key`](Self::key).
+    #[must_use]
+    pub const fn with_key(mut self, key: SortKey) -> Self {
+        self.key = key;
+        self
+    }
+
+    /// Sets [`reverse`](Self::reverse).
+    #[must_use]
+    pub const fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
     }
 }
 
@@ -217,11 +234,28 @@ pub struct RefListing {
 
 /// Extra inputs for pattern matching and version sort (explicit config, no env reads).
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct RefQueryOptions {
     /// `versionsort.suffix` values in priority order (Git multi-valued config).
     pub versionsort_suffixes: Vec<String>,
     /// When true, patterns use [`WM_CASEFOLD`] like `core.ignorecase`.
     pub ignore_case: bool,
+}
+
+impl RefQueryOptions {
+    /// Sets [`versionsort_suffixes`](Self::versionsort_suffixes).
+    #[must_use]
+    pub fn with_versionsort_suffixes(mut self, versionsort_suffixes: Vec<String>) -> Self {
+        self.versionsort_suffixes = versionsort_suffixes;
+        self
+    }
+
+    /// Sets [`ignore_case`](Self::ignore_case).
+    #[must_use]
+    pub const fn with_ignore_case(mut self, ignore_case: bool) -> Self {
+        self.ignore_case = ignore_case;
+        self
+    }
 }
 
 type QueryResult<T> = crate::error::Result<T>;

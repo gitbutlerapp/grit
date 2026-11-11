@@ -94,12 +94,7 @@ fn interpret_trailers_trailer_arg_matches_git() {
         unfold: false,
         no_divider: false,
     };
-    let args = [NewTrailerArg {
-        text: "Acked-by: Maintainer".into(),
-        where_: TrailerWhere::Default,
-        if_exists: TrailerIfExists::Default,
-        if_missing: TrailerIfMissing::Default,
-    }];
+    let args = [NewTrailerArg::new("Acked-by: Maintainer")];
     let grit_out = process_trailers(input, &opts, &args, Some(git_dir.as_path()));
     assert_eq!(grit_out.trim_end(), git_out.trim_end());
 }
@@ -214,12 +209,12 @@ fn assert_args_match_git(
     let mut new_args = Vec::new();
     for text in texts {
         git_args.push(format!("--trailer={text}"));
-        new_args.push(NewTrailerArg {
-            text: (*text).to_string(),
-            where_: where_.0,
-            if_exists: if_exists.0,
-            if_missing: if_missing.0,
-        });
+        new_args.push(
+            NewTrailerArg::new((*text).to_string())
+                .with_where_(where_.0)
+                .with_if_exists(if_exists.0)
+                .with_if_missing(if_missing.0),
+        );
     }
     let expected = git_interpret_trailers_raw(repo, &git_args, input);
     let actual = process_trailers(
@@ -357,12 +352,7 @@ fn trailer_output_options_match_git() {
                 Vec::new()
             } else {
                 git_args.push("--trailer=Acked-by: Z".to_string());
-                vec![NewTrailerArg {
-                    text: "Acked-by: Z".into(),
-                    where_: TrailerWhere::Default,
-                    if_exists: TrailerIfExists::Default,
-                    if_missing: TrailerIfMissing::Default,
-                }]
+                vec![NewTrailerArg::new("Acked-by: Z")]
             };
             let expected = git_interpret_trailers_raw(dir.path(), &git_args, input);
             let actual = process_trailers(input, &opts, &new_args, Some(git_dir.as_path()));

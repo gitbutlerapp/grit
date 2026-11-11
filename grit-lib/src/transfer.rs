@@ -492,11 +492,42 @@ impl Default for FetchOptions {
 
 /// Identity and message for clone reflog entries written by the library.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct CloneReflog {
     /// Committer identity for the clone reflog line.
     pub identity: crate::ident::Signature,
     /// Reflog message (e.g. `clone: from <url>`).
     pub message: String,
+}
+
+impl CloneReflog {
+    /// Creates a [`CloneReflog`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `identity`: committer identity for the clone reflog line.
+    /// - `message`: reflog message (for example `clone: from <url>`).
+    #[must_use]
+    pub fn new(identity: crate::ident::Signature, message: impl Into<String>) -> Self {
+        Self {
+            identity,
+            message: message.into(),
+        }
+    }
+
+    /// Sets [`identity`](Self::identity).
+    #[must_use]
+    pub fn with_identity(mut self, identity: crate::ident::Signature) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: String) -> Self {
+        self.message = message;
+        self
+    }
 }
 
 impl Clone for FetchOptions {

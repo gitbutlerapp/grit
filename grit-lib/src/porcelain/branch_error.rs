@@ -129,11 +129,42 @@ impl BranchError {
 
 /// Start commit and reflog label for [`crate::porcelain::branch::BranchCreateOptions::start`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StartPoint {
     /// Tip commit for the new or updated branch.
     pub oid: ObjectId,
     /// Label for `branch: Created from …` / `branch: Reset to …`.
     pub label: String,
+}
+
+impl StartPoint {
+    /// Creates a [`StartPoint`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `oid`: tip commit for the new or updated branch.
+    /// - `label`: label for `branch: Created from …` / `branch: Reset to …`.
+    #[must_use]
+    pub fn new(oid: ObjectId, label: impl Into<String>) -> Self {
+        Self {
+            oid,
+            label: label.into(),
+        }
+    }
+
+    /// Sets [`oid`](Self::oid).
+    #[must_use]
+    pub const fn with_oid(mut self, oid: ObjectId) -> Self {
+        self.oid = oid;
+        self
+    }
+
+    /// Sets [`label`](Self::label).
+    #[must_use]
+    pub fn with_label(mut self, label: String) -> Self {
+        self.label = label;
+        self
+    }
 }
 
 /// Whether creating a branch should configure `branch.<name>.remote` / `.merge`.

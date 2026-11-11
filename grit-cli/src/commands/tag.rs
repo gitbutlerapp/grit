@@ -341,10 +341,11 @@ fn list(
         repo,
         RefQuery::default()
             .with_patterns(patterns)
-            .with_sort(RefSort {
-                key: sort.sort_key(),
-                reverse,
-            })
+            .with_sort(
+                RefSort::default()
+                    .with_key(sort.sort_key())
+                    .with_reverse(reverse),
+            )
             .with_limit(output.limit)
             .with_contains(contains_ids)
             .with_points_at(resolve_points_at(repo, &points_at)?),

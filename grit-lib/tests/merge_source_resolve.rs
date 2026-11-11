@@ -90,17 +90,11 @@ fn resolves_branches_by_namespace() {
     let repo = open_repo(dir.path());
     assert_eq!(
         resolved(&repo, "side"),
-        MergeSource {
-            oid: c[1],
-            kind: MergeSourceKind::LocalBranch
-        }
+        MergeSource::new(c[1], MergeSourceKind::LocalBranch)
     );
     assert_eq!(
         resolved(&repo, "origin/topic"),
-        MergeSource {
-            oid: c[1],
-            kind: MergeSourceKind::RemoteBranch
-        }
+        MergeSource::new(c[1], MergeSourceKind::RemoteBranch)
     );
 }
 
@@ -110,10 +104,7 @@ fn resolves_lightweight_and_annotated_tags() {
     let repo = open_repo(dir.path());
     assert_eq!(
         resolved(&repo, "keep"),
-        MergeSource {
-            oid: c[3],
-            kind: MergeSourceKind::Tag
-        }
+        MergeSource::new(c[3], MergeSourceKind::Tag)
     );
     let annotated = resolved(&repo, "v1");
     assert_ne!(
@@ -121,13 +112,7 @@ fn resolves_lightweight_and_annotated_tags() {
         rev(&dir, "refs/tags/v1"),
         "tag object must be peeled"
     );
-    assert_eq!(
-        annotated,
-        MergeSource {
-            oid: c[2],
-            kind: MergeSourceKind::Tag
-        }
-    );
+    assert_eq!(annotated, MergeSource::new(c[2], MergeSourceKind::Tag));
 }
 
 #[test]
@@ -159,10 +144,7 @@ fn branch_name_wins_over_tag_of_same_name() {
     let repo = open_repo(dir.path());
     assert_eq!(
         resolved(&repo, "side"),
-        MergeSource {
-            oid: c[1],
-            kind: MergeSourceKind::LocalBranch
-        }
+        MergeSource::new(c[1], MergeSourceKind::LocalBranch)
     );
 }
 
@@ -234,10 +216,7 @@ fn ranges_over_brace_containing_branch_are_not_found() {
     let repo = open_repo(dir.path());
     assert_eq!(
         resolved(&repo, "foo{bar"),
-        MergeSource {
-            oid: c[1],
-            kind: MergeSourceKind::LocalBranch
-        }
+        MergeSource::new(c[1], MergeSourceKind::LocalBranch)
     );
     let got = resolved(&repo, "foo{bar~1");
     assert_eq!((got.oid, got.kind), (c[0], MergeSourceKind::Commit));

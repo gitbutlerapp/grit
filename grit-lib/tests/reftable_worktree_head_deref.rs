@@ -22,13 +22,11 @@ fn oid(byte: u8) -> ObjectId {
 }
 
 fn log(message: &str) -> Option<ReflogUpdate> {
-    Some(ReflogUpdate {
-        identity: "T <t@example.com>".to_owned(),
-        message: message.to_owned(),
-        time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
-        old_oid: None,
-        new_oid: None,
-    })
+    Some(ReflogUpdate::new(
+        "T <t@example.com>".to_owned(),
+        message.to_owned(),
+        time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time"),
+    ))
 }
 
 fn commit(store: &dyn RefStore, update: RefUpdate) {

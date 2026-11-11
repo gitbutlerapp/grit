@@ -31,13 +31,12 @@ fn append(
 ) -> grit_lib::error::Result<()> {
     let txn = RefTransaction::new().update(
         RefUpdate::new("refs/heads/race".into(), Some(RawRef::Direct(oid))).with_reflog(Some(
-            ReflogUpdate {
-                identity: "T <t@example.com>".into(),
-                message: "x".into(),
-                time: time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
-                old_oid: None,
-                new_oid: Some(oid),
-            },
+            ReflogUpdate::new(
+                "T <t@example.com>",
+                "x",
+                time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
+            )
+            .with_new_oid(Some(oid)),
         )),
     )?;
     prepare_with_lock_wait(store, txn, lock_wait)?.commit()?;

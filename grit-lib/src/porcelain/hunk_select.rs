@@ -43,6 +43,7 @@ use crate::worktree_rules::WorktreeRules;
 ///
 /// Line numbers match `grit diff --json` `lines[].new` on the unstaged side.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LineRange {
     /// Repository-relative path.
     pub path: String,
@@ -50,6 +51,45 @@ pub struct LineRange {
     pub start: usize,
     /// Last new-side line number in the range (1-based, inclusive).
     pub end: usize,
+}
+
+impl LineRange {
+    /// Creates a [`LineRange`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: repository-relative path.
+    /// - `start`: first new-side line number in the range (1-based).
+    /// - `end`: last new-side line number in the range (1-based, inclusive).
+    #[must_use]
+    pub fn new(path: impl Into<String>, start: usize, end: usize) -> Self {
+        Self {
+            path: path.into(),
+            start,
+            end,
+        }
+    }
+
+    /// Sets [`path`](Self::path).
+    #[must_use]
+    pub fn with_path(mut self, path: String) -> Self {
+        self.path = path;
+        self
+    }
+
+    /// Sets [`start`](Self::start).
+    #[must_use]
+    pub const fn with_start(mut self, start: usize) -> Self {
+        self.start = start;
+        self
+    }
+
+    /// Sets [`end`](Self::end).
+    #[must_use]
+    pub const fn with_end(mut self, end: usize) -> Self {
+        self.end = end;
+        self
+    }
 }
 
 /// Selected hunks by stable id and/or new-side line ranges.

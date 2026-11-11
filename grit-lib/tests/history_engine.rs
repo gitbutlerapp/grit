@@ -123,12 +123,7 @@ fn plan_rewrite_rewords_and_replays_linear_descendants() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["b"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("second reworded\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("second reworded\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -182,15 +177,7 @@ fn plan_rewrite_preserves_encoding_when_message_unchanged() {
     git(wt, &["update-ref", "refs/heads/main", &encoded_b.to_hex()]);
 
     let mut edits = HistoryEdits::new();
-    edits.insert(
-        encoded_b,
-        CommitEdit::Rewrite {
-            tree: None,
-            message: None,
-            author: None,
-            parents: None,
-        },
-    );
+    edits.insert(encoded_b, CommitEdit::rewrite(None, None, None, None));
     let plan = grit
         .history()
         .plan_rewrite(
@@ -226,21 +213,11 @@ fn plan_rewrite_implicit_tree_replay_preserves_ancestor_tree_change() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         a_oid,
-        CommitEdit::Rewrite {
-            tree: Some(a_tree_with_ancestor),
-            message: None,
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(Some(a_tree_with_ancestor), None, None, None),
     );
     edits.insert(
         b_oid,
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("reword child only\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("reword child only\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -275,11 +252,11 @@ fn plan_rewrite_insert_before_root_succeeds() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["r"],
-        CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit {
-            tree: insert_tree,
-            author: "Insert <i@grit.test> 1 +0000".into(),
-            message: "inserted root parent\n".into(),
-        }),
+        CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit::new(
+            insert_tree,
+            "Insert <i@grit.test> 1 +0000",
+            "inserted root parent\n",
+        )),
     );
     let plan = grit
         .history()
@@ -311,11 +288,11 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         merge,
-        CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit {
-            tree: insert_tree,
-            author: "Insert <i@grit.test> 1 +0000".into(),
-            message: "inserted parent\n".into(),
-        }),
+        CommitEdit::InsertBefore(grit_lib::revwalk::history::NewCommit::new(
+            insert_tree,
+            "Insert <i@grit.test> 1 +0000",
+            "inserted parent\n",
+        )),
     );
     let err = grit
         .history()
@@ -365,12 +342,7 @@ fn plan_rewrite_non_commit_tip_is_a_typed_engine_error() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         blob,
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("nope\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("nope\n".into()), None, None),
     );
     let err = grit
         .history()
@@ -439,12 +411,7 @@ fn plan_rewrite_strips_gpgsig_and_gpgsig_sha256() {
         let mut edits = HistoryEdits::new();
         edits.insert(
             signed,
-            CommitEdit::Rewrite {
-                tree: None,
-                message: Some(format!("reword {case}\n")),
-                author: None,
-                parents: None,
-            },
+            CommitEdit::rewrite(None, Some(format!("reword {case}\n")), None, None),
         );
         let plan = grit
             .history()
@@ -488,12 +455,7 @@ fn plan_rewrite_keeps_all_merge_parents_on_implicit_tree_reword() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         merge_oid,
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("merge reword only\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("merge reword only\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -523,12 +485,7 @@ fn plan_rewrite_skips_merge_when_parent_tree_unchanged() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("first reworded\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("first reworded\n".into()), None, None),
     );
     let _plan = grit
         .history()
@@ -552,12 +509,7 @@ fn plan_rewrite_updates_all_descendant_branches() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("root reword\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("root reword\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -588,12 +540,7 @@ fn plan_rewrite_head_scope_updates_only_head() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("base reword\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("base reword\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -627,12 +574,7 @@ fn plan_rewrite_replays_merge_descendants() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("reword root\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("reword root\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -692,17 +634,7 @@ fn plan_rewrite_reports_conflict_with_paths() {
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
 
     let mut edits = HistoryEdits::new();
-    edits.insert(
-        b,
-        CommitEdit::Rewrite {
-            // Match a parent tree and `b` becomes empty under `EmptyPolicy::Abort`.
-            // Use a distinct tree so replaying `c` hits a transplant conflict instead.
-            tree: Some(tree_middle),
-            message: None,
-            author: None,
-            parents: None,
-        },
-    );
+    edits.insert(b, CommitEdit::rewrite(Some(tree_middle), None, None, None));
 
     let err = grit
         .history()
@@ -741,15 +673,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
     let oids_c = c;
     let mut edits_drop = HistoryEdits::new();
-    edits_drop.insert(
-        b,
-        CommitEdit::Rewrite {
-            tree: Some(tree_a),
-            message: None,
-            author: None,
-            parents: None,
-        },
-    );
+    edits_drop.insert(b, CommitEdit::rewrite(Some(tree_a), None, None, None));
     let drop_plan = grit
         .history()
         .plan_rewrite(
@@ -772,15 +696,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
     );
 
     let mut edits_abort = HistoryEdits::new();
-    edits_abort.insert(
-        b,
-        CommitEdit::Rewrite {
-            tree: Some(tree_a),
-            message: None,
-            author: None,
-            parents: None,
-        },
-    );
+    edits_abort.insert(b, CommitEdit::rewrite(Some(tree_a), None, None, None));
     let abort_err = grit
         .history()
         .plan_rewrite(
@@ -832,12 +748,7 @@ fn plan_rewrite_rejects_branch_checked_out_in_other_worktree() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("reword\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("reword\n".into()), None, None),
     );
     let err = grit
         .history()
@@ -873,12 +784,7 @@ fn plan_rewrite_skips_same_tip_branch_checked_out_in_other_worktree() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("reword\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("reword\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -901,12 +807,7 @@ fn plan_rewrite_detached_head() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["b"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("detached reword\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("detached reword\n".into()), None, None),
     );
     let plan = grit
         .history()
@@ -933,12 +834,7 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("silent reword\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("silent reword\n".into()), None, None),
     );
     let _plan = grit
         .history()
@@ -968,12 +864,7 @@ fn plan_rewrite_surfaces_missing_object_as_library_error() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["b"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("reword\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("reword\n".into()), None, None),
     );
     let err = grit
         .history()
@@ -1012,12 +903,7 @@ fn plan_rewrite_parent_only_replay_matches_git_commit_tree() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::Rewrite {
-            tree: None,
-            message: Some("reword first\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(None, Some("reword first\n".into()), None, None),
     );
     let committer_line = committer(99);
     let plan = grit
@@ -1104,11 +990,11 @@ fn history_public_api_coverage_smoke() {
     };
     let _opts = RewriteOptions::new(committer(0).parse().expect("signature"))
         .with_empty(EmptyPolicy::Abort);
-    let _nc = NewCommit {
-        tree: ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
-        author: "A <a@b.c> 0 +0000".into(),
-        message: "m\n".into(),
-    };
+    let _nc = NewCommit::new(
+        ObjectId::null(grit_lib::objects::HashAlgo::Sha1),
+        "A <a@b.c> 0 +0000",
+        "m\n",
+    );
     let mut map: BTreeMap<_, _> = Default::default();
     map.insert(
         ObjectId::null(grit_lib::objects::HashAlgo::Sha1),

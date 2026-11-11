@@ -32,6 +32,7 @@ pub struct CommandHandleError;
 
 /// How a child process should inherit or receive environment variables.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CommandEnvironment {
     /// When `true`, the child starts from the current process environment (system runner only).
     pub inherit_process: bool,
@@ -73,6 +74,27 @@ impl CommandEnvironment {
             set,
             remove: Vec::new(),
         }
+    }
+
+    /// Sets [`inherit_process`](Self::inherit_process).
+    #[must_use]
+    pub const fn with_inherit_process(mut self, inherit_process: bool) -> Self {
+        self.inherit_process = inherit_process;
+        self
+    }
+
+    /// Sets [`set`](Self::set).
+    #[must_use]
+    pub fn with_set(mut self, set: Vec<(OsString, OsString)>) -> Self {
+        self.set = set;
+        self
+    }
+
+    /// Sets [`remove`](Self::remove).
+    #[must_use]
+    pub fn with_remove(mut self, remove: Vec<OsString>) -> Self {
+        self.remove = remove;
+        self
     }
 }
 

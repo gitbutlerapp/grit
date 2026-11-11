@@ -134,15 +134,16 @@ fn git_blame(dir: &Path, file: &str, ignore: &IgnoreParams<'_>) -> Vec<Porcelain
 fn grit_blame(repo: &Repository, file: &str, ignore: &IgnoreParams<'_>) -> Vec<PorcelainLine> {
     let loaded = IgnoreRevs::load(
         repo,
-        &IgnoreRevsSources {
-            files: ignore
-                .ignore_revs_file
-                .iter()
-                .map(|s| (*s).to_owned())
-                .collect(),
-            revs: ignore.ignore_rev.iter().map(|s| (*s).to_owned()).collect(),
-            use_config: ignore.use_config,
-        },
+        &IgnoreRevsSources::default()
+            .with_files(
+                ignore
+                    .ignore_revs_file
+                    .iter()
+                    .map(|s| (*s).to_owned())
+                    .collect(),
+            )
+            .with_revs(ignore.ignore_rev.iter().map(|s| (*s).to_owned()).collect())
+            .with_use_config(ignore.use_config),
     )
     .expect("IgnoreRevs::load");
     let result = repo
@@ -456,10 +457,7 @@ fn line_range_through_ignored_commit() {
     );
     let grit_loaded = IgnoreRevs::load(
         &repo,
-        &IgnoreRevsSources {
-            revs: vec!["X".into()],
-            ..Default::default()
-        },
+        &IgnoreRevsSources::default().with_revs(vec!["X".into()]),
     )
     .unwrap();
     let grit = repo
@@ -500,10 +498,7 @@ fn ignore_revs_file_resolves_from_worktree_root_when_cwd_is_subdirectory() {
     let repo = Repository::open(&dir.path().join(".git"), &opts).unwrap();
     let loaded = IgnoreRevs::load(
         &repo,
-        &IgnoreRevsSources {
-            files: vec!["sub/ignore_x".into()],
-            ..Default::default()
-        },
+        &IgnoreRevsSources::default().with_files(vec!["sub/ignore_x".into()]),
     )
     .expect("load");
     assert!(loaded.as_set().contains(&x));
@@ -549,10 +544,7 @@ fn typed_errors_for_bad_rev_and_file() {
     let repo = open_repo(dir.path());
     let err = IgnoreRevs::load(
         &repo,
-        &IgnoreRevsSources {
-            revs: vec!["NOREV".into()],
-            ..Default::default()
-        },
+        &IgnoreRevsSources::default().with_revs(vec!["NOREV".into()]),
     )
     .unwrap_err();
     assert!(matches!(
@@ -562,10 +554,7 @@ fn typed_errors_for_bad_rev_and_file() {
 
     let err = IgnoreRevs::load(
         &repo,
-        &IgnoreRevsSources {
-            files: vec!["NOFILE".into()],
-            ..Default::default()
-        },
+        &IgnoreRevsSources::default().with_files(vec!["NOFILE".into()]),
     )
     .unwrap_err();
     assert!(matches!(
@@ -576,10 +565,7 @@ fn typed_errors_for_bad_rev_and_file() {
     std::fs::write(dir.path().join("ignore_norev"), "NOREV\n").unwrap();
     let err = IgnoreRevs::load(
         &repo,
-        &IgnoreRevsSources {
-            files: vec!["ignore_norev".into()],
-            ..Default::default()
-        },
+        &IgnoreRevsSources::default().with_files(vec!["ignore_norev".into()]),
     )
     .unwrap_err();
     assert!(matches!(

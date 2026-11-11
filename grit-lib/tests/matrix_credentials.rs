@@ -120,11 +120,9 @@ fn build_config(dir: &Path, kvs: &[(&str, &str)]) -> ConfigSet {
 }
 
 fn sample_target(host: &str) -> Credential {
-    Credential {
-        protocol: Some("https".into()),
-        host: Some(host.into()),
-        ..Default::default()
-    }
+    Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some(host.into()))
 }
 
 /// Locate `git-credential-store` so we can drive the REAL external helper.
@@ -254,11 +252,9 @@ fn parse_bytes_matches_parse_and_lines_without_equals_ignored() {
 
 #[test]
 fn is_complete_requires_nonempty_user_and_password() {
-    let mut c = Credential {
-        protocol: Some("https".into()),
-        host: Some("h".into()),
-        ..Default::default()
-    };
+    let mut c = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("h".into()));
     assert!(!c.is_complete(), "no user/pass");
     c.username = Some("u".into());
     assert!(!c.is_complete(), "user only");
@@ -273,35 +269,28 @@ fn is_complete_requires_nonempty_user_and_password() {
 #[test]
 fn target_url_prefers_explicit_url_then_reconstructs_with_userinfo() {
     // Explicit url wins verbatim.
-    let with_url = Credential {
-        protocol: Some("https".into()),
-        host: Some("ignored.example".into()),
-        url: Some("https://github.com/owner/repo.git".into()),
-        ..Default::default()
-    };
+    let with_url = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("ignored.example".into()))
+        .with_url(Some("https://github.com/owner/repo.git".into()));
     assert_eq!(
         with_url.target_url().as_deref(),
         Some("https://github.com/owner/repo.git")
     );
 
     // Reconstructed from fields, including username -> user@host and path join.
-    let reconstructed = Credential {
-        protocol: Some("https".into()),
-        host: Some("git.example".into()),
-        username: Some("alice".into()),
-        path: Some("team/proj.git".into()),
-        ..Default::default()
-    };
+    let reconstructed = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("git.example".into()))
+        .with_username(Some("alice".into()))
+        .with_path(Some("team/proj.git".into()));
     assert_eq!(
         reconstructed.target_url().as_deref(),
         Some("https://alice@git.example/team/proj.git")
     );
 
     // Missing host -> cannot reconstruct.
-    let bare = Credential {
-        protocol: Some("https".into()),
-        ..Default::default()
-    };
+    let bare = Credential::default().with_protocol(Some("https".into()));
     assert_eq!(bare.target_url(), None);
 }
 
@@ -394,11 +383,9 @@ fn shell_helper_fills_and_forwards_configured_args_and_dispatches_actions() {
     assert_eq!(filled.username.as_deref(), Some("carol"));
     assert_eq!(filled.password.as_deref(), Some("pw-carol"));
 
-    let cred = Credential {
-        username: Some("carol".into()),
-        password: Some("pw-carol".into()),
-        ..sample_target("argful.example")
-    };
+    let cred = (sample_target("argful.example"))
+        .with_username(Some("carol".into()))
+        .with_password(Some("pw-carol".into()));
     provider.approve(&cred).expect("approve -> store");
     provider.reject(&cred).expect("reject -> erase");
 
@@ -445,16 +432,13 @@ fn external_credential_store_helper_full_lifecycle_cross_checked_with_git() {
     let cfg = build_config(dir, &[("credential.helper", &helper_value)]);
     let provider = HelperCredentialProvider::new(cfg);
 
-    let target = Credential {
-        protocol: Some("https".into()),
-        host: Some("store.example.com".into()),
-        ..Default::default()
-    };
-    let full = Credential {
-        username: Some("dave".into()),
-        password: Some("p@ss-w0rd".into()),
-        ..target.clone()
-    };
+    let target = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("store.example.com".into()));
+    let full = target
+        .clone()
+        .with_username(Some("dave".into()))
+        .with_password(Some("p@ss-w0rd".into()));
 
     // Empty store -> fill cannot complete -> typed non-interactive error.
     let err = provider
@@ -548,16 +532,13 @@ fn store_shorthand_helper_resolves_via_git_exec_path() {
     let cfg = build_config(dir, &[("credential.helper", &helper_value)]);
     let provider = HelperCredentialProvider::new(cfg);
 
-    let target = Credential {
-        protocol: Some("https".into()),
-        host: Some("shorthand.example.com".into()),
-        ..Default::default()
-    };
-    let full = Credential {
-        username: Some("bob".into()),
-        password: Some("secret".into()),
-        ..target.clone()
-    };
+    let target = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("shorthand.example.com".into()));
+    let full = target
+        .clone()
+        .with_username(Some("bob".into()))
+        .with_password(Some("secret".into()));
 
     provider.approve(&full).expect("store shorthand approve");
     let filled = provider.fill(&target).expect("store shorthand fill");

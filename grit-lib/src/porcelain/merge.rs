@@ -721,11 +721,39 @@ pub enum MergeSourceKind {
 
 /// The commit a merge brings in, and how its name was resolved ([`resolve_merge_source`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MergeSource {
     /// The commit to merge (annotated tags already peeled).
     pub oid: ObjectId,
     /// Which namespace matched the spec.
     pub kind: MergeSourceKind,
+}
+
+impl MergeSource {
+    /// Creates a [`MergeSource`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `oid`: the commit to merge (annotated tags already peeled).
+    /// - `kind`: which namespace matched the spec.
+    #[must_use]
+    pub const fn new(oid: ObjectId, kind: MergeSourceKind) -> Self {
+        Self { oid, kind }
+    }
+
+    /// Sets [`oid`](Self::oid).
+    #[must_use]
+    pub const fn with_oid(mut self, oid: ObjectId) -> Self {
+        self.oid = oid;
+        self
+    }
+
+    /// Sets [`kind`](Self::kind).
+    #[must_use]
+    pub const fn with_kind(mut self, kind: MergeSourceKind) -> Self {
+        self.kind = kind;
+        self
+    }
 }
 
 /// Resolve the argument of a merge (`spec`) to the commit it names.

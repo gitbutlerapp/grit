@@ -798,18 +798,8 @@ fn reftable_write_transaction_batch() {
     ReftableRefStore::open(git_dir.to_path_buf())
         .expect("open store")
         .write_reftable_updates(vec![
-            ReftableTransactionUpdate {
-                refname: "refs/heads/a".into(),
-                value: Some(RefValue::Val1(o1)),
-                log: None,
-                expected_old: None,
-            },
-            ReftableTransactionUpdate {
-                refname: "refs/heads/b".into(),
-                value: Some(RefValue::Val1(o2)),
-                log: None,
-                expected_old: None,
-            },
+            ReftableTransactionUpdate::new("refs/heads/a").with_value(Some(RefValue::Val1(o1))),
+            ReftableTransactionUpdate::new("refs/heads/b").with_value(Some(RefValue::Val1(o2))),
         ])
         .expect("txn");
     assert_eq!(

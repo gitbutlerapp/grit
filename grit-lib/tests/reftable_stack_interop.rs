@@ -217,12 +217,11 @@ fn grit_written_reftable_passes_git_fsck_and_refs_verify() {
     .expect("log record");
     ReftableRefStore::open(git_dir.to_path_buf())
         .expect("open store")
-        .write_reftable_updates(vec![ReftableTransactionUpdate {
-            refname: "refs/heads/grit-txn".to_owned(),
-            value: Some(RefValue::Val1(oid2)),
-            log: Some(log),
-            expected_old: None,
-        }])
+        .write_reftable_updates(vec![ReftableTransactionUpdate::new(
+            "refs/heads/grit-txn".to_owned(),
+        )
+        .with_value(Some(RefValue::Val1(oid2)))
+        .with_log(Some(log))])
         .expect("write transaction");
 
     reftable_delete_ref(&git_dir, "refs/heads/grit-txn").expect("delete ref");

@@ -166,6 +166,7 @@ fn hook_command_env(git_dir: Option<&Path>, extra_env: &[(String, String)]) -> C
 
 /// Environment for commit-style hooks (`GIT_INDEX_FILE`, `GIT_EDITOR`, `GIT_PREFIX`, and extra pairs).
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CommitHookEnv<'a> {
     /// Absolute or cwd-relative index path passed as `GIT_INDEX_FILE`.
     pub index_file: Option<&'a Path>,
@@ -175,6 +176,36 @@ pub struct CommitHookEnv<'a> {
     pub git_prefix: Option<&'a str>,
     /// Additional `KEY=value` pairs for the hook subprocess.
     pub extra_env: &'a [(&'a str, &'a str)],
+}
+
+impl<'a> CommitHookEnv<'a> {
+    /// Sets [`index_file`](Self::index_file).
+    #[must_use]
+    pub const fn with_index_file(mut self, index_file: Option<&'a Path>) -> Self {
+        self.index_file = index_file;
+        self
+    }
+
+    /// Sets [`git_editor`](Self::git_editor).
+    #[must_use]
+    pub const fn with_git_editor(mut self, git_editor: Option<&'a str>) -> Self {
+        self.git_editor = git_editor;
+        self
+    }
+
+    /// Sets [`git_prefix`](Self::git_prefix).
+    #[must_use]
+    pub const fn with_git_prefix(mut self, git_prefix: Option<&'a str>) -> Self {
+        self.git_prefix = git_prefix;
+        self
+    }
+
+    /// Sets [`extra_env`](Self::extra_env).
+    #[must_use]
+    pub const fn with_extra_env(mut self, extra_env: &'a [(&'a str, &'a str)]) -> Self {
+        self.extra_env = extra_env;
+        self
+    }
 }
 
 fn absolute_index_path(index_file: &Path, cwd: &Path) -> PathBuf {
@@ -1528,6 +1559,7 @@ pub(crate) fn run_hook_in_git_dir_with_cancel(
 
 /// One ref update a push is about to make, as reported to the `pre-push` hook.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PrePushRef {
     /// Local source as named by the push (`refs/heads/main`, `HEAD`, …). `None` when the
     /// source was a bare object id, or for a deletion.
@@ -1559,6 +1591,57 @@ impl PrePushRef {
             self.remote_ref,
             hex(self.remote_oid)
         )
+    }
+
+    /// Creates a [`PrePushRef`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `local_ref`: local source as named by the push (`refs/heads/main`, `HEAD`, …).
+    /// - `local_oid`: object the remote ref will point at; `None` for a deletion.
+    /// - `remote_ref`: destination ref on the remote (`refs/heads/main`).
+    /// - `remote_oid`: current value of [`Self::remote_ref`] on the remote; `None` when it does not exist.
+    #[must_use]
+    pub fn new(
+        local_ref: Option<String>,
+        local_oid: Option<ObjectId>,
+        remote_ref: impl Into<String>,
+        remote_oid: Option<ObjectId>,
+    ) -> Self {
+        Self {
+            local_ref,
+            local_oid,
+            remote_ref: remote_ref.into(),
+            remote_oid,
+        }
+    }
+
+    /// Sets [`local_ref`](Self::local_ref).
+    #[must_use]
+    pub fn with_local_ref(mut self, local_ref: Option<String>) -> Self {
+        self.local_ref = local_ref;
+        self
+    }
+
+    /// Sets [`local_oid`](Self::local_oid).
+    #[must_use]
+    pub const fn with_local_oid(mut self, local_oid: Option<ObjectId>) -> Self {
+        self.local_oid = local_oid;
+        self
+    }
+
+    /// Sets [`remote_ref`](Self::remote_ref).
+    #[must_use]
+    pub fn with_remote_ref(mut self, remote_ref: String) -> Self {
+        self.remote_ref = remote_ref;
+        self
+    }
+
+    /// Sets [`remote_oid`](Self::remote_oid).
+    #[must_use]
+    pub const fn with_remote_oid(mut self, remote_oid: Option<ObjectId>) -> Self {
+        self.remote_oid = remote_oid;
+        self
     }
 }
 

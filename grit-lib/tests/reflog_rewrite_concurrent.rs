@@ -23,13 +23,12 @@ fn append_on_store(
 ) -> grit_lib::error::Result<()> {
     let txn = RefTransaction::new().update(
         RefUpdate::new(refname.to_owned(), Some(RawRef::Direct(oid))).with_reflog(Some(
-            ReflogUpdate {
-                identity: format!("T <t@example.com> {ts} +0000"),
-                message: "x".into(),
-                time: time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
-                old_oid: None,
-                new_oid: Some(oid),
-            },
+            ReflogUpdate::new(
+                format!("T <t@example.com> {ts} +0000"),
+                "x",
+                time::OffsetDateTime::from_unix_timestamp(ts).expect("ts"),
+            )
+            .with_new_oid(Some(oid)),
         )),
     )?;
     prepare_with_lock_wait(store, txn, lock_wait)?.commit()?;

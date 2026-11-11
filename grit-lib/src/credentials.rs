@@ -101,7 +101,25 @@ pub(crate) fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<P
 /// (`capability[]`, `authtype`, `password_expiry_utc`, …) are preserved in
 /// [`extra`](Credential::extra) so they survive a parse/serialize round-trip
 /// and are forwarded to helpers unchanged.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+///
+/// Build one with [`Credential::default`] and the `with_` setters, or parse it
+/// with [`Credential::parse`]. Its [`Debug`](std::fmt::Debug) output redacts the
+/// password and the secret `extra` values (`oauth_refresh_token`, `credential`),
+/// so logging a credential does not leak it.
+///
+/// ```
+/// use grit_lib::remote::credentials::Credential;
+///
+/// let cred = Credential::default()
+///     .with_protocol(Some("https".into()))
+///     .with_host(Some("example.com".into()))
+///     .with_username(Some("ada".into()))
+///     .with_password(Some("hunter2".into()));
+/// assert!(cred.is_complete());
+/// assert!(!format!("{cred:?}").contains("hunter2"));
+/// ```
+#[derive(Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Credential {
     /// `protocol` field (e.g. `https`, `http`, `ssh`).
     pub protocol: Option<String>,
@@ -123,6 +141,38 @@ pub struct Credential {
     /// Any additional `key=value` pairs, in wire order. Multi-valued keys such
     /// as `capability[]` may appear more than once.
     pub extra: Vec<(String, String)>,
+}
+
+/// Keys in [`Credential::extra`] whose values are secrets and are redacted by `Debug`.
+const SECRET_EXTRA_KEYS: &[&str] = &["oauth_refresh_token", "credential"];
+
+/// Stand-in printed by `Debug` for a secret value.
+const REDACTED: &str = "<redacted>";
+
+impl std::fmt::Debug for Credential {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let extra: Vec<(&str, &str)> = self
+            .extra
+            .iter()
+            .map(|(k, v)| {
+                let shown = if SECRET_EXTRA_KEYS.contains(&k.as_str()) {
+                    REDACTED
+                } else {
+                    v.as_str()
+                };
+                (k.as_str(), shown)
+            })
+            .collect();
+        f.debug_struct("Credential")
+            .field("protocol", &self.protocol)
+            .field("host", &self.host)
+            .field("path", &self.path)
+            .field("username", &self.username)
+            .field("password", &self.password.as_ref().map(|_| REDACTED))
+            .field("url", &self.url)
+            .field("extra", &extra)
+            .finish()
+    }
 }
 
 impl Credential {
@@ -379,6 +429,55 @@ impl Credential {
     /// Did a helper signal `quit=1`/`quit=true` (stop querying further helpers)?
     fn wants_quit(&self) -> bool {
         matches!(self.extra_get("quit"), Some("1") | Some("true"))
+    }
+
+    /// Sets [`protocol`](Self::protocol).
+    #[must_use]
+    pub fn with_protocol(mut self, protocol: Option<String>) -> Self {
+        self.protocol = protocol;
+        self
+    }
+
+    /// Sets [`host`](Self::host).
+    #[must_use]
+    pub fn with_host(mut self, host: Option<String>) -> Self {
+        self.host = host;
+        self
+    }
+
+    /// Sets [`path`](Self::path).
+    #[must_use]
+    pub fn with_path(mut self, path: Option<String>) -> Self {
+        self.path = path;
+        self
+    }
+
+    /// Sets [`username`](Self::username).
+    #[must_use]
+    pub fn with_username(mut self, username: Option<String>) -> Self {
+        self.username = username;
+        self
+    }
+
+    /// Sets [`password`](Self::password).
+    #[must_use]
+    pub fn with_password(mut self, password: Option<String>) -> Self {
+        self.password = password;
+        self
+    }
+
+    /// Sets [`url`](Self::url).
+    #[must_use]
+    pub fn with_url(mut self, url: Option<String>) -> Self {
+        self.url = url;
+        self
+    }
+
+    /// Sets [`extra`](Self::extra).
+    #[must_use]
+    pub fn with_extra(mut self, extra: Vec<(String, String)>) -> Self {
+        self.extra = extra;
+        self
     }
 }
 

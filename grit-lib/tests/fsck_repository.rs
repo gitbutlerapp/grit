@@ -1640,13 +1640,7 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
                 .update(
                     RefUpdate::new("refs/heads/main".into(), Some(RawRef::Direct(new)))
                         .with_expected(exp)
-                        .with_reflog(Some(ReflogUpdate {
-                            identity: identity.into(),
-                            message: msg.into(),
-                            time: ts,
-                            old_oid: None,
-                            new_oid: None,
-                        })),
+                        .with_reflog(Some(ReflogUpdate::new(identity, msg, ts))),
                 )
                 .expect("txn");
             repo.ref_store()
@@ -1661,13 +1655,7 @@ fn injected_ref_store_reflog_roots_are_not_dangling() {
             .update(
                 RefUpdate::new("refs/heads/feature".into(), Some(RawRef::Direct(side)))
                     .with_expected(Expected::Missing)
-                    .with_reflog(Some(ReflogUpdate {
-                        identity: identity.into(),
-                        message: "branch: Created".into(),
-                        time: ts,
-                        old_oid: None,
-                        new_oid: None,
-                    })),
+                    .with_reflog(Some(ReflogUpdate::new(identity, "branch: Created", ts))),
             )
             .expect("side txn");
         repo.ref_store()
@@ -2154,13 +2142,7 @@ fn connectivity_only_dangling_excludes_reachable_blobs_in_bare_repo() {
                     .update(
                         RefUpdate::new(name.into(), Some(RawRef::Direct(oid)))
                             .with_expected(Expected::Missing)
-                            .with_reflog(Some(ReflogUpdate {
-                                identity: identity.into(),
-                                message: "test".into(),
-                                time: ts,
-                                old_oid: None,
-                                new_oid: None,
-                            })),
+                            .with_reflog(Some(ReflogUpdate::new(identity, "test", ts))),
                     )
                     .expect("txn"),
             )
@@ -2309,13 +2291,7 @@ fn connectivity_only_does_not_inflate_reachable_blob_bodies() {
                 .update(
                     RefUpdate::new("refs/heads/main".into(), Some(RawRef::Direct(commit)))
                         .with_expected(Expected::Missing)
-                        .with_reflog(Some(ReflogUpdate {
-                            identity: "T <t@example.com>".into(),
-                            message: "init".into(),
-                            time: ts,
-                            old_oid: None,
-                            new_oid: None,
-                        })),
+                        .with_reflog(Some(ReflogUpdate::new("T <t@example.com>", "init", ts))),
                 )
                 .expect("txn"),
         )

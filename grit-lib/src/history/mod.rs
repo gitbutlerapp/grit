@@ -26,12 +26,7 @@
 //! let mut edits = HistoryEdits::new();
 //! edits.insert(
 //!     oldest,
-//!     CommitEdit::Rewrite {
-//!         tree: None,
-//!         message: Some("Reworded subject\n".into()),
-//!         author: None,
-//!         parents: None,
-//!     },
+//!     CommitEdit::rewrite(None, Some("Reworded subject\n".into()), None, None),
 //! );
 //! let opts = RewriteOptions::new("Rewriter <r@example.com> 1 +0000".parse()?)
 //!     .with_scope(RefScope::Branches)

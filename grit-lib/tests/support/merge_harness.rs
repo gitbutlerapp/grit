@@ -229,11 +229,9 @@ pub fn assert_merge_commits_match_git_with_favor(
     let base_tree = commit_tree(grit_repo, merge_base).expect("base tree");
     let ours_tree = commit_tree(grit_repo, ours).expect("ours tree");
     let theirs_tree = commit_tree(grit_repo, theirs).expect("theirs tree");
-    let presentation = TreeMergeConflictPresentation {
-        df_directory_ours_commit: presentation.df_directory_ours_commit.or(Some(*ours)),
-        df_directory_theirs_commit: presentation.df_directory_theirs_commit.or(Some(*theirs)),
-        ..presentation
-    };
+    let presentation = presentation
+        .with_df_directory_ours_commit(presentation.df_directory_ours_commit.or(Some(*ours)))
+        .with_df_directory_theirs_commit(presentation.df_directory_theirs_commit.or(Some(*theirs)));
     let merged = merge_trees_three_way(
         grit_repo,
         base_tree,
@@ -315,15 +313,9 @@ impl CommitMergeLabels {
 
     #[must_use]
     pub fn presentation(&self) -> TreeMergeConflictPresentation<'_> {
-        TreeMergeConflictPresentation {
-            label_ours: &self.ours,
-            label_theirs: TheirsConflictLabel::Fixed(&self.theirs),
-            label_base: "merged common ancestors",
-            style: grit_lib::diff::merge_file::ConflictStyle::Merge,
-            checkout_merge: false,
-            df_directory_ours_commit: None,
-            df_directory_theirs_commit: None,
-        }
+        TreeMergeConflictPresentation::default()
+            .with_label_ours(&self.ours)
+            .with_label_theirs(TheirsConflictLabel::Fixed(&self.theirs))
     }
 }
 

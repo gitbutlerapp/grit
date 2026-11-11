@@ -126,16 +126,8 @@ fn update_refs_create_batch_rejects_later_conflict_without_partial_write() {
     .expect("child ref");
 
     let items = vec![
-        RefTransactionItem {
-            name: "refs/heads/innocent".into(),
-            new_oid: Some(oid(10)),
-            expected_old: None,
-        },
-        RefTransactionItem {
-            name: "refs/heads/existing".into(),
-            new_oid: Some(oid(11)),
-            expected_old: None,
-        },
+        RefTransactionItem::new("refs/heads/innocent", Some(oid(10))),
+        RefTransactionItem::new("refs/heads/existing", Some(oid(11))),
     ];
     let err = update_refs(&git_dir, &items).expect_err("descendant conflict");
     let _ = err;
@@ -171,16 +163,8 @@ fn update_refs_create_batch_rejects_remotes_conflict_without_partial_write() {
     .expect("remote ref");
 
     let items = vec![
-        RefTransactionItem {
-            name: "refs/heads/innocent".into(),
-            new_oid: Some(oid(13)),
-            expected_old: None,
-        },
-        RefTransactionItem {
-            name: "refs/remotes/origin".into(),
-            new_oid: Some(oid(14)),
-            expected_old: None,
-        },
+        RefTransactionItem::new("refs/heads/innocent", Some(oid(13))),
+        RefTransactionItem::new("refs/remotes/origin", Some(oid(14))),
     ];
     let err = update_refs(&git_dir, &items).expect_err("descendant conflict");
     let _ = err;
@@ -219,11 +203,7 @@ fn update_refs_cas_sees_loose_tag_while_heads_tree_empty() {
 
     update_refs(
         &git_dir,
-        &[RefTransactionItem {
-            name: "refs/tags/v1".into(),
-            new_oid: Some(new_oid),
-            expected_old: Some(old_oid),
-        }],
+        &[RefTransactionItem::new("refs/tags/v1", Some(new_oid)).with_expected_old(Some(old_oid))],
     )
     .expect("CAS update tag");
     assert_eq!(

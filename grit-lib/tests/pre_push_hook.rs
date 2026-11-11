@@ -339,24 +339,14 @@ fn run_pre_push_hook_formats_stdin_lines() {
             "up",
             "https://example.com/r.git",
             &[
-                PrePushRef {
-                    local_ref: Some("refs/heads/main".to_owned()),
-                    local_oid: Some(a),
-                    remote_ref: "refs/heads/main".to_owned(),
-                    remote_oid: Some(b),
-                },
-                PrePushRef {
-                    local_ref: None,
-                    local_oid: Some(a),
-                    remote_ref: "refs/heads/new".to_owned(),
-                    remote_oid: None,
-                },
-                PrePushRef {
-                    local_ref: None,
-                    local_oid: None,
-                    remote_ref: "refs/heads/gone".to_owned(),
-                    remote_oid: Some(b),
-                },
+                PrePushRef::new(
+                    Some("refs/heads/main".to_owned()),
+                    Some(a),
+                    "refs/heads/main".to_owned(),
+                    Some(b),
+                ),
+                PrePushRef::new(None, Some(a), "refs/heads/new".to_owned(), None),
+                PrePushRef::new(None, None, "refs/heads/gone".to_owned(), Some(b)),
             ],
         )
         .expect("hook succeeds");

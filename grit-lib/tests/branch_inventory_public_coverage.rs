@@ -33,10 +33,7 @@ fn branch_inventory_public_api_smoke() {
         .list(
             &BranchListQuery {
                 scope: BranchScope::Local,
-                refs: RefQuery::default().with_sort(RefSort {
-                    key: SortKey::Date,
-                    reverse: false,
-                }),
+                refs: RefQuery::default().with_sort(RefSort::default().with_key(SortKey::Date)),
             },
             BranchDetail::Names,
         )

@@ -880,7 +880,7 @@ fn bounded_contains_order_filters_tags_and_backends_match_git() {
                 for reverse in [false, true] {
                     for filter in 0..6 {
                         let mut query = base.clone();
-                        query.sort = RefSort { key: sort, reverse };
+                        query.sort = RefSort::default().with_key(sort).with_reverse(reverse);
                         let key = match sort {
                             SortKey::Name => "refname",
                             SortKey::Version => "version:refname",
@@ -1061,10 +1061,9 @@ fn bounded_contains_parent_rewrite_cycles_match_unlimited_and_git() {
                         let query = RefQuery::default()
                             .with_namespaces(vec![RefNamespace::Heads])
                             .with_contains(vec![child.parse().unwrap()])
-                            .with_sort(grit_lib::refs::listing::RefSort {
-                                key: grit_lib::refs::listing::SortKey::Name,
-                                reverse,
-                            })
+                            .with_sort(
+                                grit_lib::refs::listing::RefSort::default().with_reverse(reverse),
+                            )
                             .with_limit(limit);
                         assert_eq!(grit_refnames(&repo, query), all[..limit.unwrap_or(all.len()).min(all.len())],
                             "backend={backend:?} graph={with_graph} replace={replace} reverse={reverse} limit={limit:?}");

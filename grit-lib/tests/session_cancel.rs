@@ -393,11 +393,7 @@ fn stash_push_staged_only_reset_stops_when_the_sink_asks() {
 fn stash_push_partial_reset_stops_when_the_sink_asks() {
     let (tmp, repo, _) = repo_with_modified_files();
     let ranges = (0..FILES)
-        .map(|i| grit_lib::porcelain::hunk_select::LineRange {
-            path: format!("d/f{i:04}.txt"),
-            start: 1,
-            end: 1,
-        })
+        .map(|i| grit_lib::porcelain::hunk_select::LineRange::new(format!("d/f{i:04}.txt"), 1, 1))
         .collect();
     let opts = StashPushOptions {
         selection: Some(grit_lib::porcelain::hunk_select::HunkSelection {

@@ -302,10 +302,7 @@ fn bounded_packed_branch_contains_matches_git_metadata_and_order() {
                 RefQuery::default()
                     .with_contains(vec![target])
                     .with_limit(Some(limit))
-                    .with_sort(grit_lib::refs::listing::RefSort {
-                        reverse,
-                        ..Default::default()
-                    }),
+                    .with_sort(grit_lib::refs::listing::RefSort::default().with_reverse(reverse)),
             );
             let expected = git_out(&clone, &[
                 "for-each-ref",

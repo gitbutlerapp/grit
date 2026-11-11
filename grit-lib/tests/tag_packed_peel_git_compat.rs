@@ -23,10 +23,7 @@ fn rev(dir: &Path, rev: &str) -> ObjectId {
 }
 
 fn kind_tags(repo: &Repository) -> Vec<TagSummary> {
-    let query = RefQuery::default().with_sort(RefSort {
-        key: SortKey::Name,
-        reverse: false,
-    });
+    let query = RefQuery::default().with_sort(RefSort::default());
     let TagList::Summaries(tags) = repo
         .tags()
         .list(

@@ -19,13 +19,13 @@ use support::require_reftable_git;
 use tempfile::TempDir;
 
 fn forged_log() -> ReflogUpdate {
-    ReflogUpdate {
-        identity: "Evil <a@b>\nforged".to_owned(),
-        message: "test".to_owned(),
-        time: time::OffsetDateTime::from_unix_timestamp(1).expect("time"),
-        old_oid: Some(ObjectId::zero()),
-        new_oid: Some(ObjectId::zero()),
-    }
+    ReflogUpdate::new(
+        "Evil <a@b>\nforged".to_owned(),
+        "test".to_owned(),
+        time::OffsetDateTime::from_unix_timestamp(1).expect("time"),
+    )
+    .with_old_oid(Some(ObjectId::zero()))
+    .with_new_oid(Some(ObjectId::zero()))
 }
 
 fn forged_head_update(tip: ObjectId) -> RefUpdate {

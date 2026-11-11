@@ -49,21 +49,11 @@ fn t1404_failed_cas_changes_nothing() {
         let grit_before = support::grit_refs(worktree);
 
         let bad = vec![
-            RefTransactionItem {
-                name: "refs/heads/created".to_owned(),
-                new_oid: Some(c2),
-                expected_old: None,
-            },
-            RefTransactionItem {
-                name: "refs/heads/to-update".to_owned(),
-                new_oid: Some(c2),
-                expected_old: Some(c1),
-            },
-            RefTransactionItem {
-                name: "refs/heads/to-delete".to_owned(),
-                new_oid: None,
-                expected_old: Some(c2),
-            },
+            RefTransactionItem::new("refs/heads/created".to_owned(), Some(c2)),
+            RefTransactionItem::new("refs/heads/to-update".to_owned(), Some(c2))
+                .with_expected_old(Some(c1)),
+            RefTransactionItem::new("refs/heads/to-delete".to_owned(), None)
+                .with_expected_old(Some(c2)),
         ];
         assert!(update_refs(&git_dir, &bad).is_err());
 
@@ -180,29 +170,13 @@ fn t1404_df_conflicts_match_git_update_ref_stdin() {
 
             let items = if case.add_del {
                 vec![
-                    RefTransactionItem {
-                        name: addref.clone(),
-                        new_oid: Some(d),
-                        expected_old: None,
-                    },
-                    RefTransactionItem {
-                        name: delref.clone(),
-                        new_oid: None,
-                        expected_old: Some(c),
-                    },
+                    RefTransactionItem::new(addref.clone(), Some(d)),
+                    RefTransactionItem::new(delref.clone(), None).with_expected_old(Some(c)),
                 ]
             } else {
                 vec![
-                    RefTransactionItem {
-                        name: delref.clone(),
-                        new_oid: None,
-                        expected_old: Some(c),
-                    },
-                    RefTransactionItem {
-                        name: addref.clone(),
-                        new_oid: Some(d),
-                        expected_old: None,
-                    },
+                    RefTransactionItem::new(delref.clone(), None).with_expected_old(Some(c)),
+                    RefTransactionItem::new(addref.clone(), Some(d)),
                 ]
             };
             let grit_ok = update_refs(&grit_repo.git_dir(), &items).is_ok();
@@ -412,11 +386,8 @@ fn concurrent_cas_single_winner() {
         )
         .expect("seed");
 
-        let item = RefTransactionItem {
-            name: "refs/heads/cas-race".to_owned(),
-            new_oid: Some(c2),
-            expected_old: Some(c1),
-        };
+        let item = RefTransactionItem::new("refs/heads/cas-race".to_owned(), Some(c2))
+            .with_expected_old(Some(c1));
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
             assert_eq!(
                 grit_test_support::refs::at(gd)
@@ -448,11 +419,8 @@ fn concurrent_cas_delete_single_winner() {
         )
         .expect("seed");
 
-        let item = RefTransactionItem {
-            name: "refs/heads/cas-del".to_owned(),
-            new_oid: None,
-            expected_old: Some(c1),
-        };
+        let item = RefTransactionItem::new("refs/heads/cas-del".to_owned(), None)
+            .with_expected_old(Some(c1));
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
             assert!(grit_test_support::refs::at(gd)
                 .references()
@@ -486,11 +454,8 @@ fn concurrent_cas_delete_single_winner_packed_only() {
             "fixture must be packed-only"
         );
 
-        let item = RefTransactionItem {
-            name: "refs/heads/cas-del-packed".to_owned(),
-            new_oid: None,
-            expected_old: Some(c1),
-        };
+        let item = RefTransactionItem::new("refs/heads/cas-del-packed".to_owned(), None)
+            .with_expected_old(Some(c1));
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
             assert!(grit_test_support::refs::at(gd)
                 .references()
@@ -524,11 +489,8 @@ fn concurrent_reftable_cas_single_winner() {
     )
     .expect("seed");
 
-    let item = RefTransactionItem {
-        name: "refs/heads/cas-rt".to_owned(),
-        new_oid: Some(c2),
-        expected_old: Some(c1),
-    };
+    let item = RefTransactionItem::new("refs/heads/cas-rt".to_owned(), Some(c2))
+        .with_expected_old(Some(c1));
     concurrent_cas_winners(&git_dir, item, 1, |gd| {
         assert_eq!(
             grit_test_support::refs::at(gd)
@@ -562,16 +524,8 @@ fn duplicate_ref_updates_match_git_update_ref_stdin() {
         assert!(!git_update_ref_stdin(git_repo.worktree(), &script));
 
         let items = vec![
-            RefTransactionItem {
-                name: "refs/heads/dup".to_owned(),
-                new_oid: Some(c1),
-                expected_old: None,
-            },
-            RefTransactionItem {
-                name: "refs/heads/dup".to_owned(),
-                new_oid: Some(c2),
-                expected_old: None,
-            },
+            RefTransactionItem::new("refs/heads/dup".to_owned(), Some(c1)),
+            RefTransactionItem::new("refs/heads/dup".to_owned(), Some(c2)),
         ];
         assert!(update_refs(&grit_repo.git_dir(), &items).is_err());
         assert!(grit_test_support::refs::at(grit_repo.git_dir())
@@ -601,13 +555,13 @@ fn update_branch_for_commit_writes_head_and_branch_reflogs() {
 
         update_branch_for_commit(
             &git_dir,
-            &BranchCommitRefUpdate {
-                branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
-                expected_old: Some(c1),
-                new_oid: c2,
-                identity: "Refs Tx Author <refs-harness@example.com> 1700000000 +0000",
-                reflog_message: "commit: refs transaction test",
-            },
+            &BranchCommitRefUpdate::new(
+                RefNameRef::new("refs/heads/main").expect("valid ref name"),
+                Some(c1),
+                c2,
+                "Refs Tx Author <refs-harness@example.com> 1700000000 +0000",
+                "commit: refs transaction test",
+            ),
         )
         .expect("branch update");
 
@@ -661,13 +615,13 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
         for expected_old in [Some(c1), None] {
             let err = update_branch_for_commit(
                 &git_dir,
-                &BranchCommitRefUpdate {
-                    branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
+                &BranchCommitRefUpdate::new(
+                    RefNameRef::new("refs/heads/main").expect("valid ref name"),
                     expected_old,
-                    new_oid: c1,
-                    identity: "Refs Tx Author <refs-harness@example.com> 1700000000 +0000",
-                    reflog_message: "commit: stale tip",
-                },
+                    c1,
+                    "Refs Tx Author <refs-harness@example.com> 1700000000 +0000",
+                    "commit: stale tip",
+                ),
             )
             .expect_err("stale expected tip must be rejected");
             let Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
@@ -735,16 +689,8 @@ fn reftable_transaction_one_table_single_update_index() {
         update_refs(
             &git_dir,
             &[
-                RefTransactionItem {
-                    name: "refs/heads/tx-a".to_owned(),
-                    new_oid: Some(c2),
-                    expected_old: None,
-                },
-                RefTransactionItem {
-                    name: "refs/heads/tx-b".to_owned(),
-                    new_oid: Some(c2),
-                    expected_old: None,
-                },
+                RefTransactionItem::new("refs/heads/tx-a".to_owned(), Some(c2)),
+                RefTransactionItem::new("refs/heads/tx-b".to_owned(), Some(c2)),
             ],
         )
         .expect("batch write");

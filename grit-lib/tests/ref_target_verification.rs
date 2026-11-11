@@ -264,13 +264,15 @@ fn log_only_updates_with_missing_reflog_objects_are_refused() {
     each_format(|format, fx| {
         let mut log_only = put("refs/heads/main", fx.commit);
         log_only.flags.log_only = true;
-        log_only.reflog = Some(ReflogUpdate {
-            identity: "Ref Verify <verify@example.com>".to_owned(),
-            message: "log only".to_owned(),
-            time: time::OffsetDateTime::UNIX_EPOCH,
-            old_oid: Some(fx.commit),
-            new_oid: Some(bogus()),
-        });
+        log_only.reflog = Some(
+            ReflogUpdate::new(
+                "Ref Verify <verify@example.com>".to_owned(),
+                "log only".to_owned(),
+                time::OffsetDateTime::UNIX_EPOCH,
+            )
+            .with_old_oid(Some(fx.commit))
+            .with_new_oid(Some(bogus())),
+        );
         assert_eq!(
             commit_updates(fx.repo.ref_store(), vec![log_only]),
             Err(missing("refs/heads/main", bogus())),
@@ -299,13 +301,15 @@ fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
         };
         let before = log_len();
         let log_only = RefUpdate::new(name("refs/heads/main"), None)
-            .with_reflog(Some(ReflogUpdate {
-                identity: "Ref Verify <verify@example.com>".to_owned(),
-                message: "log only".to_owned(),
-                time: time::OffsetDateTime::UNIX_EPOCH,
-                old_oid: Some(fx.commit),
-                new_oid: Some(bogus()),
-            }))
+            .with_reflog(Some(
+                ReflogUpdate::new(
+                    "Ref Verify <verify@example.com>".to_owned(),
+                    "log only".to_owned(),
+                    time::OffsetDateTime::UNIX_EPOCH,
+                )
+                .with_old_oid(Some(fx.commit))
+                .with_new_oid(Some(bogus())),
+            ))
             .with_flags(RefUpdateFlags::default().with_log_only(true));
         let err =
             commit_ref_update_on_store(fx.repo.ref_store(), log_only).expect_err("{format:?}");
@@ -609,13 +613,13 @@ fn injected_ref_store_is_checked_against_the_repository_objects() {
 }
 
 fn branch_commit<'a>(expected_old: ObjectId, new_oid: ObjectId) -> BranchCommitRefUpdate<'a> {
-    BranchCommitRefUpdate {
-        branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
-        expected_old: Some(expected_old),
+    BranchCommitRefUpdate::new(
+        RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        Some(expected_old),
         new_oid,
-        identity: "Ref Verify <verify@example.com> 1700000000 +0000",
-        reflog_message: "commit: next",
-    }
+        "Ref Verify <verify@example.com> 1700000000 +0000",
+        "commit: next",
+    )
 }
 
 #[test]

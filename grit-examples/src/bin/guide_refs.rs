@@ -68,10 +68,7 @@ fn main() -> Result<()> {
     }
     let tag_query = RefQuery::default()
         .with_namespaces(vec![RefNamespace::Tags])
-        .with_sort(RefSort {
-            key: SortKey::Name,
-            reverse: false,
-        });
+        .with_sort(RefSort::default().with_key(SortKey::Name));
     let tag_rows = repo
         .tags()
         .list(&grit_lib::repo_handles::TagListOptions::full_annotations(

@@ -305,10 +305,12 @@ fn grit_worktree_patch_hunk_headers(root: &Path) -> Vec<String> {
     let resolved: Vec<PatchResolvedSide> = entries
         .into_iter()
         .zip(changes)
-        .map(|(entry, fc)| PatchResolvedSide {
-            entry,
-            old: PatchSide::Bytes(fc.old_bytes.data),
-            new: PatchSide::Worktree,
+        .map(|(entry, fc)| {
+            PatchResolvedSide::new(
+                entry,
+                PatchSide::Bytes(fc.old_bytes.data),
+                PatchSide::Worktree,
+            )
         })
         .collect();
     let opts = PatchTextOptions::from_repo(&repo, DiffOptions::default()).expect("patch opts");

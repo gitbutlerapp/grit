@@ -47,10 +47,7 @@ fn query_listings_from_pairs_and_store() {
     ];
     let query = RefQuery::default()
         .with_namespaces(vec![RefNamespace::Tags])
-        .with_sort(RefSort {
-            key: SortKey::Name,
-            reverse: false,
-        })
+        .with_sort(RefSort::default())
         .with_limit(Some(1));
     let out = query_listings_from_pairs(pairs, &query, &RefQueryOptions::default(), None).unwrap();
     assert_eq!(out.len(), 1);
@@ -249,10 +246,7 @@ fn date_sort_keeps_refs_with_missing_objects() {
         &store,
         &RefQuery::default()
             .with_namespaces(vec![RefNamespace::Tags])
-            .with_sort(RefSort {
-                key: SortKey::Date,
-                reverse: false,
-            }),
+            .with_sort(RefSort::default().with_key(SortKey::Date)),
         &RefQueryOptions::default(),
         Some(repo.odb()),
     )

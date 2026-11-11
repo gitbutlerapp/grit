@@ -194,8 +194,30 @@ Input structs that grow with new flags are `#[non_exhaustive]`, so struct litera
 | [`SwitchOptions`](rustdoc:grit_lib::porcelain::switch::SwitchOptions) | `new(mode)` |
 | [`RestoreOptions`](rustdoc:grit_lib::porcelain::restore::RestoreOptions) | `new(pathspecs)` |
 | [`MergeOptions`](rustdoc:grit_lib::merge::MergeOptions), [`StatusOptions`](rustdoc:grit_lib::status::StatusOptions), [`OwnershipContext`](rustdoc:grit_lib::ownership_check::OwnershipContext) | `default()` |
+| [`CommandEnvironment`](rustdoc:grit_lib::command_runner::CommandEnvironment), [`CommitHookEnv`](rustdoc:grit_lib::command_runner::hooks::CommitHookEnv), [`ProtocolPolicyInputs`](rustdoc:grit_lib::remote::protocol::ProtocolPolicyInputs), [`GitDaemonTransport`](rustdoc:grit_lib::remote::transport::GitDaemonTransport) | `default()` |
+| [`Credential`](rustdoc:grit_lib::remote::credentials::Credential) | `default()` (its `Debug` output redacts the password) |
+| [`RefSort`](rustdoc:grit_lib::refs::listing::RefSort), [`RefQueryOptions`](rustdoc:grit_lib::refs::listing::RefQueryOptions), [`IgnoreRevsSources`](rustdoc:grit_lib::blame::IgnoreRevsSources), [`ReachableWalkCommitterCutoffs`](rustdoc:grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) | `default()` |
+| [`TreeMergeConflictPresentation`](rustdoc:grit_lib::merge::merge_trees::TreeMergeConflictPresentation), [`RenameDetection`](rustdoc:grit_lib::status::RenameDetection) (status) | `default()` |
+| [`DateMode`](rustdoc:grit_lib::config::git_date::DateMode) | `from_type(ty)` or `parse_date_format` |
+| [`GraphCharset`](rustdoc:grit_lib::revwalk::GraphCharset) | `GraphCharset::ASCII` or `GraphCharset::UNICODE` |
+| [`PathspecFile`](rustdoc:grit_lib::worktree::pathspec::PathspecFile) | `new(data, nul_terminated)` |
+| [`StartPoint`](rustdoc:grit_lib::porcelain::branch::StartPoint) | `new(oid, label)` |
+| [`NewTrailerArg`](rustdoc:grit_lib::commit::trailers::interpret::NewTrailerArg) | `new(text)` |
+| [`ReftableTransactionUpdate`](rustdoc:grit_lib::refs::reftable::ReftableTransactionUpdate) | `new(refname)` |
+| [`RefTransactionItem`](rustdoc:grit_lib::refs::gc::RefTransactionItem) | `new(name, new_oid)` |
+| [`ReflogUpdate`](rustdoc:grit_lib::refs::store::ReflogUpdate) | `new(identity, message, time)` or `from_signature(signature, message)` |
+| [`BranchCommitRefUpdate`](rustdoc:grit_lib::refs::BranchCommitRefUpdate) | `new(branch_ref, expected_old, new_oid, identity, reflog_message)` |
+| [`NewCommit`](rustdoc:grit_lib::revwalk::history::NewCommit) (history) | `new(tree, author, message)` |
+| [`LineRange`](rustdoc:grit_lib::porcelain::hunk_select::LineRange) | `new(path, start, end)` |
+| [`PatchResolvedSide`](rustdoc:grit_lib::diff::PatchResolvedSide) | `new(entry, old, new)` |
+| [`CloneReflog`](rustdoc:grit_lib::remote::transfer::CloneReflog) | `new(identity, message)` |
+| [`PrePushRef`](rustdoc:grit_lib::command_runner::hooks::PrePushRef) | `new(local_ref, local_oid, remote_ref, remote_oid)` |
+| [`ReflogSelector`](rustdoc:grit_lib::refs::reflog::ReflogSelector) | `new(ref_name, index)` or `str::parse` |
+| [`MergeSource`](rustdoc:grit_lib::merge::MergeSource) | `new(oid, kind)` |
 
 `OwnershipContext` is no longer `Copy`; clone it where you need a second copy.
+
+The struct-like variants of [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) that carry several fields are `#[non_exhaustive]` too. Build them with [`CommitEdit::rewrite`](rustdoc:grit_lib::revwalk::history::CommitEdit::rewrite), [`CommitEdit::split_before`](rustdoc:grit_lib::revwalk::history::CommitEdit::split_before) and [`CommitEdit::reuse`](rustdoc:grit_lib::revwalk::history::CommitEdit::reuse), and end patterns on them with `..`.
 
 ```rust
 // 0.5.x

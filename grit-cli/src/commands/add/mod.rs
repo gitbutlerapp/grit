@@ -96,11 +96,7 @@ fn parse_line_range_token(token: &str) -> Result<LineRange> {
             .map_err(|_| anyhow::anyhow!("invalid line number in '{token}'"))?;
         (n, n)
     };
-    Ok(LineRange {
-        path: path.to_string(),
-        start,
-        end,
-    })
+    Ok(LineRange::new(path.to_string(), start, end))
 }
 
 pub fn run_hunks(

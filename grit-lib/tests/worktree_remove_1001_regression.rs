@@ -177,13 +177,13 @@ fn commit_staged_without_index_stat_refresh(
     let config = repo.config().snapshot().expect("config");
     update_branch_for_commit_with_config(
         repo.git_dir(),
-        &BranchCommitRefUpdate {
-            branch_ref: RefNameRef::new(refname.as_str()).expect("valid ref name"),
-            expected_old: parent,
-            new_oid: oid,
-            identity: &commit_data.committer,
-            reflog_message: "commit: test",
-        },
+        &BranchCommitRefUpdate::new(
+            RefNameRef::new(refname.as_str()).expect("valid ref name"),
+            parent,
+            oid,
+            &commit_data.committer,
+            "commit: test",
+        ),
         config.as_ref(),
     )
     .expect("update ref");

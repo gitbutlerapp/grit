@@ -22,11 +22,39 @@ use std::str::FromStr;
 /// # }
 /// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReflogSelector {
     /// Validated reference to pass to [`RepositoryReflogs`](crate::repo_handles::RepositoryReflogs).
     pub ref_name: RefName,
     /// Newest-first entry index (`0` is the latest entry).
     pub index: usize,
+}
+
+impl ReflogSelector {
+    /// Creates a [`ReflogSelector`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `ref_name`: validated reference to pass to [`RepositoryReflogs`](crate::repo_handles::RepositoryReflogs).
+    /// - `index`: newest-first entry index (`0` is the latest entry).
+    #[must_use]
+    pub fn new(ref_name: RefName, index: usize) -> Self {
+        Self { ref_name, index }
+    }
+
+    /// Sets [`ref_name`](Self::ref_name).
+    #[must_use]
+    pub fn with_ref_name(mut self, ref_name: RefName) -> Self {
+        self.ref_name = ref_name;
+        self
+    }
+
+    /// Sets [`index`](Self::index).
+    #[must_use]
+    pub const fn with_index(mut self, index: usize) -> Self {
+        self.index = index;
+        self
+    }
 }
 
 impl FromStr for ReflogSelector {

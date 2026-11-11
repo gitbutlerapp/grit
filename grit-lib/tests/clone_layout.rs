@@ -183,10 +183,10 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
     fetch_opts.refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()];
     fetch_opts.tags = TagMode::All;
     fetch_opts.remote_name = Some("origin".to_owned());
-    fetch_opts.clone_reflog = Some(CloneReflog {
-        identity: "T <t@e.com> 1 +0000".parse().expect("identity"),
-        message: "clone: from file://fixture".to_owned(),
-    });
+    fetch_opts.clone_reflog = Some(CloneReflog::new(
+        "T <t@e.com> 1 +0000".parse().expect("identity"),
+        "clone: from file://fixture".to_owned(),
+    ));
     grit_lib::repo::Repository::open(
         &clone_git,
         &grit_lib::config::environment::RepositoryOptions::with_environment(

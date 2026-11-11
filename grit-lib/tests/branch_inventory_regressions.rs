@@ -246,10 +246,7 @@ fn names_detail_rejects_date_sort_without_reading_objects() {
 
     let date_query = BranchListQuery {
         scope: BranchScope::Local,
-        refs: RefQuery::default().with_sort(RefSort {
-            key: SortKey::Date,
-            reverse: false,
-        }),
+        refs: RefQuery::default().with_sort(RefSort::default().with_key(SortKey::Date)),
     };
     let err = repo
         .branches()

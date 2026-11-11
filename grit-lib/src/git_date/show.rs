@@ -38,7 +38,7 @@ const WEEKDAY_NAMES: [&str; 7] = [
     "Saturdays",
 ];
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 /// `DateModeType` enum.
 #[non_exhaustive]
 pub enum DateModeType {
@@ -64,24 +64,51 @@ pub enum DateModeType {
     Unix,
 }
 
-/// `DateMode` struct.
+/// How [`show_date`] formats a timestamp (Git's `--date=<format>`).
+///
+/// Parse one from a `--date` value with [`parse_date_format`], or start from
+/// [`DateMode::from_type`] and adjust it with the `with_` setters.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DateMode {
-    /// `ty` field.
+    /// Which date format to render.
     pub ty: DateModeType,
-    /// `local` field.
+    /// Render in the local time zone instead of the timestamp's own offset (`-local` suffix).
     pub local: bool,
-    /// `strftime_fmt` field.
+    /// The `strftime` pattern for [`DateModeType::Strftime`] (`format:<pattern>`).
     pub strftime_fmt: Option<String>,
 }
 
 impl DateMode {
-    /// `from_type` associated function.
+    /// Creates a mode of type `ty` in the timestamp's own time zone, with no `strftime` pattern.
+    #[must_use]
     pub fn from_type(ty: DateModeType) -> Self {
         Self {
             ty,
             local: false,
             strftime_fmt: None,
         }
+    }
+
+    /// Sets [`ty`](Self::ty).
+    #[must_use]
+    pub fn with_ty(mut self, ty: DateModeType) -> Self {
+        self.ty = ty;
+        self
+    }
+
+    /// Sets [`local`](Self::local).
+    #[must_use]
+    pub const fn with_local(mut self, local: bool) -> Self {
+        self.local = local;
+        self
+    }
+
+    /// Sets [`strftime_fmt`](Self::strftime_fmt).
+    #[must_use]
+    pub fn with_strftime_fmt(mut self, strftime_fmt: Option<String>) -> Self {
+        self.strftime_fmt = strftime_fmt;
+        self
     }
 }
 

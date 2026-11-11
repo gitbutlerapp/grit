@@ -4086,6 +4086,7 @@ fn test_inject_reflog_fail(refname: &str) -> Result<()> {
 /// Returns [`crate::error::RefError::HeadNotOnBranch`] when `HEAD` does not point at `branch_ref`,
 /// [`store::RefStoreError::ExpectedMismatch`] (see [`verify_branch_commit_cas`]) when the
 /// CAS check fails, or an I/O error when ref/reflog writes fail.
+#[non_exhaustive]
 pub struct BranchCommitRefUpdate<'a> {
     /// Branch ref to update (e.g. `refs/heads/main`).
     pub branch_ref: &'a RefNameRef,
@@ -4097,6 +4098,69 @@ pub struct BranchCommitRefUpdate<'a> {
     pub identity: &'a str,
     /// Reflog message (without trailing newline).
     pub reflog_message: &'a str,
+}
+
+impl<'a> BranchCommitRefUpdate<'a> {
+    /// Creates a [`BranchCommitRefUpdate`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `branch_ref`: branch ref to update (for example `refs/heads/main`).
+    /// - `expected_old`: expected current tip; `None` when the branch must not exist yet (unborn).
+    /// - `new_oid`: new commit OID for the branch tip.
+    /// - `identity`: committer identity for reflog lines.
+    /// - `reflog_message`: reflog message (without trailing newline).
+    #[must_use]
+    pub const fn new(
+        branch_ref: &'a RefNameRef,
+        expected_old: Option<ObjectId>,
+        new_oid: ObjectId,
+        identity: &'a str,
+        reflog_message: &'a str,
+    ) -> Self {
+        Self {
+            branch_ref,
+            expected_old,
+            new_oid,
+            identity,
+            reflog_message,
+        }
+    }
+
+    /// Sets [`branch_ref`](Self::branch_ref).
+    #[must_use]
+    pub const fn with_branch_ref(mut self, branch_ref: &'a RefNameRef) -> Self {
+        self.branch_ref = branch_ref;
+        self
+    }
+
+    /// Sets [`expected_old`](Self::expected_old).
+    #[must_use]
+    pub const fn with_expected_old(mut self, expected_old: Option<ObjectId>) -> Self {
+        self.expected_old = expected_old;
+        self
+    }
+
+    /// Sets [`new_oid`](Self::new_oid).
+    #[must_use]
+    pub const fn with_new_oid(mut self, new_oid: ObjectId) -> Self {
+        self.new_oid = new_oid;
+        self
+    }
+
+    /// Sets [`identity`](Self::identity).
+    #[must_use]
+    pub const fn with_identity(mut self, identity: &'a str) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Sets [`reflog_message`](Self::reflog_message).
+    #[must_use]
+    pub const fn with_reflog_message(mut self, reflog_message: &'a str) -> Self {
+        self.reflog_message = reflog_message;
+        self
+    }
 }
 
 /// Compare expected and current branch tips for compare-and-swap ref updates.

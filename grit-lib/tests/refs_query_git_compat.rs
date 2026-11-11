@@ -46,10 +46,7 @@ fn grit_sorted_refnames(
     let query = RefQuery::default()
         .with_namespaces(vec![RefNamespace::Tags])
         .with_patterns(patterns)
-        .with_sort(RefSort {
-            key: sort_key,
-            reverse,
-        })
+        .with_sort(RefSort::default().with_key(sort_key).with_reverse(reverse))
         .with_limit(limit);
     repo.references()
         .query(&query, options)
@@ -123,10 +120,7 @@ fn run_query_matrix(worktree: &std::path::Path, backend: Backend, storage: &str)
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .expect("discover");
-    let options = RefQueryOptions {
-        versionsort_suffixes: vec!["-rc".to_owned()],
-        ignore_case: false,
-    };
+    let options = RefQueryOptions::default().with_versionsort_suffixes(vec!["-rc".to_owned()]);
 
     for (git_sort, grit_key) in [
         ("refname", SortKey::Name),

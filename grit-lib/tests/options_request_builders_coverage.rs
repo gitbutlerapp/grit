@@ -490,10 +490,11 @@ fn merge_status_and_ownership_setters_set_each_field() {
     let opts = StatusOptions::default()
         .with_untracked(UntrackedMode::All)
         .with_ignored(IgnoredMode::Traditional)
-        .with_renames(Some(RenameDetection {
-            threshold: 60,
-            copies: true,
-        }))
+        .with_renames(Some(
+            RenameDetection::default()
+                .with_threshold(60)
+                .with_copies(true),
+        ))
         .with_pathspec(defaults.pathspec.clone())
         .with_ahead_behind(false)
         .with_stat_parallel_threads(Some(1))
@@ -512,4 +513,439 @@ fn merge_status_and_ownership_setters_set_each_field() {
     let ctx = OwnershipContext::default();
     assert_eq!(ctx.sudo_uid, None);
     assert_eq!(ctx.with_sudo_uid(Some(501)).sudo_uid, Some(501));
+}
+
+#[test]
+fn process_and_hook_input_setters_set_each_field() {
+    use grit_lib::command_runner::hooks::{CommitHookEnv, PrePushRef};
+    use grit_lib::command_runner::CommandEnvironment;
+    use std::ffi::OsString;
+    use std::path::Path;
+
+    let env = CommandEnvironment::default()
+        .with_inherit_process(true)
+        .with_set(vec![(OsString::from("A"), OsString::from("1"))])
+        .with_remove(vec![OsString::from("B")]);
+    assert!(env.inherit_process);
+    assert_eq!(env.set, vec![(OsString::from("A"), OsString::from("1"))]);
+    assert_eq!(env.remove, vec![OsString::from("B")]);
+
+    let extra = [("K", "v")];
+    let hook = CommitHookEnv::default()
+        .with_index_file(Some(Path::new("index")))
+        .with_git_editor(Some(":"))
+        .with_git_prefix(Some("sub/"))
+        .with_extra_env(&extra);
+    assert_eq!(hook.index_file, Some(Path::new("index")));
+    assert_eq!(hook.git_editor, Some(":"));
+    assert_eq!(hook.git_prefix, Some("sub/"));
+    assert_eq!(hook.extra_env, &extra);
+
+    let push = PrePushRef::new(
+        Some("refs/heads/main".to_owned()),
+        Some(oid(1)),
+        "refs/heads/main",
+        None,
+    );
+    assert_eq!(push.local_ref.as_deref(), Some("refs/heads/main"));
+    assert_eq!(push.local_oid, Some(oid(1)));
+    assert_eq!(push.remote_ref, "refs/heads/main");
+    assert_eq!(push.remote_oid, None);
+    let push = push
+        .with_local_ref(None)
+        .with_local_oid(None)
+        .with_remote_ref("refs/heads/gone".to_owned())
+        .with_remote_oid(Some(oid(2)));
+    assert_eq!(push.local_ref, None);
+    assert_eq!(push.local_oid, None);
+    assert_eq!(push.remote_ref, "refs/heads/gone");
+    assert_eq!(push.remote_oid, Some(oid(2)));
+}
+
+#[test]
+fn rendering_input_setters_set_each_field() {
+    use grit_lib::config::git_date::{DateMode, DateModeType};
+    use grit_lib::revwalk::GraphCharset;
+
+    let mode = DateMode::from_type(DateModeType::Short);
+    assert_eq!(mode.ty, DateModeType::Short);
+    assert!(!mode.local && mode.strftime_fmt.is_none());
+    let mode = mode
+        .with_ty(DateModeType::Strftime)
+        .with_local(true)
+        .with_strftime_fmt(Some("%Y".to_owned()));
+    assert_eq!(mode.ty, DateModeType::Strftime);
+    assert!(mode.local);
+    assert_eq!(mode.strftime_fmt.as_deref(), Some("%Y"));
+
+    let charset = GraphCharset::ASCII
+        .with_commit('o')
+        .with_pipe(':')
+        .with_merge_right('>')
+        .with_merge_left('<')
+        .with_merge_middle('+');
+    assert_eq!(
+        (
+            charset.commit,
+            charset.pipe,
+            charset.merge_right,
+            charset.merge_left,
+            charset.merge_middle
+        ),
+        ('o', ':', '>', '<', '+')
+    );
+    assert_ne!(GraphCharset::ASCII, GraphCharset::UNICODE);
+
+    let renames = RenameDetection::default();
+    assert_eq!(renames.threshold, 50);
+    assert!(!renames.copies);
+    let renames = renames.with_threshold(70).with_copies(true);
+    assert_eq!(renames.threshold, 70);
+    assert!(renames.copies);
+}
+
+#[test]
+fn walk_and_query_input_setters_set_each_field() {
+    use grit_lib::blame::IgnoreRevsSources;
+    use grit_lib::refs::listing::{RefQueryOptions, SortKey};
+    use grit_lib::refs::reflog::ReflogSelector;
+    use grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs;
+    use grit_lib::worktree::pathspec::PathspecFile;
+
+    let cutoffs = ReachableWalkCommitterCutoffs::default()
+        .with_since(Some(10))
+        .with_until(Some(20));
+    assert_eq!((cutoffs.since, cutoffs.until), (Some(10), Some(20)));
+
+    let file = PathspecFile::new(b"a\0b\0".to_vec(), true)
+        .with_data(b"c\n".to_vec())
+        .with_nul_terminated(false);
+    assert_eq!(file.data, b"c\n".to_vec());
+    assert!(!file.nul_terminated);
+
+    let sources = IgnoreRevsSources::default()
+        .with_files(vec![".git-blame-ignore-revs".to_owned()])
+        .with_revs(vec!["HEAD~1".to_owned()])
+        .with_use_config(true);
+    assert_eq!(sources.files, vec![".git-blame-ignore-revs".to_owned()]);
+    assert_eq!(sources.revs, vec!["HEAD~1".to_owned()]);
+    assert!(sources.use_config);
+
+    let sort = RefSort::default();
+    assert_eq!(sort.key, SortKey::Name);
+    assert!(!sort.reverse);
+    let sort = sort.with_key(SortKey::Version).with_reverse(true);
+    assert_eq!(sort.key, SortKey::Version);
+    assert!(sort.reverse);
+
+    let opts = RefQueryOptions::default()
+        .with_versionsort_suffixes(vec!["-rc".to_owned()])
+        .with_ignore_case(true);
+    assert_eq!(opts.versionsort_suffixes, vec!["-rc".to_owned()]);
+    assert!(opts.ignore_case);
+
+    let main = RefName::new("refs/heads/main").expect("ref name");
+    let topic = RefName::new("refs/heads/topic").expect("ref name");
+    let selector = ReflogSelector::new(main.clone(), 2);
+    assert_eq!(selector.ref_name, main);
+    assert_eq!(selector.index, 2);
+    let selector = selector.with_ref_name(topic.clone()).with_index(0);
+    assert_eq!(selector.ref_name, topic);
+    assert_eq!(selector.index, 0);
+}
+
+#[test]
+fn ref_transaction_input_setters_set_each_field() {
+    use grit_lib::refs::gc::RefTransactionItem;
+    use grit_lib::refs::reftable::{RefValue, ReftableTransactionUpdate};
+    use grit_lib::refs::store::RefNameRef;
+    use grit_lib::refs::BranchCommitRefUpdate;
+
+    let item = RefTransactionItem::new("refs/heads/main", Some(oid(1)));
+    assert_eq!(item.name, "refs/heads/main");
+    assert_eq!(item.new_oid, Some(oid(1)));
+    assert_eq!(item.expected_old, None);
+    let item = item
+        .with_name("refs/heads/topic".to_owned())
+        .with_new_oid(None)
+        .with_expected_old(Some(oid(2)));
+    assert_eq!(item.name, "refs/heads/topic");
+    assert_eq!(item.new_oid, None);
+    assert_eq!(item.expected_old, Some(oid(2)));
+
+    let update = ReftableTransactionUpdate::new("refs/heads/main");
+    assert_eq!(update.refname, "refs/heads/main");
+    assert!(update.value.is_none() && update.log.is_none() && update.expected_old.is_none());
+    let update = update
+        .with_refname("refs/heads/topic".to_owned())
+        .with_value(Some(RefValue::Val1(oid(3))))
+        .with_log(None)
+        .with_expected_old(Some(oid(4)));
+    assert_eq!(update.refname, "refs/heads/topic");
+    assert!(matches!(update.value, Some(RefValue::Val1(o)) if o == oid(3)));
+    assert!(update.log.is_none());
+    assert_eq!(update.expected_old, Some(oid(4)));
+
+    let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+    let reflog = ReflogUpdate::new("A U Thor <a@example.com>", "commit: x", now);
+    assert_eq!(reflog.identity, "A U Thor <a@example.com>");
+    assert_eq!(reflog.message, "commit: x");
+    assert_eq!(reflog.time, now);
+    assert!(reflog.old_oid.is_none() && reflog.new_oid.is_none());
+    let later = now + time::Duration::seconds(1);
+    let reflog = reflog
+        .with_identity("B <b@example.com>".to_owned())
+        .with_message("reset".to_owned())
+        .with_time(later)
+        .with_old_oid(Some(oid(5)))
+        .with_new_oid(Some(oid(6)));
+    assert_eq!(reflog.identity, "B <b@example.com>");
+    assert_eq!(reflog.message, "reset");
+    assert_eq!(reflog.time, later);
+    assert_eq!(
+        (reflog.old_oid, reflog.new_oid),
+        (Some(oid(5)), Some(oid(6)))
+    );
+
+    let main = RefNameRef::new("refs/heads/main").expect("ref name");
+    let topic = RefNameRef::new("refs/heads/topic").expect("ref name");
+    let branch = BranchCommitRefUpdate::new(main, None, oid(7), "Id <i@example.com>", "commit");
+    assert!(branch.branch_ref == main);
+    assert_eq!(branch.expected_old, None);
+    assert_eq!(branch.new_oid, oid(7));
+    assert_eq!(
+        (branch.identity, branch.reflog_message),
+        ("Id <i@example.com>", "commit")
+    );
+    let branch = branch
+        .with_branch_ref(topic)
+        .with_expected_old(Some(oid(7)))
+        .with_new_oid(oid(8))
+        .with_identity("Other <o@example.com>")
+        .with_reflog_message("amend");
+    assert!(branch.branch_ref == topic);
+    assert_eq!(branch.expected_old, Some(oid(7)));
+    assert_eq!(branch.new_oid, oid(8));
+    assert_eq!(
+        (branch.identity, branch.reflog_message),
+        ("Other <o@example.com>", "amend")
+    );
+}
+
+#[test]
+fn branch_merge_and_history_input_setters_set_each_field() {
+    use grit_lib::merge::merge_trees::{TheirsConflictLabel, TreeMergeConflictPresentation};
+    use grit_lib::merge::{MergeSource, MergeSourceKind};
+    use grit_lib::porcelain::branch::StartPoint;
+    use grit_lib::porcelain::hunk_select::LineRange;
+    use grit_lib::revwalk::history::{CommitEdit, NewCommit};
+
+    let start = StartPoint::new(oid(1), "main");
+    assert_eq!((start.oid, start.label.as_str()), (oid(1), "main"));
+    let start = start.with_oid(oid(2)).with_label("topic".to_owned());
+    assert_eq!((start.oid, start.label.as_str()), (oid(2), "topic"));
+
+    let source = MergeSource::new(oid(3), MergeSourceKind::Commit);
+    assert_eq!((source.oid, source.kind), (oid(3), MergeSourceKind::Commit));
+    let source = source
+        .with_oid(oid(4))
+        .with_kind(MergeSourceKind::LocalBranch);
+    assert_eq!(
+        (source.oid, source.kind),
+        (oid(4), MergeSourceKind::LocalBranch)
+    );
+
+    let range = LineRange::new("a.txt", 1, 3);
+    assert_eq!(
+        (range.path.as_str(), range.start, range.end),
+        ("a.txt", 1, 3)
+    );
+    let range = range
+        .with_path("b.txt".to_owned())
+        .with_start(4)
+        .with_end(6);
+    assert_eq!(
+        (range.path.as_str(), range.start, range.end),
+        ("b.txt", 4, 6)
+    );
+
+    let defaults = TreeMergeConflictPresentation::default();
+    assert_eq!(defaults.label_ours, "HEAD");
+    assert_eq!(defaults.style, ConflictStyle::Merge);
+    let presentation = defaults
+        .with_label_ours("ours")
+        .with_label_theirs(TheirsConflictLabel::Fixed("theirs"))
+        .with_label_base("base")
+        .with_style(ConflictStyle::Diff3)
+        .with_checkout_merge(true)
+        .with_df_directory_ours_commit(Some(oid(5)))
+        .with_df_directory_theirs_commit(Some(oid(6)));
+    assert_eq!(presentation.label_ours, "ours");
+    assert!(matches!(
+        presentation.label_theirs,
+        TheirsConflictLabel::Fixed("theirs")
+    ));
+    assert_eq!(presentation.label_base, "base");
+    assert_eq!(presentation.style, ConflictStyle::Diff3);
+    assert!(presentation.checkout_merge);
+    assert_eq!(presentation.df_directory_ours_commit, Some(oid(5)));
+    assert_eq!(presentation.df_directory_theirs_commit, Some(oid(6)));
+
+    let author = "A <a@example.com> 1700000000 +0000";
+    let insert = NewCommit::new(oid(7), author, "inserted\n");
+    assert_eq!(insert.tree, oid(7));
+    assert_eq!(insert.author, author);
+    assert_eq!(insert.message, "inserted\n");
+    let insert = insert
+        .with_tree(oid(8))
+        .with_author("B <b@example.com> 1700000000 +0000".to_owned())
+        .with_message("other\n".to_owned());
+    assert_eq!(insert.tree, oid(8));
+    assert_eq!(insert.author, "B <b@example.com> 1700000000 +0000");
+    assert_eq!(insert.message, "other\n");
+
+    match CommitEdit::rewrite(
+        Some(oid(9)),
+        Some("m\n".to_owned()),
+        None,
+        Some(vec![oid(1)]),
+    ) {
+        CommitEdit::Rewrite {
+            tree,
+            message,
+            author,
+            parents,
+            ..
+        } => {
+            assert_eq!(tree, Some(oid(9)));
+            assert_eq!(message.as_deref(), Some("m\n"));
+            assert_eq!(author, None);
+            assert_eq!(parents, Some(vec![oid(1)]));
+        }
+        other => panic!("expected Rewrite, got {other:?}"),
+    }
+    match CommitEdit::split_before(insert.clone(), Some("rest\n".to_owned())) {
+        CommitEdit::SplitBefore {
+            insert: got,
+            rest_message,
+            ..
+        } => {
+            assert_eq!(got, insert);
+            assert_eq!(rest_message.as_deref(), Some("rest\n"));
+        }
+        other => panic!("expected SplitBefore, got {other:?}"),
+    }
+    assert!(matches!(
+        CommitEdit::reuse(oid(2), oid(3)),
+        CommitEdit::Reuse { existing, parent, .. } if existing == oid(2) && parent == oid(3)
+    ));
+}
+
+#[test]
+fn transport_and_credential_input_setters_set_each_field() {
+    use grit_lib::remote::credentials::Credential;
+    use grit_lib::remote::protocol::ProtocolPolicyInputs;
+    use grit_lib::remote::transfer::CloneReflog;
+    use grit_lib::remote::transport::GitDaemonTransport;
+    use std::time::Duration;
+
+    let daemon = GitDaemonTransport::default()
+        .with_connect_timeout(Some(Duration::from_secs(1)))
+        .with_io_timeout(Some(Duration::from_secs(2)));
+    assert_eq!(daemon.connect_timeout, Some(Duration::from_secs(1)));
+    assert_eq!(daemon.io_timeout, Some(Duration::from_secs(2)));
+
+    let inputs = ProtocolPolicyInputs::default()
+        .with_git_allow_protocol(Some("https".to_owned()))
+        .with_git_protocol_from_user(Some("0".to_owned()))
+        .with_specific_allow(Some("never".to_owned()))
+        .with_blanket_allow(Some("user".to_owned()));
+    assert_eq!(inputs.git_allow_protocol.as_deref(), Some("https"));
+    assert_eq!(inputs.git_protocol_from_user.as_deref(), Some("0"));
+    assert_eq!(inputs.specific_allow.as_deref(), Some("never"));
+    assert_eq!(inputs.blanket_allow.as_deref(), Some("user"));
+
+    let reflog = CloneReflog::new(signature(), "clone: from here");
+    assert_eq!(reflog.identity, signature());
+    assert_eq!(reflog.message, "clone: from here");
+    let other: Signature = "Other <o@example.com> 1700000001 +0000"
+        .parse()
+        .expect("signature");
+    let reflog = reflog
+        .with_identity(other.clone())
+        .with_message("clone: from there".to_owned());
+    assert_eq!(reflog.identity, other);
+    assert_eq!(reflog.message, "clone: from there");
+
+    let cred = Credential::default()
+        .with_protocol(Some("https".to_owned()))
+        .with_host(Some("example.com".to_owned()))
+        .with_path(Some("repo.git".to_owned()))
+        .with_username(Some("ada".to_owned()))
+        .with_password(Some("hunter2".to_owned()))
+        .with_url(Some("https://example.com/repo.git".to_owned()))
+        .with_extra(vec![
+            (
+                "oauth_refresh_token".to_owned(),
+                "refresh-secret".to_owned(),
+            ),
+            ("capability[]".to_owned(), "authtype".to_owned()),
+        ]);
+    assert_eq!(cred.protocol.as_deref(), Some("https"));
+    assert_eq!(cred.host.as_deref(), Some("example.com"));
+    assert_eq!(cred.path.as_deref(), Some("repo.git"));
+    assert_eq!(cred.username.as_deref(), Some("ada"));
+    assert_eq!(cred.password.as_deref(), Some("hunter2"));
+    assert_eq!(cred.url.as_deref(), Some("https://example.com/repo.git"));
+    assert_eq!(cred.extra.len(), 2);
+    let debug = format!("{cred:?}");
+    assert!(!debug.contains("hunter2"), "password leaked: {debug}");
+    assert!(!debug.contains("refresh-secret"), "token leaked: {debug}");
+    assert!(debug.contains("ada") && debug.contains("capability[]"));
+    assert!(debug.contains("<redacted>"));
+    assert!(!format!("{:?}", Credential::default()).contains("<redacted>"));
+}
+
+#[test]
+fn trailer_and_patch_input_setters_set_each_field() {
+    use grit_lib::commit::trailers::interpret::{
+        NewTrailerArg, TrailerIfExists, TrailerIfMissing, TrailerWhere,
+    };
+    use grit_lib::diff::{DiffEntry, DiffStatus, PatchResolvedSide, PatchSide};
+    use grit_lib::objects::FileMode;
+
+    let arg = NewTrailerArg::new("Acked-by: A");
+    assert_eq!(arg.text, "Acked-by: A");
+    assert_eq!(arg.where_, TrailerWhere::Default);
+    assert_eq!(arg.if_exists, TrailerIfExists::Default);
+    assert_eq!(arg.if_missing, TrailerIfMissing::Default);
+    let arg = arg
+        .with_text("Signed-off-by: B".to_owned())
+        .with_where_(TrailerWhere::Start)
+        .with_if_exists(TrailerIfExists::Replace)
+        .with_if_missing(TrailerIfMissing::DoNothing);
+    assert_eq!(arg.text, "Signed-off-by: B");
+    assert_eq!(arg.where_, TrailerWhere::Start);
+    assert_eq!(arg.if_exists, TrailerIfExists::Replace);
+    assert_eq!(arg.if_missing, TrailerIfMissing::DoNothing);
+
+    let entry = DiffEntry::new(
+        DiffStatus::Modified,
+        Some("a.txt".to_owned()),
+        Some("a.txt".to_owned()),
+        FileMode::REGULAR,
+        FileMode::REGULAR,
+        oid(1),
+        oid(2),
+    );
+    let side = PatchResolvedSide::new(entry.clone(), PatchSide::Blob, PatchSide::Worktree);
+    assert_eq!(side.entry, entry);
+    assert_eq!(side.old, PatchSide::Blob);
+    assert_eq!(side.new, PatchSide::Worktree);
+    let side = side
+        .with_entry(entry.clone())
+        .with_old(PatchSide::Bytes(b"old".to_vec()))
+        .with_new(PatchSide::Bytes(b"new".to_vec()));
+    assert_eq!(side.old, PatchSide::Bytes(b"old".to_vec()));
+    assert_eq!(side.new, PatchSide::Bytes(b"new".to_vec()));
 }

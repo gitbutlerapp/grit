@@ -15,6 +15,7 @@ use crate::rev_parse::resolve_revision_as_commit;
 
 /// Where to load ignored revisions from (config, CLI files, CLI rev specs).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IgnoreRevsSources {
     /// `--ignore-revs-file` paths in argv order. An empty string clears entries loaded so far.
     pub files: Vec<String>,
@@ -22,6 +23,29 @@ pub struct IgnoreRevsSources {
     pub revs: Vec<String>,
     /// When true, prepend every `blame.ignoreRevsFile` config value before `files`.
     pub use_config: bool,
+}
+
+impl IgnoreRevsSources {
+    /// Sets [`files`](Self::files).
+    #[must_use]
+    pub fn with_files(mut self, files: Vec<String>) -> Self {
+        self.files = files;
+        self
+    }
+
+    /// Sets [`revs`](Self::revs).
+    #[must_use]
+    pub fn with_revs(mut self, revs: Vec<String>) -> Self {
+        self.revs = revs;
+        self
+    }
+
+    /// Sets [`use_config`](Self::use_config).
+    #[must_use]
+    pub const fn with_use_config(mut self, use_config: bool) -> Self {
+        self.use_config = use_config;
+        self
+    }
 }
 
 /// Commits skipped during blame (Git `--ignore-rev` / `--ignore-revs-file`).

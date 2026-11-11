@@ -90,11 +90,9 @@ fn load_config(dir: &Path) -> ConfigSet {
 }
 
 fn sample_input() -> Credential {
-    Credential {
-        protocol: Some("https".into()),
-        host: Some("example.com".into()),
-        ..Default::default()
-    }
+    Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("example.com".into()))
 }
 
 #[test]
@@ -161,13 +159,11 @@ fn approve_and_reject_invoke_helper_with_store_and_erase() {
     let cfg = build_config(dir, &[("credential.helper", &helper_value)]);
     let provider = HelperCredentialProvider::new(cfg);
 
-    let cred = Credential {
-        protocol: Some("https".into()),
-        host: Some("example.com".into()),
-        username: Some("alice".into()),
-        password: Some("secret".into()),
-        ..Default::default()
-    };
+    let cred = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("example.com".into()))
+        .with_username(Some("alice".into()))
+        .with_password(Some("secret".into()));
 
     provider.approve(&cred).expect("approve");
     provider.reject(&cred).expect("reject");
@@ -249,13 +245,11 @@ fn fill_short_circuits_when_input_already_complete() {
     let cfg = build_config(dir, &[("credential.helper", &helper_value)]);
 
     let provider = HelperCredentialProvider::new(cfg);
-    let input = Credential {
-        protocol: Some("https".into()),
-        host: Some("example.com".into()),
-        username: Some("bob".into()),
-        password: Some("hunter2".into()),
-        ..Default::default()
-    };
+    let input = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("example.com".into()))
+        .with_username(Some("bob".into()))
+        .with_password(Some("hunter2".into()));
     let filled = provider
         .fill(&input)
         .expect("complete input should not call helper");
@@ -290,20 +284,16 @@ fn url_scoped_helper_applies_only_to_matching_target() {
     let provider = HelperCredentialProvider::new(cfg);
 
     // Matching target -> helper fires, credential completed.
-    let github = Credential {
-        protocol: Some("https".into()),
-        host: Some("github.com".into()),
-        ..Default::default()
-    };
+    let github = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("github.com".into()));
     let filled = provider.fill(&github).expect("matching scope fills");
     assert_eq!(filled.username.as_deref(), Some("scoped"));
 
     // Non-matching target -> helper does not apply -> typed non-interactive err.
-    let other = Credential {
-        protocol: Some("https".into()),
-        host: Some("example.com".into()),
-        ..Default::default()
-    };
+    let other = Credential::default()
+        .with_protocol(Some("https".into()))
+        .with_host(Some("example.com".into()));
     let err = provider
         .fill(&other)
         .expect_err("non-matching scope yields no creds");

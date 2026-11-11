@@ -88,12 +88,12 @@ fn interrupted_rewrite_repo() -> (tempfile::TempDir, String) {
     let mut edits = HistoryEdits::new();
     edits.insert(
         tip.parse().expect("oid"),
-        CommitEdit::Rewrite {
-            tree: Some(tree.parse().expect("tree oid")),
-            message: Some("rewritten\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(
+            Some(tree.parse().expect("tree oid")),
+            Some("rewritten\n".into()),
+            None,
+            None,
+        ),
     );
     let plan = repo
         .history()

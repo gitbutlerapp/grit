@@ -102,11 +102,10 @@ fn reftable_cas_rejects_stale_oid_after_deletion_in_newer_table() {
 
     let err = update_refs(
         &git_dir,
-        &[RefTransactionItem {
-            name: "refs/heads/cas-target".into(),
-            new_oid: Some(after),
-            expected_old: Some(before),
-        }],
+        &[
+            RefTransactionItem::new("refs/heads/cas-target", Some(after))
+                .with_expected_old(Some(before)),
+        ],
     )
     .expect_err("stale CAS must fail");
     assert!(
@@ -141,11 +140,10 @@ fn reftable_cas_rejects_stale_oid_when_newest_table_is_symref() {
 
     let err = update_refs(
         &git_dir,
-        &[RefTransactionItem {
-            name: "refs/heads/sym-cas".into(),
-            new_oid: Some(oid(0x42)),
-            expected_old: Some(before),
-        }],
+        &[
+            RefTransactionItem::new("refs/heads/sym-cas", Some(oid(0x42)))
+                .with_expected_old(Some(before)),
+        ],
     )
     .expect_err("symref current is not the prior oid");
     assert!(
@@ -165,11 +163,7 @@ fn reftable_verify_batch_allows_parent_after_deleted_descendant() {
     write_with_autocompact_off(&git_dir, "refs/heads/topic/child", &oid(0x31)).expect("child");
     update_refs(
         &git_dir,
-        &[RefTransactionItem {
-            name: "refs/heads/topic/child".into(),
-            new_oid: None,
-            expected_old: None,
-        }],
+        &[RefTransactionItem::new("refs/heads/topic/child", None)],
     )
     .expect("delete child");
 
@@ -181,11 +175,7 @@ fn reftable_verify_batch_allows_parent_after_deleted_descendant() {
 
     update_refs(
         &git_dir,
-        &[RefTransactionItem {
-            name: "refs/heads/topic".into(),
-            new_oid: Some(oid(0x32)),
-            expected_old: None,
-        }],
+        &[RefTransactionItem::new("refs/heads/topic", Some(oid(0x32)))],
     )
     .expect("create parent");
     assert_eq!(

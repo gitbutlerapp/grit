@@ -131,13 +131,11 @@ fn set_ref(repo: &Repository, name: &str, new: ObjectId, expected: Expected, mes
                 Some(RawRef::Direct(new)),
             )
             .with_expected(expected)
-            .with_reflog(Some(ReflogUpdate {
-                identity: "T <t@example.com>".into(),
-                message: message.into(),
-                time: fixed_now(),
-                old_oid: None,
-                new_oid: None,
-            })),
+            .with_reflog(Some(ReflogUpdate::new(
+                "T <t@example.com>",
+                message,
+                fixed_now(),
+            ))),
         )
         .expect("transaction");
     repo.ref_store()

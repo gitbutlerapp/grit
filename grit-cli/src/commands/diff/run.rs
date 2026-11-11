@@ -351,7 +351,7 @@ fn emit_patch_text_to_stdout(
                             PatchSide::Bytes(fc.new_bytes.data),
                         )
                     };
-                    PatchResolvedSide { entry, old, new }
+                    PatchResolvedSide::new(entry, old, new)
                 })
                 .collect();
             write_patch_resolved(repo, &resolved, &patch_opts, stdout)?;

@@ -55,10 +55,7 @@ fn bench_version_sort(c: &mut Criterion) {
             let store = open_ref_store(&git_dir).expect("open store");
             let query = RefQuery::default()
                 .with_namespaces(vec![RefNamespace::Heads])
-                .with_sort(RefSort {
-                    key: SortKey::Version,
-                    reverse: false,
-                });
+                .with_sort(RefSort::default().with_key(SortKey::Version));
             let rows =
                 query_listings_on_store(store.as_ref(), &query, &RefQueryOptions::default(), None)
                     .expect("query");

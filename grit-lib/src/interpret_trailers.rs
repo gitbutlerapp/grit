@@ -78,16 +78,67 @@ pub struct ProcessTrailerOptions {
 }
 
 #[derive(Debug, Clone)]
-/// `NewTrailerArg` struct.
+/// One trailer to add (a `--trailer` argument) and how to place it.
+///
+/// Build it with [`NewTrailerArg::new`] and the `with_` setters.
+#[non_exhaustive]
 pub struct NewTrailerArg {
-    /// `text` field.
+    /// Trailer text as given to `--trailer` (`token: value` or `token=value`).
     pub text: String,
-    /// `where_` field.
+    /// Where to put the trailer (`--where`); `Default` uses the trailer config.
     pub where_: TrailerWhere,
-    /// `if_exists` field.
+    /// What to do when a trailer with the same token exists (`--if-exists`).
     pub if_exists: TrailerIfExists,
-    /// `if_missing` field.
+    /// What to do when no trailer with the same token exists (`--if-missing`).
     pub if_missing: TrailerIfMissing,
+}
+
+impl NewTrailerArg {
+    /// Creates a [`NewTrailerArg`] from its required fields.
+    ///
+    /// The placement and policy fields start at their `Default` variants (use the trailer
+    /// config); set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `text`: the trailer text as given to `--trailer` (`token: value` or `token=value`).
+    #[must_use]
+    pub fn new(text: impl Into<String>) -> Self {
+        Self {
+            text: text.into(),
+            where_: Default::default(),
+            if_exists: Default::default(),
+            if_missing: Default::default(),
+        }
+    }
+
+    /// Sets [`text`](Self::text).
+    #[must_use]
+    pub fn with_text(mut self, text: String) -> Self {
+        self.text = text;
+        self
+    }
+
+    /// Sets [`where_`](Self::where_).
+    #[must_use]
+    pub fn with_where_(mut self, where_: TrailerWhere) -> Self {
+        self.where_ = where_;
+        self
+    }
+
+    /// Sets [`if_exists`](Self::if_exists).
+    #[must_use]
+    pub fn with_if_exists(mut self, if_exists: TrailerIfExists) -> Self {
+        self.if_exists = if_exists;
+        self
+    }
+
+    /// Sets [`if_missing`](Self::if_missing).
+    #[must_use]
+    pub fn with_if_missing(mut self, if_missing: TrailerIfMissing) -> Self {
+        self.if_missing = if_missing;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]

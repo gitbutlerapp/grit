@@ -467,6 +467,7 @@ impl Default for WriteOptions {
 /// one transaction are written with the same update index, matching Git's
 /// reftable backend for `update-ref --stdin` batches.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ReftableTransactionUpdate {
     /// Full storage refname to update.
     pub refname: String,
@@ -477,6 +478,53 @@ pub struct ReftableTransactionUpdate {
     /// When set, the ref's current oid must match before the update is applied (checked
     /// while the stack lock is held).
     pub expected_old: Option<ObjectId>,
+}
+
+impl ReftableTransactionUpdate {
+    /// Creates a [`ReftableTransactionUpdate`] from its required fields.
+    ///
+    /// The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `refname`: full storage refname to update.
+    #[must_use]
+    pub fn new(refname: impl Into<String>) -> Self {
+        Self {
+            refname: refname.into(),
+            value: None,
+            log: None,
+            expected_old: None,
+        }
+    }
+
+    /// Sets [`refname`](Self::refname).
+    #[must_use]
+    pub fn with_refname(mut self, refname: String) -> Self {
+        self.refname = refname;
+        self
+    }
+
+    /// Sets [`value`](Self::value).
+    #[must_use]
+    pub fn with_value(mut self, value: Option<RefValue>) -> Self {
+        self.value = value;
+        self
+    }
+
+    /// Sets [`log`](Self::log).
+    #[must_use]
+    pub fn with_log(mut self, log: Option<LogRecord>) -> Self {
+        self.log = log;
+        self
+    }
+
+    /// Sets [`expected_old`](Self::expected_old).
+    #[must_use]
+    pub const fn with_expected_old(mut self, expected_old: Option<ObjectId>) -> Self {
+        self.expected_old = expected_old;
+        self
+    }
 }
 
 // ---------------------------------------------------------------------------

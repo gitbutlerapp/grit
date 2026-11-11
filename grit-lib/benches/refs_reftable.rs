@@ -36,11 +36,10 @@ impl ReftableBenchFixture {
         let base_commit = ObjectId::from_hex(EMPTY_TREE).expect("tree oid");
         let mut batch = Vec::with_capacity(REF_COUNT);
         for i in 0..REF_COUNT {
-            batch.push(RefTransactionItem {
-                name: format!("refs/heads/b{i:05}"),
-                new_oid: Some(base_commit),
-                expected_old: None,
-            });
+            batch.push(RefTransactionItem::new(
+                format!("refs/heads/b{i:05}"),
+                Some(base_commit),
+            ));
         }
         update_refs(&git_dir, &batch).expect("seed refs");
         let mut stack =
@@ -100,11 +99,10 @@ fn bench_transaction_create_10k(c: &mut Criterion) {
                 let git_dir = work.path();
                 let mut batch = Vec::with_capacity(TXN_CREATE_COUNT);
                 for i in 0..TXN_CREATE_COUNT {
-                    batch.push(RefTransactionItem {
-                        name: format!("refs/heads/t{i:05}"),
-                        new_oid: Some(fx.base_commit),
-                        expected_old: None,
-                    });
+                    batch.push(RefTransactionItem::new(
+                        format!("refs/heads/t{i:05}"),
+                        Some(fx.base_commit),
+                    ));
                 }
                 update_refs(git_dir, &batch).expect("txn");
                 black_box(batch.len())

@@ -231,6 +231,7 @@ pub enum TheirsConflictLabel<'a> {
 
 /// Labels and marker style for conflict output during tree merges.
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct TreeMergeConflictPresentation<'a> {
     /// Label after `<<<<<<<` (Git: ours side name).
     pub label_ours: &'a str,
@@ -259,6 +260,63 @@ impl Default for TreeMergeConflictPresentation<'_> {
             df_directory_ours_commit: None,
             df_directory_theirs_commit: None,
         }
+    }
+}
+
+impl<'a> TreeMergeConflictPresentation<'a> {
+    /// Sets [`label_ours`](Self::label_ours).
+    #[must_use]
+    pub const fn with_label_ours(mut self, label_ours: &'a str) -> Self {
+        self.label_ours = label_ours;
+        self
+    }
+
+    /// Sets [`label_theirs`](Self::label_theirs).
+    #[must_use]
+    pub const fn with_label_theirs(mut self, label_theirs: TheirsConflictLabel<'a>) -> Self {
+        self.label_theirs = label_theirs;
+        self
+    }
+
+    /// Sets [`label_base`](Self::label_base).
+    #[must_use]
+    pub const fn with_label_base(mut self, label_base: &'a str) -> Self {
+        self.label_base = label_base;
+        self
+    }
+
+    /// Sets [`style`](Self::style).
+    #[must_use]
+    pub const fn with_style(mut self, style: ConflictStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Sets [`checkout_merge`](Self::checkout_merge).
+    #[must_use]
+    pub const fn with_checkout_merge(mut self, checkout_merge: bool) -> Self {
+        self.checkout_merge = checkout_merge;
+        self
+    }
+
+    /// Sets [`df_directory_ours_commit`](Self::df_directory_ours_commit).
+    #[must_use]
+    pub const fn with_df_directory_ours_commit(
+        mut self,
+        df_directory_ours_commit: Option<ObjectId>,
+    ) -> Self {
+        self.df_directory_ours_commit = df_directory_ours_commit;
+        self
+    }
+
+    /// Sets [`df_directory_theirs_commit`](Self::df_directory_theirs_commit).
+    #[must_use]
+    pub const fn with_df_directory_theirs_commit(
+        mut self,
+        df_directory_theirs_commit: Option<ObjectId>,
+    ) -> Self {
+        self.df_directory_theirs_commit = df_directory_theirs_commit;
+        self
     }
 }
 

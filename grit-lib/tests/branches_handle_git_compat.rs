@@ -40,10 +40,7 @@ fn branches_handle_round_trips_with_git() {
     repo.branches()
         .create(&BranchCreateOptions {
             name: "feature".into(),
-            start: Some(grit_lib::porcelain::branch::StartPoint {
-                oid: tip,
-                label: "HEAD".into(),
-            }),
+            start: Some(grit_lib::porcelain::branch::StartPoint::new(tip, "HEAD")),
             force: false,
             track: grit_lib::porcelain::branch::TrackMode::Never,
             dry_run: false,

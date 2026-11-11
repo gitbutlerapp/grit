@@ -99,12 +99,7 @@ fn bench_history_rewrite(c: &mut Criterion) {
             let mut edits = HistoryEdits::new();
             edits.insert(
                 oldest,
-                CommitEdit::Rewrite {
-                    tree: None,
-                    message: Some("reworded oldest subject\n".into()),
-                    author: None,
-                    parents: None,
-                },
+                CommitEdit::rewrite(None, Some("reworded oldest subject\n".into()), None, None),
             );
             let plan = repo
                 .history()

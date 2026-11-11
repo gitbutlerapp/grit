@@ -66,11 +66,38 @@ pub enum IgnoredMode {
 /// Rename/copy detection settings for the status diffs (`status.renames` /
 /// `--find-renames`, `status.renameLimit`, copy detection).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RenameDetection {
     /// Rename similarity threshold, as a percentage (e.g. `50` for 50%).
     pub threshold: u32,
     /// Whether to also detect copies (`-C` / `--find-copies`).
     pub copies: bool,
+}
+
+impl Default for RenameDetection {
+    /// Git's status defaults: a 50% similarity threshold and no copy detection.
+    fn default() -> Self {
+        Self {
+            threshold: STATUS_RENAME_DEFAULT_THRESHOLD,
+            copies: false,
+        }
+    }
+}
+
+impl RenameDetection {
+    /// Sets [`threshold`](Self::threshold).
+    #[must_use]
+    pub const fn with_threshold(mut self, threshold: u32) -> Self {
+        self.threshold = threshold;
+        self
+    }
+
+    /// Sets [`copies`](Self::copies).
+    #[must_use]
+    pub const fn with_copies(mut self, copies: bool) -> Self {
+        self.copies = copies;
+        self
+    }
 }
 
 /// Inputs that drive **what** `status` computes.

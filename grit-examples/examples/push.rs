@@ -4,12 +4,7 @@ use grit_lib::remote::protocol::{check_protocol_allowed_with, ProtocolPolicyInpu
 fn main() -> Result<(), grit_lib::remote::protocol::ProtocolError> {
     check_protocol_allowed_with(
         "https",
-        &ProtocolPolicyInputs {
-            git_allow_protocol: None,
-            git_protocol_from_user: Some("1".into()),
-            specific_allow: None,
-            blanket_allow: None,
-        },
+        &ProtocolPolicyInputs::default().with_git_protocol_from_user(Some("1".into())),
     )?;
 
     println!("https transport is allowed for a user-requested push");

@@ -114,10 +114,9 @@ pub fn run_refs(remote_or_url: &str, cli: &RemoteRefsCliOptions) -> Result<Remot
         heads: cli.heads,
         tags: cli.tags,
         peel: true,
-        sort: RefSort {
-            key: sort_key,
-            reverse: cli.reverse,
-        },
+        sort: RefSort::default()
+            .with_key(sort_key)
+            .with_reverse(cli.reverse),
         limit: cli.limit,
         versionsort_suffixes: crate::context::config_strings(&config, "versionsort.suffix"),
         protocol_version: Some(protocol_version),

@@ -100,11 +100,7 @@ fn parse_update_ref_stdin() -> Result<Vec<RefTransactionItem>> {
                 }
                 let oid = ObjectId::from_hex(oid_hex)
                     .with_context(|| format!("parse oid on create line: {line}"))?;
-                items.push(RefTransactionItem {
-                    name: name.to_owned(),
-                    new_oid: Some(oid),
-                    expected_old: None,
-                });
+                items.push(RefTransactionItem::new(name.to_owned(), Some(oid)));
             }
             "update" => {
                 let name = parts
@@ -123,11 +119,9 @@ fn parse_update_ref_stdin() -> Result<Vec<RefTransactionItem>> {
                 if parts.next().is_some() {
                     bail!("unexpected extra fields on update line: {line}");
                 }
-                items.push(RefTransactionItem {
-                    name: name.to_owned(),
-                    new_oid: Some(new_oid),
-                    expected_old: old,
-                });
+                items.push(
+                    RefTransactionItem::new(name.to_owned(), Some(new_oid)).with_expected_old(old),
+                );
             }
             "delete" => {
                 let name = parts
@@ -141,11 +135,7 @@ fn parse_update_ref_stdin() -> Result<Vec<RefTransactionItem>> {
                 if parts.next().is_some() {
                     bail!("unexpected extra fields on delete line: {line}");
                 }
-                items.push(RefTransactionItem {
-                    name: name.to_owned(),
-                    new_oid: None,
-                    expected_old: old,
-                });
+                items.push(RefTransactionItem::new(name.to_owned(), None).with_expected_old(old));
             }
             other => bail!("unknown update-ref stdin command '{other}'"),
         }

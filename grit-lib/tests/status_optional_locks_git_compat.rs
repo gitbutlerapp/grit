@@ -213,12 +213,7 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         target,
-        CommitEdit::Rewrite {
-            tree: Some(new_tree),
-            message: Some("tree change\n".into()),
-            author: None,
-            parents: None,
-        },
+        CommitEdit::rewrite(Some(new_tree), Some("tree change\n".into()), None, None),
     );
     let plan = grit
         .history()

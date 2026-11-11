@@ -23,14 +23,12 @@ fn oid(byte: u8) -> ObjectId {
 }
 
 fn sample_log(n: u8) -> ReflogUpdate {
-    ReflogUpdate {
-        identity: grit_reflog_identity(),
-        message: format!("commit: batch {n}"),
-        time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000 + i64::from(n))
+    ReflogUpdate::new(
+        grit_reflog_identity(),
+        format!("commit: batch {n}"),
+        time::OffsetDateTime::from_unix_timestamp(1_700_000_000 + i64::from(n))
             .expect("valid timestamp"),
-        old_oid: None,
-        new_oid: None,
-    }
+    )
 }
 
 #[test]
@@ -219,13 +217,11 @@ fn reftable_reflog_identity_with_digits_in_name_visible_to_git() {
                 "refs/heads/digit-name".to_owned(),
                 Some(RawRef::Direct(oid_b)),
             )
-            .with_reflog(Some(ReflogUpdate {
-                identity: identity.to_owned(),
-                message: String::new(),
+            .with_reflog(Some(ReflogUpdate::new(
+                identity.to_owned(),
+                String::new(),
                 time,
-                old_oid: None,
-                new_oid: None,
-            })),
+            ))),
         )
         .expect("txn");
     store

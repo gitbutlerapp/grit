@@ -9,6 +9,7 @@ use crate::refs::store::RefName;
 
 /// Description of a new commit to insert immediately before an existing one.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NewCommit {
     /// Root tree for the inserted commit.
     pub tree: ObjectId,
@@ -18,11 +19,53 @@ pub struct NewCommit {
     pub message: String,
 }
 
+impl NewCommit {
+    /// Creates a [`NewCommit`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `tree`: root tree for the inserted commit.
+    /// - `author`: full author ident (name, email, timestamp, tz).
+    /// - `message`: commit message body (trailing newline optional).
+    #[must_use]
+    pub fn new(tree: ObjectId, author: impl Into<String>, message: impl Into<String>) -> Self {
+        Self {
+            tree,
+            author: author.into(),
+            message: message.into(),
+        }
+    }
+
+    /// Sets [`tree`](Self::tree).
+    #[must_use]
+    pub const fn with_tree(mut self, tree: ObjectId) -> Self {
+        self.tree = tree;
+        self
+    }
+
+    /// Sets [`author`](Self::author).
+    #[must_use]
+    pub fn with_author(mut self, author: String) -> Self {
+        self.author = author;
+        self
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: String) -> Self {
+        self.message = message;
+        self
+    }
+}
+
 /// Per-commit edit applied during planning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CommitEdit {
     /// Replace fields on the commit, then replay descendants.
+    ///
+    /// Build it with [`CommitEdit::rewrite`].
+    #[non_exhaustive]
     Rewrite {
         /// Optional replacement tree OID.
         tree: Option<ObjectId>,
@@ -39,6 +82,9 @@ pub enum CommitEdit {
     InsertBefore(NewCommit),
     /// Insert `insert` before the commit; the mapped original keeps its tree and uses the insert
     /// as its parent, optionally with a new message.
+    ///
+    /// Build it with [`CommitEdit::split_before`].
+    #[non_exhaustive]
     SplitBefore {
         /// New parent commit to insert.
         insert: NewCommit,
@@ -56,6 +102,9 @@ pub enum CommitEdit {
     /// continue from `parent` (mapped through the rewrite, like [`CommitEdit::Reparent`]'s
     /// parent), so a skipped commit never pulls the rest of the replay back onto an older
     /// upstream commit.
+    ///
+    /// Build it with [`CommitEdit::reuse`].
+    #[non_exhaustive]
     Reuse {
         /// Upstream commit with the same patch, reported as the commit's replacement.
         existing: ObjectId,
@@ -63,6 +112,58 @@ pub enum CommitEdit {
         /// its own first parent, or the replay's new base when it is a root of the range.
         parent: ObjectId,
     },
+}
+
+impl CommitEdit {
+    /// Creates a [`CommitEdit::Rewrite`] that replaces the given fields; `None` keeps the
+    /// commit's own value.
+    ///
+    /// # Parameters
+    ///
+    /// - `tree`: replacement root tree.
+    /// - `message`: replacement message.
+    /// - `author`: replacement author ident line.
+    /// - `parents`: replacement parent list.
+    #[must_use]
+    pub fn rewrite(
+        tree: Option<ObjectId>,
+        message: Option<String>,
+        author: Option<String>,
+        parents: Option<Vec<ObjectId>>,
+    ) -> Self {
+        Self::Rewrite {
+            tree,
+            message,
+            author,
+            parents,
+        }
+    }
+
+    /// Creates a [`CommitEdit::SplitBefore`] that inserts `insert` before the commit.
+    ///
+    /// # Parameters
+    ///
+    /// - `insert`: the new parent commit to insert.
+    /// - `rest_message`: when set, replaces the remaining commit's message.
+    #[must_use]
+    pub fn split_before(insert: NewCommit, rest_message: Option<String>) -> Self {
+        Self::SplitBefore {
+            insert,
+            rest_message,
+        }
+    }
+
+    /// Creates a [`CommitEdit::Reuse`] that skips the commit because `existing` already
+    /// carries its patch.
+    ///
+    /// # Parameters
+    ///
+    /// - `existing`: upstream commit with the same patch, reported as the replacement.
+    /// - `parent`: commit that descendants and refs at the skipped commit continue from.
+    #[must_use]
+    pub const fn reuse(existing: ObjectId, parent: ObjectId) -> Self {
+        Self::Reuse { existing, parent }
+    }
 }
 
 /// Pathspec strings passed to history helpers (same syntax as `git` pathspecs on the CLI).

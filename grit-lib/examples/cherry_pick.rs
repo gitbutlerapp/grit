@@ -127,15 +127,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         MergeFavor::default(),
         WhitespaceMergeOptions::default(),
         None,
-        grit_lib::diff::merge_trees::TreeMergeConflictPresentation {
-            label_ours: "HEAD",
-            label_theirs: grit_lib::diff::merge_trees::TheirsConflictLabel::Fixed("picked"),
-            label_base: "parent of picked commit",
-            style: grit_lib::diff::merge_file::ConflictStyle::Merge,
-            checkout_merge: false,
-            df_directory_ours_commit: None,
-            df_directory_theirs_commit: None,
-        },
+        grit_lib::diff::merge_trees::TreeMergeConflictPresentation::default()
+            .with_label_theirs(grit_lib::diff::merge_trees::TheirsConflictLabel::Fixed(
+                "picked",
+            ))
+            .with_label_base("parent of picked commit"),
         DirectoryRenameMode::from_repo(&repo)?,
     )?;
 

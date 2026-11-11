@@ -5,7 +5,11 @@ use std::collections::HashMap;
 use crate::objects::ObjectId;
 
 /// Character set for graph rendering.
+///
+/// Start from [`GraphCharset::ASCII`] or [`GraphCharset::UNICODE`] and change single
+/// glyphs with the `with_` setters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GraphCharset {
     /// Marker on the commit's lane (`*` or `●`).
     pub commit: char,
@@ -37,6 +41,41 @@ impl GraphCharset {
         merge_left: '╱',
         merge_middle: '┼',
     };
+
+    /// Sets [`commit`](Self::commit).
+    #[must_use]
+    pub const fn with_commit(mut self, commit: char) -> Self {
+        self.commit = commit;
+        self
+    }
+
+    /// Sets [`pipe`](Self::pipe).
+    #[must_use]
+    pub const fn with_pipe(mut self, pipe: char) -> Self {
+        self.pipe = pipe;
+        self
+    }
+
+    /// Sets [`merge_right`](Self::merge_right).
+    #[must_use]
+    pub const fn with_merge_right(mut self, merge_right: char) -> Self {
+        self.merge_right = merge_right;
+        self
+    }
+
+    /// Sets [`merge_left`](Self::merge_left).
+    #[must_use]
+    pub const fn with_merge_left(mut self, merge_left: char) -> Self {
+        self.merge_left = merge_left;
+        self
+    }
+
+    /// Sets [`merge_middle`](Self::merge_middle).
+    #[must_use]
+    pub const fn with_merge_middle(mut self, merge_middle: char) -> Self {
+        self.merge_middle = merge_middle;
+        self
+    }
 }
 
 /// One commit row fed into [`GraphLayout`].

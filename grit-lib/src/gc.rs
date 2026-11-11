@@ -498,6 +498,7 @@ pub fn remote_default_branch_local(remote_git_dir: &Path) -> Result<Option<Strin
 
 /// A single ref change in an [`update_refs`] batch transaction.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefTransactionItem {
     /// Full ref name (e.g. `refs/heads/main`).
     pub name: String,
@@ -513,6 +514,46 @@ pub struct RefTransactionItem {
     /// `None` — callers that need create-only semantics check existence
     /// themselves; matching jj's transaction model where `None` means "any".
     pub expected_old: Option<ObjectId>,
+}
+
+impl RefTransactionItem {
+    /// Creates a [`RefTransactionItem`] from its required fields.
+    ///
+    /// The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: full ref name (for example `refs/heads/main`).
+    /// - `new_oid`: new value to write, or `None` to delete the ref.
+    #[must_use]
+    pub fn new(name: impl Into<String>, new_oid: Option<ObjectId>) -> Self {
+        Self {
+            name: name.into(),
+            new_oid,
+            expected_old: None,
+        }
+    }
+
+    /// Sets [`name`](Self::name).
+    #[must_use]
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
+
+    /// Sets [`new_oid`](Self::new_oid).
+    #[must_use]
+    pub const fn with_new_oid(mut self, new_oid: Option<ObjectId>) -> Self {
+        self.new_oid = new_oid;
+        self
+    }
+
+    /// Sets [`expected_old`](Self::expected_old).
+    #[must_use]
+    pub const fn with_expected_old(mut self, expected_old: Option<ObjectId>) -> Self {
+        self.expected_old = expected_old;
+        self
+    }
 }
 
 /// Apply a batch of ref create/update/delete operations transactionally with

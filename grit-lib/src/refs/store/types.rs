@@ -72,6 +72,7 @@ pub enum Expected {
 
 /// Metadata appended to a ref update for the reflog.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReflogUpdate {
     /// Author/committer identity (name and email); timestamp is taken from [`Self::time`].
     pub identity: String,
@@ -98,6 +99,65 @@ impl ReflogUpdate {
             old_oid: None,
             new_oid: None,
         }
+    }
+
+    /// Creates a [`ReflogUpdate`] from its required fields.
+    ///
+    /// The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `identity`: author/committer identity (name and email); timestamp is taken from [`Self::time`].
+    /// - `message`: reflog message (may be empty).
+    /// - `time`: timestamp recorded in the reflog line.
+    #[must_use]
+    pub fn new(
+        identity: impl Into<String>,
+        message: impl Into<String>,
+        time: time::OffsetDateTime,
+    ) -> Self {
+        Self {
+            identity: identity.into(),
+            message: message.into(),
+            time,
+            old_oid: None,
+            new_oid: None,
+        }
+    }
+
+    /// Sets [`identity`](Self::identity).
+    #[must_use]
+    pub fn with_identity(mut self, identity: String) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: String) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`time`](Self::time).
+    #[must_use]
+    pub fn with_time(mut self, time: time::OffsetDateTime) -> Self {
+        self.time = time;
+        self
+    }
+
+    /// Sets [`old_oid`](Self::old_oid).
+    #[must_use]
+    pub const fn with_old_oid(mut self, old_oid: Option<crate::objects::ObjectId>) -> Self {
+        self.old_oid = old_oid;
+        self
+    }
+
+    /// Sets [`new_oid`](Self::new_oid).
+    #[must_use]
+    pub const fn with_new_oid(mut self, new_oid: Option<crate::objects::ObjectId>) -> Self {
+        self.new_oid = new_oid;
+        self
     }
 }
 

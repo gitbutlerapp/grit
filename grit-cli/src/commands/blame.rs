@@ -122,11 +122,10 @@ pub fn run(
 
     let ignore = IgnoreRevs::load(
         &repo,
-        &IgnoreRevsSources {
-            files: ignore_revs_file,
-            revs: ignore_rev,
-            use_config: true,
-        },
+        &IgnoreRevsSources::default()
+            .with_files(ignore_revs_file)
+            .with_revs(ignore_rev)
+            .with_use_config(true),
     )?;
 
     let copy_detection = CopyDetection::from_count(copy_detection as usize)

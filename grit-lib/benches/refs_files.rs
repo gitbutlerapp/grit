@@ -114,11 +114,7 @@ fn bench_transaction_create(c: &mut Criterion) {
                             return None;
                         }
                         let name = parts.next()?.to_owned();
-                        Some(RefTransactionItem {
-                            name,
-                            new_oid: Some(oid),
-                            expected_old: None,
-                        })
+                        Some(RefTransactionItem::new(name, Some(oid)))
                     })
                     .collect();
                 update_refs(&git_dir, &items).expect("batch");

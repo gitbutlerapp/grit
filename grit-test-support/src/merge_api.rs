@@ -26,10 +26,7 @@ pub fn integrate_branch(
         &BranchIntegrateRequest {
             into_ref,
             into_oid,
-            source: &MergeSource {
-                oid: other_oid,
-                kind: MergeSourceKind::Commit,
-            },
+            source: &MergeSource::new(other_oid, MergeSourceKind::Commit),
             label,
         },
         &MergeOptions::default(),
@@ -54,10 +51,7 @@ pub fn integrate_branch_with(
         &BranchIntegrateRequest {
             into_ref,
             into_oid,
-            source: &MergeSource {
-                oid: other_oid,
-                kind: MergeSourceKind::Commit,
-            },
+            source: &MergeSource::new(other_oid, MergeSourceKind::Commit),
             label,
         },
         options,
@@ -77,10 +71,7 @@ pub fn integrate_detached_head(
 ) -> grit_lib::error::Result<IntegrateBranchOutcome> {
     let _ = into_oid;
     repo.merge().integrate(
-        &MergeSource {
-            oid: other_oid,
-            kind: MergeSourceKind::Commit,
-        },
+        &MergeSource::new(other_oid, MergeSourceKind::Commit),
         label,
         &MergeOptions::default(),
         progress,
@@ -101,10 +92,7 @@ pub fn integrate_detached_head_with(
 ) -> grit_lib::error::Result<IntegrateBranchOutcome> {
     let _ = into_oid;
     repo.merge().integrate(
-        &MergeSource {
-            oid: other_oid,
-            kind: MergeSourceKind::Commit,
-        },
+        &MergeSource::new(other_oid, MergeSourceKind::Commit),
         label,
         options,
         progress,

@@ -136,13 +136,13 @@ fn files_backend_commit_emits_head_and_branch_lines() {
     fs::write(&log, "").expect("clear log");
     update_branch_for_commit_on_store(
         repo.ref_store(),
-        &BranchCommitRefUpdate {
-            branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
-            expected_old: Some(old),
-            new_oid: new_commit,
-            identity: "T <t@e.x> 1700000000 +0000",
-            reflog_message: "commit: c2",
-        },
+        &BranchCommitRefUpdate::new(
+            RefNameRef::new("refs/heads/main").expect("valid ref name"),
+            Some(old),
+            new_commit,
+            "T <t@e.x> 1700000000 +0000",
+            "commit: c2",
+        ),
         &repo.config().snapshot().expect("config"),
     )
     .expect("advance branch");
@@ -247,13 +247,13 @@ fn branch_lock_held_during_prepared_blocks_nested_ref_update() {
     fs::write(&log, "").expect("clear log");
     update_branch_for_commit_on_store(
         repo.ref_store(),
-        &BranchCommitRefUpdate {
-            branch_ref: RefNameRef::new("refs/heads/main").expect("valid ref name"),
-            expected_old: Some(old_oid),
+        &BranchCommitRefUpdate::new(
+            RefNameRef::new("refs/heads/main").expect("valid ref name"),
+            Some(old_oid),
             new_oid,
-            identity: "T <t@e.x> 1700000000 +0000",
-            reflog_message: "commit: c2",
-        },
+            "T <t@e.x> 1700000000 +0000",
+            "commit: c2",
+        ),
         &repo.config().snapshot().expect("config"),
     )
     .expect("outer commit succeeds");

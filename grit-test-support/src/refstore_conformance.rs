@@ -167,13 +167,11 @@ fn oid(byte: u8) -> ObjectId {
 }
 
 fn sample_log() -> ReflogUpdate {
-    ReflogUpdate {
-        identity: "Test User <test@example.com>".to_owned(),
-        message: "commit: msg".to_owned(),
-        time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
-        old_oid: None,
-        new_oid: None,
-    }
+    ReflogUpdate::new(
+        "Test User <test@example.com>".to_owned(),
+        "commit: msg".to_owned(),
+        time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("valid timestamp"),
+    )
 }
 
 fn update(name: &str, new_value: Option<RawRef>, expected: Expected) -> RefUpdate {
@@ -687,11 +685,11 @@ pub fn symref_log_only_reflog_on_symref_and_target(store: Arc<dyn RefStore>) {
     seed_symref(store.as_ref(), "HEAD", "refs/heads/main");
 
     let mut upd = update("HEAD", Some(RawRef::Direct(oid(2))), Expected::Any);
-    upd.reflog = Some(ReflogUpdate {
-        old_oid: Some(oid(1)),
-        new_oid: Some(oid(2)),
-        ..sample_log()
-    });
+    upd.reflog = Some(
+        sample_log()
+            .with_old_oid(Some(oid(1)))
+            .with_new_oid(Some(oid(2))),
+    );
     upd.flags.log_only = true;
     commit_txn(
         store.as_ref(),
@@ -1513,13 +1511,15 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
                     Some(RawRef::Direct(oid(3))),
                 )
                 .with_expected(Expected::Oid(oid(1)))
-                .with_reflog(Some(ReflogUpdate {
-                    identity: "A <a@a.com> 3 +0000".into(),
-                    message: CONCURRENT_APPEND_MARKER.into(),
-                    time: time::OffsetDateTime::from_unix_timestamp(1_700_000_003).expect("ts"),
-                    old_oid: Some(oid(1)),
-                    new_oid: Some(oid(3)),
-                })),
+                .with_reflog(Some(
+                    ReflogUpdate::new(
+                        "A <a@a.com> 3 +0000",
+                        CONCURRENT_APPEND_MARKER,
+                        time::OffsetDateTime::from_unix_timestamp(1_700_000_003).expect("ts"),
+                    )
+                    .with_old_oid(Some(oid(1)))
+                    .with_new_oid(Some(oid(3))),
+                )),
             )
             .expect("txn");
         commit_txn_retry_lock(store2.as_ref(), txn);

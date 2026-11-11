@@ -44,10 +44,7 @@ fn git_tag_field(dir: &std::path::Path, name: &str, field: &str) -> String {
 fn name_query() -> RefQuery {
     RefQuery::default()
         .with_namespaces(vec![RefNamespace::Tags])
-        .with_sort(RefSort {
-            key: SortKey::Name,
-            reverse: false,
-        })
+        .with_sort(RefSort::default())
 }
 
 /// Signed tags append armor directly after the message; Git's `%(contents:subject)`

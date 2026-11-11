@@ -626,10 +626,7 @@ fn run_snapshot_on_repo(
             &BranchIntegrateRequest {
                 into_ref: "refs/heads/main",
                 into_oid: main_before_merge,
-                source: &MergeSource {
-                    oid: feature_tip,
-                    kind: MergeSourceKind::LocalBranch,
-                },
+                source: &MergeSource::new(feature_tip, MergeSourceKind::LocalBranch),
                 label: "feature",
             },
             &MergeOptions::default(),
@@ -748,10 +745,7 @@ fn run_snapshot_on_repo(
             &BranchIntegrateRequest {
                 into_ref: "refs/heads/main",
                 into_oid: main_conflict,
-                source: &MergeSource {
-                    oid: topic_conflict,
-                    kind: MergeSourceKind::LocalBranch,
-                },
+                source: &MergeSource::new(topic_conflict, MergeSourceKind::LocalBranch),
                 label: "conflict",
             },
             &MergeOptions::default(),

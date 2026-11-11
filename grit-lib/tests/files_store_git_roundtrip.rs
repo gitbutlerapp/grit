@@ -33,13 +33,11 @@ fn files_store_git_roundtrip() {
     let git_dir = repo.git_dir();
     let store = FilesRefStore::from_git_dir(&git_dir).expect("store");
 
-    let log = ReflogUpdate {
-        identity: "Store Test <store@test.example> 1700000000 +0000".to_owned(),
-        message: "grit: batch".to_owned(),
-        time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("ts"),
-        old_oid: None,
-        new_oid: None,
-    };
+    let log = ReflogUpdate::new(
+        "Store Test <store@test.example> 1700000000 +0000".to_owned(),
+        "grit: batch".to_owned(),
+        time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("ts"),
+    );
 
     let mut txn = RefTransaction::new();
     for i in 0..1000 {

@@ -301,12 +301,12 @@ fn rename_on_injected_memory_ref_store() {
     let direct = |name: &str, reflog: bool| {
         RefUpdate::new(name.to_owned(), Some(RawRef::Direct(tip)))
             .with_expected(Expected::Missing)
-            .with_reflog(reflog.then(|| ReflogUpdate {
-                identity: "T <t@example.com>".to_owned(),
-                message: "create".to_owned(),
-                time: time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
-                old_oid: None,
-                new_oid: None,
+            .with_reflog(reflog.then(|| {
+                ReflogUpdate::new(
+                    "T <t@example.com>".to_owned(),
+                    "create".to_owned(),
+                    time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+                )
             }))
     };
     store

@@ -65,10 +65,7 @@ fn create_at_start_point_reflog_matches_git() {
     repo.branches()
         .create(&BranchCreateOptions {
             name: "topic".into(),
-            start: Some(StartPoint {
-                oid: start,
-                label: "main~1".into(),
-            }),
+            start: Some(StartPoint::new(start, "main~1")),
             force: false,
             track: TrackMode::Never,
             dry_run: false,
@@ -101,10 +98,7 @@ fn force_overwrite_reflog_and_refuse_checked_out() {
     repo.branches()
         .create(&BranchCreateOptions {
             name: "topic".into(),
-            start: Some(StartPoint {
-                oid: oid(dir, "main"),
-                label: "main".into(),
-            }),
+            start: Some(StartPoint::new(oid(dir, "main"), "main")),
             force: true,
             track: TrackMode::Never,
             dry_run: false,
@@ -161,10 +155,10 @@ fn auto_track_matches_git_branch_track() {
     repo.branches()
         .create(&BranchCreateOptions {
             name: "upstream".into(),
-            start: Some(StartPoint {
-                oid: oid(&clone, "refs/remotes/origin/upstream"),
-                label: "origin/upstream".into(),
-            }),
+            start: Some(StartPoint::new(
+                oid(&clone, "refs/remotes/origin/upstream"),
+                "origin/upstream",
+            )),
             force: false,
             track: TrackMode::Auto,
             dry_run: false,
@@ -303,10 +297,7 @@ fn invalid_start_oid_is_rejected_before_writing_ref() {
         .branches()
         .create(&BranchCreateOptions {
             name: "invalid-tip".into(),
-            start: Some(StartPoint {
-                oid: bad,
-                label: bad.to_hex(),
-            }),
+            start: Some(StartPoint::new(bad, bad.to_hex())),
             force: false,
             track: TrackMode::Never,
             dry_run: false,
@@ -361,10 +352,7 @@ fn non_commit_start_oid_is_rejected_before_writing_ref() {
         .branches()
         .create(&BranchCreateOptions {
             name: "blob-tip".into(),
-            start: Some(StartPoint {
-                oid: blob,
-                label: blob.to_hex(),
-            }),
+            start: Some(StartPoint::new(blob, blob.to_hex())),
             force: false,
             track: TrackMode::Never,
             dry_run: false,
@@ -410,10 +398,7 @@ fn always_track_accepts_local_branch_start() {
     repo.branches()
         .create(&BranchCreateOptions {
             name: "topic".into(),
-            start: Some(StartPoint {
-                oid: oid(dir, "base"),
-                label: "base".into(),
-            }),
+            start: Some(StartPoint::new(oid(dir, "base"), "base")),
             force: false,
             track: TrackMode::Always,
             dry_run: false,
@@ -446,10 +431,7 @@ fn dry_run_force_does_not_reset_existing_branch() {
     repo.branches()
         .create(&BranchCreateOptions {
             name: "topic".into(),
-            start: Some(StartPoint {
-                oid: oid(dir, "main"),
-                label: "main".into(),
-            }),
+            start: Some(StartPoint::new(oid(dir, "main"), "main")),
             force: true,
             track: TrackMode::Never,
             dry_run: true,
@@ -490,10 +472,7 @@ fn create_reports_remote_upstream_git_reads_back() {
     git(dir, &["remote", "add", "origin", "/nonexistent"]);
     git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
     let repo = open(dir);
-    let start = StartPoint {
-        oid: oid(dir, "origin/main"),
-        label: "origin/main".into(),
-    };
+    let start = StartPoint::new(oid(dir, "origin/main"), "origin/main");
 
     let preview = repo
         .branches()
@@ -519,10 +498,7 @@ fn create_reports_local_upstream_for_track_always() {
     commit(dir, "c1");
     git(dir, &["branch", "base"]);
     let repo = open(dir);
-    let start = StartPoint {
-        oid: oid(dir, "base"),
-        label: "base".into(),
-    };
+    let start = StartPoint::new(oid(dir, "base"), "base");
 
     let preview = repo
         .branches()
@@ -552,10 +528,7 @@ fn create_without_tracking_reports_no_upstream() {
     git(dir, &["remote", "add", "origin", "/nonexistent"]);
     git(dir, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
     let repo = open(dir);
-    let start = StartPoint {
-        oid: oid(dir, "origin/main"),
-        label: "origin/main".into(),
-    };
+    let start = StartPoint::new(oid(dir, "origin/main"), "origin/main");
 
     for dry_run in [true, false] {
         let created = repo
@@ -590,10 +563,7 @@ fn forced_reset_reports_kept_upstream_in_dry_run_and_live() {
     let repo = open(dir);
     let mut opts = create_from(
         "topic",
-        StartPoint {
-            oid: oid(dir, "main"),
-            label: "main".into(),
-        },
+        StartPoint::new(oid(dir, "main"), "main"),
         TrackMode::Auto,
         true,
     );

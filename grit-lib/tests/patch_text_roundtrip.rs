@@ -334,36 +334,36 @@ fn write_patch_resolved_reads_worktree_binary_sides() {
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
     // Index-vs-worktree entries from the status fast path name the index blob on both sides.
     let files = vec![
-        PatchResolvedSide {
-            entry: entry(
+        PatchResolvedSide::new(
+            entry(
                 DiffStatus::Modified,
                 "b.bin",
                 ("100644", old_bin),
                 ("100644", old_bin),
             ),
-            old: PatchSide::Blob,
-            new: PatchSide::Worktree,
-        },
-        PatchResolvedSide {
-            entry: entry(
+            PatchSide::Blob,
+            PatchSide::Worktree,
+        ),
+        PatchResolvedSide::new(
+            entry(
                 DiffStatus::Deleted,
                 "gone.bin",
                 ("100644", gone),
                 ("000000", ObjectId::zero()),
             ),
-            old: PatchSide::Blob,
-            new: PatchSide::Worktree,
-        },
-        PatchResolvedSide {
-            entry: entry(
+            PatchSide::Blob,
+            PatchSide::Worktree,
+        ),
+        PatchResolvedSide::new(
+            entry(
                 DiffStatus::Modified,
                 "t.txt",
                 ("100644", old_txt),
                 ("100644", old_txt),
             ),
-            old: PatchSide::Bytes(b"one\n".to_vec()),
-            new: PatchSide::Bytes(b"one\ntwo\n".to_vec()),
-        },
+            PatchSide::Bytes(b"one\n".to_vec()),
+            PatchSide::Bytes(b"one\ntwo\n".to_vec()),
+        ),
     ];
     let patch = resolved_patch(&repo, &files);
     let text = String::from_utf8(patch.clone()).expect("utf8 patch");
@@ -432,16 +432,16 @@ fn write_patch_resolved_hashes_text_bytes_when_new_oid_zero() {
     let new_oid = git_hash_object_stdin(dir.path(), &new_bytes);
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
-    let files = vec![PatchResolvedSide {
-        entry: entry(
+    let files = vec![PatchResolvedSide::new(
+        entry(
             DiffStatus::Modified,
             "t.txt",
             ("100644", old_txt),
             ("100644", ObjectId::zero()),
         ),
-        old: PatchSide::Bytes(b"one\n".to_vec()),
-        new: PatchSide::Bytes(new_bytes),
-    }];
+        PatchSide::Bytes(b"one\n".to_vec()),
+        PatchSide::Bytes(new_bytes),
+    )];
     let patch = resolved_patch(&repo, &files);
     let text = String::from_utf8(patch.clone()).expect("utf8");
     assert!(
@@ -482,16 +482,16 @@ fn write_patch_resolved_gitlink_index_line_keeps_commit_ids() {
     let new_line = format!("Subproject commit {}\n", new_commit.to_hex());
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
-    let files = vec![PatchResolvedSide {
-        entry: entry(
+    let files = vec![PatchResolvedSide::new(
+        entry(
             DiffStatus::Modified,
             "sub",
             ("160000", old_commit),
             ("160000", new_commit),
         ),
-        old: PatchSide::Bytes(old_line.into_bytes()),
-        new: PatchSide::Bytes(new_line.into_bytes()),
-    }];
+        PatchSide::Bytes(old_line.into_bytes()),
+        PatchSide::Bytes(new_line.into_bytes()),
+    )];
     let patch = resolved_patch(&repo, &files);
     let text = String::from_utf8(patch).expect("utf8");
     assert!(
@@ -518,26 +518,26 @@ fn write_patch_resolved_reads_staged_binary_blobs() {
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
     let files = vec![
-        PatchResolvedSide {
-            entry: entry(
+        PatchResolvedSide::new(
+            entry(
                 DiffStatus::Modified,
                 "b.bin",
                 ("100644", old_bin),
                 ("100644", staged_bin),
             ),
-            old: PatchSide::Blob,
-            new: PatchSide::Blob,
-        },
-        PatchResolvedSide {
-            entry: entry(
+            PatchSide::Blob,
+            PatchSide::Blob,
+        ),
+        PatchResolvedSide::new(
+            entry(
                 DiffStatus::Added,
                 "new.bin",
                 ("000000", ObjectId::zero()),
                 ("100644", staged_new),
             ),
-            old: PatchSide::Blob,
-            new: PatchSide::Blob,
-        },
+            PatchSide::Blob,
+            PatchSide::Blob,
+        ),
     ];
     let patch = resolved_patch(&repo, &files);
     let want = ObjectId::from_hex(&git_out(dir.path(), &["write-tree"])).expect("tree");
@@ -550,16 +550,16 @@ fn write_patch_resolved_hashes_in_memory_binary_bytes_for_index_line() {
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::default()).expect("open");
     let old_bin = git_oid(dir.path(), "HEAD:b.bin");
     let new_bytes = vec![0u8, 1, 2, 4, 5, 6];
-    let files = vec![PatchResolvedSide {
-        entry: entry(
+    let files = vec![PatchResolvedSide::new(
+        entry(
             DiffStatus::Modified,
             "b.bin",
             ("100644", old_bin),
             ("100644", old_bin),
         ),
-        old: PatchSide::Bytes(vec![0u8, 1, 2, 3]),
-        new: PatchSide::Bytes(new_bytes.clone()),
-    }];
+        PatchSide::Bytes(vec![0u8, 1, 2, 3]),
+        PatchSide::Bytes(new_bytes.clone()),
+    )];
     let patch = resolved_patch(&repo, &files);
     std::fs::write(dir.path().join("b.bin"), &new_bytes).unwrap();
     git_in(dir.path(), &["add", "b.bin"]);
@@ -575,16 +575,16 @@ fn write_patch_resolved_worktree_side_needs_work_tree() {
         &grit_lib::repo::InitOptions::new().with_bare(true),
     )
     .expect("init bare");
-    let files = vec![PatchResolvedSide {
-        entry: entry(
+    let files = vec![PatchResolvedSide::new(
+        entry(
             DiffStatus::Added,
             "b.bin",
             ("000000", ObjectId::zero()),
             ("100644", ObjectId::zero()),
         ),
-        old: PatchSide::Blob,
-        new: PatchSide::Worktree,
-    }];
+        PatchSide::Blob,
+        PatchSide::Worktree,
+    )];
     let opts = PatchTextOptions::from_repo(&repo, DiffOptions::default()).expect("patch opts");
     let err = write_patch_resolved(&repo, &files, &opts, &mut std::io::sink())
         .expect_err("bare repository has no work tree");

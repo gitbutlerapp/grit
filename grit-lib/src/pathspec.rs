@@ -159,6 +159,7 @@ fn unquote_c_style_pathspec_line(s: &str) -> Result<String, PathspecFromFilePars
 
 /// Raw bytes for [`ResolvedPathspecs::resolve`] from `--pathspec-from-file` (read by the caller).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PathspecFile {
     /// File or stdin contents.
     pub data: Vec<u8>,
@@ -174,6 +175,20 @@ impl PathspecFile {
             data,
             nul_terminated,
         }
+    }
+
+    /// Sets [`data`](Self::data).
+    #[must_use]
+    pub fn with_data(mut self, data: Vec<u8>) -> Self {
+        self.data = data;
+        self
+    }
+
+    /// Sets [`nul_terminated`](Self::nul_terminated).
+    #[must_use]
+    pub const fn with_nul_terminated(mut self, nul_terminated: bool) -> Self {
+        self.nul_terminated = nul_terminated;
+        self
     }
 }
 

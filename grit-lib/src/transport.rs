@@ -612,6 +612,7 @@ impl Connection for GitDaemonConnection {
 /// exposing the socket as a [`Connection`]. Lifted from the CLI's
 /// `git_daemon_url::connect_git_daemon_upload_pack`.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct GitDaemonTransport {
     /// Connect timeout. `None` blocks per the OS default.
     pub connect_timeout: Option<Duration>,
@@ -653,6 +654,20 @@ impl GitDaemonTransport {
         pkt_line::write_packet_raw(stream_w, &inner)?;
         stream_w.flush()?;
         Ok(())
+    }
+
+    /// Sets [`connect_timeout`](Self::connect_timeout).
+    #[must_use]
+    pub const fn with_connect_timeout(mut self, connect_timeout: Option<Duration>) -> Self {
+        self.connect_timeout = connect_timeout;
+        self
+    }
+
+    /// Sets [`io_timeout`](Self::io_timeout).
+    #[must_use]
+    pub const fn with_io_timeout(mut self, io_timeout: Option<Duration>) -> Self {
+        self.io_timeout = io_timeout;
+        self
     }
 }
 

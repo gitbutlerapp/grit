@@ -848,11 +848,28 @@ pub(crate) fn ahead_behind_of_target_commits(
 /// Propagates object read and parse errors from commit traversal.
 /// Committer-date filters applied during bounded reachable walks (Git `--since` / `--until`).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReachableWalkCommitterCutoffs {
     /// Exclude commits with committer date strictly before this Unix timestamp (`--since`).
     pub since: Option<i64>,
     /// Exclude commits with committer date strictly after this Unix timestamp (`--until`).
     pub until: Option<i64>,
+}
+
+impl ReachableWalkCommitterCutoffs {
+    /// Sets [`since`](Self::since).
+    #[must_use]
+    pub const fn with_since(mut self, since: Option<i64>) -> Self {
+        self.since = since;
+        self
+    }
+
+    /// Sets [`until`](Self::until).
+    #[must_use]
+    pub const fn with_until(mut self, until: Option<i64>) -> Self {
+        self.until = until;
+        self
+    }
 }
 
 /// How [`RevWalk::reachable_excluding`](crate::revwalk::RevWalk::reachable_excluding) bounds

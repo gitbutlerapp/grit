@@ -319,10 +319,11 @@ fn build_ref_query(repo: &Repository, args: &BranchListArgs) -> Result<RefQuery>
     };
     Ok(RefQuery::default()
         .with_patterns(args.patterns.clone())
-        .with_sort(RefSort {
-            key: sort_key,
-            reverse: args.reverse,
-        })
+        .with_sort(
+            RefSort::default()
+                .with_key(sort_key)
+                .with_reverse(args.reverse),
+        )
         .with_limit(grit_lib::list_limit::fetch_plus_one(args.limit.get()))
         .with_contains(resolve_filter_revs(repo, args.contains.as_deref())?)
         .with_merged(resolve_filter_revs(repo, args.merged.as_deref())?)
@@ -427,10 +428,7 @@ fn create(
             .revwalk()
             .resolve(rev, &ResolveOptions::default())
             .map_err(|err| map_create_start_revision_error(rev, err))?;
-        Some(StartPoint {
-            oid,
-            label: rev.to_owned(),
-        })
+        Some(StartPoint::new(oid, rev.to_owned()))
     } else {
         None
     };

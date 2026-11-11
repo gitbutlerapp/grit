@@ -197,23 +197,13 @@ fn update_refs_cas_and_atomicity() {
     // 1. A batch with a wrong expected_old must apply NOTHING (all-or-nothing).
     let bad = vec![
         // Valid: create a brand-new ref (no CAS).
-        RefTransactionItem {
-            name: "refs/heads/created".to_owned(),
-            new_oid: Some(c2),
-            expected_old: None,
-        },
+        RefTransactionItem::new("refs/heads/created".to_owned(), Some(c2)),
         // Valid CAS update.
-        RefTransactionItem {
-            name: "refs/heads/to-update".to_owned(),
-            new_oid: Some(c2),
-            expected_old: Some(c1),
-        },
+        RefTransactionItem::new("refs/heads/to-update".to_owned(), Some(c2))
+            .with_expected_old(Some(c1)),
         // INVALID CAS: expects c2 but ref currently holds c1.
-        RefTransactionItem {
-            name: "refs/heads/to-delete".to_owned(),
-            new_oid: None,
-            expected_old: Some(c2),
-        },
+        RefTransactionItem::new("refs/heads/to-delete".to_owned(), None)
+            .with_expected_old(Some(c2)),
     ];
     let err = update_refs(&git_dir, &bad).expect_err("batch with bad CAS must fail");
     let _ = err;
@@ -236,21 +226,11 @@ fn update_refs_cas_and_atomicity() {
 
     // 2. The same batch with the CORRECT expected_old applies everything.
     let good = vec![
-        RefTransactionItem {
-            name: "refs/heads/created".to_owned(),
-            new_oid: Some(c2),
-            expected_old: None,
-        },
-        RefTransactionItem {
-            name: "refs/heads/to-update".to_owned(),
-            new_oid: Some(c2),
-            expected_old: Some(c1),
-        },
-        RefTransactionItem {
-            name: "refs/heads/to-delete".to_owned(),
-            new_oid: None,
-            expected_old: Some(c1),
-        },
+        RefTransactionItem::new("refs/heads/created".to_owned(), Some(c2)),
+        RefTransactionItem::new("refs/heads/to-update".to_owned(), Some(c2))
+            .with_expected_old(Some(c1)),
+        RefTransactionItem::new("refs/heads/to-delete".to_owned(), None)
+            .with_expected_old(Some(c1)),
     ];
     update_refs(&git_dir, &good).expect("good batch applies");
 
@@ -262,11 +242,10 @@ fn update_refs_cas_and_atomicity() {
     );
 
     // 3. CAS against an absent ref: expected_old set but ref does not exist → fail.
-    let absent_cas = vec![RefTransactionItem {
-        name: "refs/heads/never".to_owned(),
-        new_oid: Some(c2),
-        expected_old: Some(c1),
-    }];
+    let absent_cas = vec![
+        RefTransactionItem::new("refs/heads/never".to_owned(), Some(c2))
+            .with_expected_old(Some(c1)),
+    ];
     update_refs(&git_dir, &absent_cas).expect_err("CAS on an absent ref must fail");
     assert!(remote_ref(&git_dir, "refs/heads/never").is_none());
 

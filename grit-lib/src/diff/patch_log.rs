@@ -1117,6 +1117,7 @@ pub enum PatchSide {
 
 /// One file for [`write_patch_resolved`]: diff metadata plus where each side's content is.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct PatchResolvedSide {
     /// Tree diff metadata (paths, modes, ids, status).
     pub entry: DiffEntry,
@@ -1124,6 +1125,41 @@ pub struct PatchResolvedSide {
     pub old: PatchSide,
     /// New side content.
     pub new: PatchSide,
+}
+
+impl PatchResolvedSide {
+    /// Creates a [`PatchResolvedSide`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `entry`: tree diff metadata (paths, modes, ids, status).
+    /// - `old`: old side content.
+    /// - `new`: new side content.
+    #[must_use]
+    pub fn new(entry: DiffEntry, old: PatchSide, new: PatchSide) -> Self {
+        Self { entry, old, new }
+    }
+
+    /// Sets [`entry`](Self::entry).
+    #[must_use]
+    pub fn with_entry(mut self, entry: DiffEntry) -> Self {
+        self.entry = entry;
+        self
+    }
+
+    /// Sets [`old`](Self::old).
+    #[must_use]
+    pub fn with_old(mut self, old: PatchSide) -> Self {
+        self.old = old;
+        self
+    }
+
+    /// Sets [`new`](Self::new).
+    #[must_use]
+    pub fn with_new(mut self, new: PatchSide) -> Self {
+        self.new = new;
+        self
+    }
 }
 
 /// Write `git diff --binary`-compatible patch text for files whose sides may live in memory,

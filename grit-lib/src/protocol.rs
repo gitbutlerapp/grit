@@ -35,6 +35,7 @@ pub enum ProtocolError {
 
 /// Explicit inputs for protocol allow/deny evaluation.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct ProtocolPolicyInputs {
     /// `GIT_ALLOW_PROTOCOL` value, when set.
     pub git_allow_protocol: Option<String>,
@@ -44,6 +45,36 @@ pub struct ProtocolPolicyInputs {
     pub specific_allow: Option<String>,
     /// `protocol.allow` config value.
     pub blanket_allow: Option<String>,
+}
+
+impl ProtocolPolicyInputs {
+    /// Sets [`git_allow_protocol`](Self::git_allow_protocol).
+    #[must_use]
+    pub fn with_git_allow_protocol(mut self, git_allow_protocol: Option<String>) -> Self {
+        self.git_allow_protocol = git_allow_protocol;
+        self
+    }
+
+    /// Sets [`git_protocol_from_user`](Self::git_protocol_from_user).
+    #[must_use]
+    pub fn with_git_protocol_from_user(mut self, git_protocol_from_user: Option<String>) -> Self {
+        self.git_protocol_from_user = git_protocol_from_user;
+        self
+    }
+
+    /// Sets [`specific_allow`](Self::specific_allow).
+    #[must_use]
+    pub fn with_specific_allow(mut self, specific_allow: Option<String>) -> Self {
+        self.specific_allow = specific_allow;
+        self
+    }
+
+    /// Sets [`blanket_allow`](Self::blanket_allow).
+    #[must_use]
+    pub fn with_blanket_allow(mut self, blanket_allow: Option<String>) -> Self {
+        self.blanket_allow = blanket_allow;
+        self
+    }
 }
 
 /// Check whether a given protocol (e.g. `file`, `git`, `ssh`, `https`) is allowed.

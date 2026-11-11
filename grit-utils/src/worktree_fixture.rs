@@ -537,11 +537,7 @@ pub fn prepare_add_lines_large(git: &Path) -> Result<()> {
             DiffSide::Unstaged,
             &HunkSelection {
                 ids: Vec::new(),
-                ranges: vec![LineRange {
-                    path: LARGE_HUNKS_FILE.to_string(),
-                    start: 1,
-                    end: 25_000,
-                }],
+                ranges: vec![LineRange::new(LARGE_HUNKS_FILE.to_string(), 1, 25_000)],
             },
             &pathspec,
             grit_lib::diff::DiffOptions::default(),

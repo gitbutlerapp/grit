@@ -293,13 +293,7 @@ fn files_store_reflog_identity_with_digits_in_name_gets_timestamp() {
     let txn = RefTransaction::new()
         .update(
             RefUpdate::new("refs/heads/main".to_owned(), Some(RawRef::Direct(oid_b))).with_reflog(
-                Some(ReflogUpdate {
-                    identity: identity.to_owned(),
-                    message: String::new(),
-                    time,
-                    old_oid: None,
-                    new_oid: None,
-                }),
+                Some(ReflogUpdate::new(identity.to_owned(), String::new(), time)),
             ),
         )
         .expect("txn");
@@ -370,13 +364,11 @@ fn files_store_symref_expected_oid_update_reflog_old_oid() {
         .update(
             RefUpdate::new("refs/heads/sym".to_owned(), Some(RawRef::Direct(oid_new)))
                 .with_expected(Expected::Oid(oid_old))
-                .with_reflog(Some(ReflogUpdate {
-                    identity: "Tester <t@example.com>".to_owned(),
-                    message: "update through symref".to_owned(),
+                .with_reflog(Some(ReflogUpdate::new(
+                    "Tester <t@example.com>".to_owned(),
+                    "update through symref".to_owned(),
                     time,
-                    old_oid: None,
-                    new_oid: None,
-                })),
+                ))),
         )
         .expect("txn");
     store
@@ -448,13 +440,11 @@ fn files_store_partial_batch_symref_packed_target_reflog_old_oid() {
     let txn = RefTransaction::new()
         .update(
             RefUpdate::new("HEAD".to_owned(), Some(RawRef::Direct(oid_next))).with_reflog(Some(
-                ReflogUpdate {
-                    identity: "Tester <t@example.com>".to_owned(),
-                    message: "move head".to_owned(),
+                ReflogUpdate::new(
+                    "Tester <t@example.com>".to_owned(),
+                    "move head".to_owned(),
                     time,
-                    old_oid: None,
-                    new_oid: None,
-                },
+                ),
             )),
         )
         .expect("txn");
