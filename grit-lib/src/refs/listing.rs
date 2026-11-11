@@ -138,6 +138,7 @@ pub enum RefKind {
 /// [`query_listings_from_pairs`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RefListing {
     /// Full ref name (for example `refs/tags/v1.0`).
     pub full_name: String,

@@ -469,12 +469,12 @@ fn get_all_values(
     let mut origins = config.origins_of(key)?;
     if origins.is_empty() {
         if let Some(def) = default_value {
-            origins.push(grit_lib::config::ConfigValueOrigin {
-                value: Some(def),
-                scope: ConfigScope::Command,
-                file: None,
-                line: None,
-            });
+            origins.push(grit_lib::config::ConfigValueOrigin::new(
+                Some(def),
+                ConfigScope::Command,
+                None,
+                None,
+            ));
         }
     }
     let values: Vec<ConfigValueWithOrigin> = if let Some(ty) = value_type {

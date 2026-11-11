@@ -148,6 +148,7 @@ pub enum HunkSelectError {
 
 /// Result of [`stage_hunks`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StageHunksOutcome {
     /// Whether this was a dry run.
     pub dry_run: bool,
@@ -797,7 +798,6 @@ fn file_patch_from_hunks(
         binary_patch: None,
         is_binary: false,
         hunks: apply_hunks,
-        ws_rule: 0,
         is_toplevel_relative: true,
     })
 }
@@ -1104,6 +1104,7 @@ fn structured_hunk_to_apply_hunk(hunk: &StructuredHunk, first_body_line: usize) 
 
 /// Outcome of [`restore_hunks`].
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct RestoreHunksOutcome {
     /// Whether this was a dry run.
     pub dry_run: bool,

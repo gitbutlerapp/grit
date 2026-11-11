@@ -69,18 +69,13 @@ fn commit_tree(repo: &Repository, message: &str) -> ObjectId {
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
     let parent = repo.references().resolve("HEAD").ok();
-    let commit_data = CommitData {
+    let commit_data = CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: TEST_COMMITTER.to_owned(),
-        committer: TEST_COMMITTER.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        TEST_COMMITTER,
+        TEST_COMMITTER,
+        format!("{message}\n"),
+    );
     let bytes = serialize_commit(&commit_data);
     let commit_oid = repo
         .odb()
@@ -567,37 +562,34 @@ fn parallel_pool_error_rolls_back_every_job() {
         .expect("missing");
 
     let mut changes = Vec::with_capacity(N);
-    changes.push(DiffEntry {
-        status: DiffStatus::Added,
-        old_path: None,
-        new_path: Some("f0.txt".into()),
-        old_mode: FileMode::ABSENT,
-        new_mode: FileMode::REGULAR,
-        old_oid: ObjectId::zero(),
-        new_oid: good_oid,
-        score: None,
-    });
-    changes.push(DiffEntry {
-        status: DiffStatus::Added,
-        old_path: None,
-        new_path: Some("f1.txt".into()),
-        old_mode: FileMode::ABSENT,
-        new_mode: FileMode::REGULAR,
-        old_oid: ObjectId::zero(),
-        new_oid: missing,
-        score: None,
-    });
+    changes.push(DiffEntry::new(
+        DiffStatus::Added,
+        None,
+        Some("f0.txt".into()),
+        FileMode::ABSENT,
+        FileMode::REGULAR,
+        ObjectId::zero(),
+        good_oid,
+    ));
+    changes.push(DiffEntry::new(
+        DiffStatus::Added,
+        None,
+        Some("f1.txt".into()),
+        FileMode::ABSENT,
+        FileMode::REGULAR,
+        ObjectId::zero(),
+        missing,
+    ));
     for i in 2..N {
-        changes.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(format!("f{i}.txt")),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: ObjectId::zero(),
-            new_oid: good_oid,
-            score: None,
-        });
+        changes.push(DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some(format!("f{i}.txt")),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            ObjectId::zero(),
+            good_oid,
+        ));
     }
 
     let err =
@@ -646,26 +638,24 @@ fn missing_blob_error_rolls_back_earlier_write() {
         .parse()
         .expect("missing");
     let changes = vec![
-        DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some("first.txt".into()),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: ObjectId::zero(),
-            new_oid: good_oid,
-            score: None,
-        },
-        DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some("second.txt".into()),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: ObjectId::zero(),
-            new_oid: missing,
-            score: None,
-        },
+        DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some("first.txt".into()),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            ObjectId::zero(),
+            good_oid,
+        ),
+        DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some("second.txt".into()),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            ObjectId::zero(),
+            missing,
+        ),
     ];
     let err = checkout_tree_changes(&open_with_policy(root, 1, None), &changes)
         .expect_err("missing object must fail");

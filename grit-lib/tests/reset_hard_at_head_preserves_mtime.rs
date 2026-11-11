@@ -43,18 +43,7 @@ fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::Obje
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let commit = CommitData {
-        tree,
-        parents: vec![],
-        author: "T <t@t> 0 +0000".into(),
-        committer: "T <t@t> 0 +0000".into(),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "c\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let commit = CommitData::new(tree, vec![], "T <t@t> 0 +0000", "T <t@t> 0 +0000", "c\n");
     let co = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))

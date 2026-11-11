@@ -266,6 +266,7 @@ impl NextStep {
 /// In-progress operation plus the steps grit can suggest today.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct Operation {
     /// Which operation is paused.
     pub kind: InProgressOperation,

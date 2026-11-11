@@ -21,6 +21,7 @@ pub const DEFAULT_ORPHAN_LIMIT: usize = 20;
 /// One commit that becomes unreachable when `HEAD` moves away from it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct OrphanedCommitSummary {
     /// Commit object id.
     pub oid: ObjectId,

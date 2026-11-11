@@ -298,6 +298,7 @@ impl<'a> HttpRequest<'a> {
 }
 
 /// A response from [`HttpClient::send`].
+#[non_exhaustive]
 pub struct HttpResponse {
     /// Status code.
     pub status: u16,

@@ -52,11 +52,28 @@ pub use crate::worktree::io_error::WorktreePathOperation;
     "lock file {} already exists",
     crate::git_path::user_display_path(.path.as_path())
 )]
+#[non_exhaustive]
 pub struct LockHeldError {
     /// Lock file that could not be created.
     pub path: PathBuf,
     /// Owner recorded in the lock's pid sidecar (`core.lockfilePid`), when one was written.
     pub holder: Option<crate::lockfile::LockHolder>,
+}
+
+impl LockHeldError {
+    /// Build the error for a lock file that already exists.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: the lock file that could not be created.
+    /// - `holder`: the owner recorded in the lock's pid sidecar, when known.
+    #[must_use]
+    pub fn new(path: impl Into<PathBuf>, holder: Option<crate::lockfile::LockHolder>) -> Self {
+        Self {
+            path: path.into(),
+            holder,
+        }
+    }
 }
 
 /// Operation stopped because [`CancelToken`](crate::progress::CancelToken) fired before completion.
@@ -81,6 +98,7 @@ pub enum PathIoOperation {
 
 /// Structured path I/O failure shared by worktree and git-directory operations.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct PathIoError {
     /// What the operation was doing when I/O failed.
     pub operation: PathIoOperation,

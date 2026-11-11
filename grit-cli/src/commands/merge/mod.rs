@@ -388,10 +388,7 @@ mod tests {
             (
                 MergeOutcome::conflicts(
                     "topic",
-                    vec![Conflict {
-                        path: "a.txt".into(),
-                        kind: ConflictKind::BothModified,
-                    }],
+                    vec![Conflict::new("a.txt", ConflictKind::BothModified)],
                     Vec::new(),
                 ),
                 "conflicts",

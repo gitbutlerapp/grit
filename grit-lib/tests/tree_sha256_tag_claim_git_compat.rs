@@ -19,22 +19,18 @@ fn claim_headers_survive_git_cat_file_and_fsck_strict() {
         .parse()
         .expect("oid");
 
-    let claim = TreeSha256Claim {
-        digest: TreeSha256::from_str(
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
-        )
-        .expect("digest"),
-        excluded: vec!["vendor/mod".into(), "alpha/mod".into()],
-    };
-    let mut tag = TagData {
-        object: commit,
-        object_type: "commit".into(),
-        tag: "tree-sha256-claim".into(),
-        tagger: Some("T <t@example.com> 1 +0000".into()),
-        extra_headers: Vec::new(),
-        message: "annotated\n".into(),
-        raw_message: None,
-    };
+    let claim = TreeSha256Claim::new(
+        TreeSha256::from_str("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855")
+            .expect("digest"),
+        vec!["vendor/mod".into(), "alpha/mod".into()],
+    );
+    let mut tag = TagData::new(
+        commit,
+        "commit",
+        "tree-sha256-claim",
+        Some("T <t@example.com> 1 +0000".into()),
+        "annotated\n",
+    );
     claim.apply_to_tag(&mut tag);
     let bytes = serialize_tag(&tag);
 

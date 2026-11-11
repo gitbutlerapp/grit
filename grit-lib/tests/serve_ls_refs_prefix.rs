@@ -48,16 +48,12 @@ impl ObjectStore for CountingStore {
     }
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        Ok(self.get(oid, |(kind, data)| Object {
-            kind: *kind,
-            data: data.clone(),
-        }))
+        Ok(self.get(oid, |(kind, data)| Object::new(*kind, data.clone())))
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
-        Ok(self.get(oid, |(kind, data)| ObjectInfo {
-            kind: *kind,
-            size: data.len() as u64,
+        Ok(self.get(oid, |(kind, data)| {
+            ObjectInfo::new(*kind, data.len() as u64)
         }))
     }
 

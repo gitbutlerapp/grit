@@ -172,6 +172,7 @@ pub enum IndexCorruptReason {
 
 /// Index file or extension corruption at an optional byte offset.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IndexCorrupt {
     /// Repository-relative path when the failure came from a file on disk.
     pub path: Option<PathBuf>,

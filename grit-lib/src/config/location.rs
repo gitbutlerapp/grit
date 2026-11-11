@@ -144,6 +144,7 @@ pub fn global_config_write_path(env: &Environment) -> Result<PathBuf> {
 
 /// Human-readable summary of a config write that `--dry-run` would perform.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConfigWritePreview {
     /// Config file that would be updated.
     pub path: PathBuf,

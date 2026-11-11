@@ -150,6 +150,7 @@ fn file_diff_from_stat(
 
 /// Output of [`Diff::files_for_entries`](super::Diff::files_for_entries).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DiffFilesOutput {
     /// Per-file results in path order.
     pub files: Vec<FileDiff>,

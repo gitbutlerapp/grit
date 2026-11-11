@@ -902,6 +902,7 @@ pub struct GcPhaseTimings {
 /// Result of [`Maintenance::gc`](crate::maintenance::Maintenance::gc).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct GcStats {
     /// Loose refs packed during gc (`None` when skipped).
     pub pack_refs: Option<PackRefsReport>,

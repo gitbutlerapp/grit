@@ -31,6 +31,7 @@ pub enum HookSource {
 
 /// One hook script on disk.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HookInfo {
     /// Basename of the hook (e.g. `pre-commit`).
     pub name: String,

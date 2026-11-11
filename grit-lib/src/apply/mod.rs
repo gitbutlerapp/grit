@@ -26,6 +26,7 @@ use std::sync::OnceLock;
 
 /// A single hunk in a unified diff.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Hunk {
     /// 1-based line number in the old file.
     pub old_start: usize,
@@ -39,6 +40,33 @@ pub struct Hunk {
     pub first_body_line: usize,
     /// Lines of the hunk body (' ', '+', '-' prefixed, or bare '\' no newline).
     pub lines: Vec<HunkLine>,
+}
+
+impl Hunk {
+    /// Build a hunk that did not come from a patch file ([`Self::first_body_line`] is `0`).
+    ///
+    /// # Parameters
+    ///
+    /// - `old_start` / `old_count`: 1-based start and line count on the old side.
+    /// - `new_start` / `new_count`: 1-based start and line count on the new side.
+    /// - `lines`: the hunk body.
+    #[must_use]
+    pub fn new(
+        old_start: usize,
+        old_count: usize,
+        new_start: usize,
+        new_count: usize,
+        lines: Vec<HunkLine>,
+    ) -> Self {
+        Self {
+            old_start,
+            old_count,
+            new_start,
+            new_count,
+            first_body_line: 0,
+            lines,
+        }
+    }
 }
 
 /// One line in a unified-diff hunk body.
@@ -56,6 +84,7 @@ pub enum HunkLine {
 
 /// Represents one file in a unified diff.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FilePatch {
     /// Path from `diff --git` old side (`a/...`) when present.
     pub diff_old_path: Option<String>,
@@ -66,17 +95,17 @@ pub struct FilePatch {
     /// Path on the new side (None for deleted files).
     pub new_path: Option<String>,
     /// Whether an explicit `---` header line was present.
-    pub saw_old_header: bool,
+    pub(crate) saw_old_header: bool,
     /// Whether an explicit `+++` header line was present.
-    pub saw_new_header: bool,
+    pub(crate) saw_new_header: bool,
     /// Old mode from extended header.
     pub old_mode: Option<String>,
     /// New mode from extended header.
     pub new_mode: Option<String>,
     /// Source line (1-based) of `old mode` / `deleted file mode` for diagnostics.
-    pub old_mode_line: Option<usize>,
+    pub(crate) old_mode_line: Option<usize>,
     /// Source line (1-based) of `new mode` / `new file mode` for diagnostics.
-    pub new_mode_line: Option<usize>,
+    pub(crate) new_mode_line: Option<usize>,
     /// Whether this file is being newly created.
     pub is_new: bool,
     /// Whether this file is being deleted.
@@ -100,8 +129,6 @@ pub struct FilePatch {
     pub is_binary: bool,
     /// Hunks to apply.
     pub hunks: Vec<Hunk>,
-    /// Merged `core.whitespace` + `whitespace` attribute (Git `ws_rule`); `0` before assignment.
-    pub ws_rule: u32,
     /// Git `patch->is_toplevel_relative`: set for `diff --git` patches only. When false, paths are
     /// prefixed with the setup directory (work-tree-relative CWD) like `prefix_patch` in Git.
     pub is_toplevel_relative: bool,
@@ -118,6 +145,7 @@ pub enum BinaryPatchSectionKind {
 
 /// One forward or reverse chunk in a `GIT binary patch`.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct BinaryPatchSection {
     /// Whether this chunk is a full literal or a delta.
     pub kind: BinaryPatchSectionKind,
@@ -129,6 +157,7 @@ pub struct BinaryPatchSection {
 
 /// Binary patch payload as compressed base85 chunks for forward/reverse apply.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct BinaryPatchPayload {
     /// Forward-direction patch chunk applied when checking out the new blob.
     pub forward: BinaryPatchSection,
@@ -160,7 +189,6 @@ impl FilePatch {
             binary_patch: None,
             is_binary: false,
             hunks: Vec::new(),
-            ws_rule: 0,
             is_toplevel_relative: false,
         }
     }

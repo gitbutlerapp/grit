@@ -75,6 +75,7 @@ pub struct BundleListEntry {
 
 /// A bundle list as the `bundle-uri` command returns it.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct BundleList {
     /// `bundle.mode`.
     pub mode: BundleListMode,
@@ -83,6 +84,17 @@ pub struct BundleList {
 }
 
 impl BundleList {
+    /// Build a bundle list, for example to advertise from a server.
+    ///
+    /// # Parameters
+    ///
+    /// - `mode`: the `bundle.mode` value.
+    /// - `bundles`: the bundles, in advertisement order.
+    #[must_use]
+    pub fn new(mode: BundleListMode, bundles: Vec<BundleListEntry>) -> Self {
+        Self { mode, bundles }
+    }
+
     /// Parse `key=value` lines. Unknown keys are ignored; bundles without a
     /// `uri` are dropped.
     ///

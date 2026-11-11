@@ -23,10 +23,7 @@ fn public_tree_sha256_types() {
         TREE_SHA256_EXCLUDED_HEADER,
         TreeSha256ClaimError::DuplicateDigestHeader,
     );
-    let _claim = TreeSha256Claim {
-        digest: TreeSha256([0; 32]),
-        excluded: Vec::new(),
-    };
+    let _claim = TreeSha256Claim::new(TreeSha256([0; 32]), Vec::new());
     let digest = <TreeSha256 as FromStr>::from_str(
         "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     )
@@ -65,10 +62,7 @@ fn public_tree_sha256_types() {
     let _ = report.submodules;
     let _ = report.excluded;
     let _ = report.cycles;
-    let _miss: MissingSubmodule = MissingSubmodule {
-        path: "x".into(),
-        reason: MissingSubmoduleReason::NotCheckedOut,
-    };
+    let _miss: MissingSubmodule = MissingSubmodule::new("x", MissingSubmoduleReason::NotCheckedOut);
     match tree_sha256(&repo, commit, &TreeSha256Options::default()) {
         Ok(_) | Err(Error::Tag(TagError::TreeSha256MissingSubmodules { .. })) => {}
         Err(e) => panic!("unexpected {e:?}"),

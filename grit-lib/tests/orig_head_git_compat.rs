@@ -734,18 +734,7 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let commit = CommitData {
-        tree,
-        parents: parent.into_iter().collect(),
-        author: IDENT.into(),
-        committer: IDENT.into(),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "c\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let commit = CommitData::new(tree, parent.into_iter().collect(), IDENT, IDENT, "c\n");
     let oid = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))

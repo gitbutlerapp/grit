@@ -30,26 +30,24 @@ fn detect_copies_accepts_shattered_modified_worktree_blob() {
     std::fs::write(wt.join("source.txt"), b"copy source payload\n").expect("source file");
     std::fs::write(wt.join("target.txt"), shattered_prefix(1)).expect("shattered file");
 
-    let source_entry = DiffEntry {
-        status: DiffStatus::Modified,
-        old_path: Some("source.txt".into()),
-        new_path: Some("source.txt".into()),
-        old_mode: FileMode::REGULAR,
-        new_mode: FileMode::REGULAR,
-        old_oid: src_oid,
-        new_oid: src_oid,
-        score: None,
-    };
-    let shattered_entry = DiffEntry {
-        status: DiffStatus::Modified,
-        old_path: Some("target.txt".into()),
-        new_path: Some("target.txt".into()),
-        old_mode: FileMode::REGULAR,
-        new_mode: FileMode::REGULAR,
-        old_oid: ObjectId::from_hex("0000000000000000000000000000000000000000").expect("zero"),
-        new_oid: zero_oid(),
-        score: None,
-    };
+    let source_entry = DiffEntry::new(
+        DiffStatus::Modified,
+        Some("source.txt".into()),
+        Some("source.txt".into()),
+        FileMode::REGULAR,
+        FileMode::REGULAR,
+        src_oid,
+        src_oid,
+    );
+    let shattered_entry = DiffEntry::new(
+        DiffStatus::Modified,
+        Some("target.txt".into()),
+        Some("target.txt".into()),
+        FileMode::REGULAR,
+        FileMode::REGULAR,
+        ObjectId::from_hex("0000000000000000000000000000000000000000").expect("zero"),
+        zero_oid(),
+    );
 
     let options = TreeDiffOptions::default().with_copies(CopyDetection::Similarity(50));
     let result = repo

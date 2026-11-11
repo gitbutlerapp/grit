@@ -105,6 +105,7 @@ pub struct PullOptions {
 
 /// An upstream commit [`pull`] integrates without fetching ([`PullOptions::upstream`]).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FetchedUpstream {
     /// What to call it in results and reflog messages, such as `origin/main`.
     pub label: String,
@@ -128,6 +129,7 @@ pub struct FetchedUpstream {
 /// Dry-run result for [`PullOptions::check`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PullCheck {
     /// Commits on the current branch not reachable from the upstream tip.
     pub ahead: usize,
@@ -185,6 +187,7 @@ pub enum PullResult {
 /// Structured outcome of [`pull`].
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PullOutcome {
     /// Integration result.
     pub result: PullResult,

@@ -34,6 +34,7 @@ type RenameTriple = (Vec<u8>, Vec<u8>, u32);
 
 /// Result of merging three trees with optional conflict-marker blobs for checkout.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct TreeMergeOutput {
     /// Merged index entries for touched paths (may include unmerged stages).
     pub index: Index,

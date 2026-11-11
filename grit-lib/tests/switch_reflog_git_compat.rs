@@ -66,18 +66,13 @@ fn grit_commit(
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let commit = CommitData {
+    let commit = CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: "A <a@b.c> 0 +0000".into(),
-        committer: "A <a@b.c> 0 +0000".into(),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "c\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        "A <a@b.c> 0 +0000",
+        "A <a@b.c> 0 +0000",
+        "c\n",
+    );
     let co = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
@@ -121,18 +116,13 @@ fn grit_commit_to_ref(
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let commit = CommitData {
+    let commit = CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: "A <a@b.c> 0 +0000".into(),
-        committer: "A <a@b.c> 0 +0000".into(),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "c\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        "A <a@b.c> 0 +0000",
+        "A <a@b.c> 0 +0000",
+        "c\n",
+    );
     let co = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))

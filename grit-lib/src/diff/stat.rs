@@ -205,6 +205,7 @@ pub struct StatBar {
 /// One file's row in a [`DiffStat`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct FileStat {
     /// Display path (new side, or old for deletions).
     pub path: String,
@@ -222,6 +223,31 @@ pub struct FileStat {
     pub similarity: Option<u32>,
     /// Inserted and deleted lines.
     pub lines: LineStat,
+}
+
+impl FileStat {
+    /// Build a stat row with no binary sizes, rename source or similarity.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: display path.
+    /// - `status`: change kind.
+    /// - `lines`: inserted and deleted line counts.
+    #[must_use]
+    pub fn new(path: impl Into<String>, status: DiffStatus, lines: LineStat) -> Self {
+        Self {
+            path: path.into(),
+            old_path: None,
+            status,
+            binary: false,
+            old_size: 0,
+            new_size: 0,
+            similarity: None,
+            lines,
+        }
+    }
 }
 
 impl From<&FileDiff> for FileStat {

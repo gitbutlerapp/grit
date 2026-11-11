@@ -548,18 +548,13 @@ fn root_commit_and_grit_only_write_without_generation_chunk() {
     });
     let tree =
         grit_lib::index::write_tree::write_tree_from_index(repo.odb(), &index, "").expect("tree");
-    let raw = serialize_commit(&CommitData {
+    let raw = serialize_commit(&CommitData::new(
         tree,
-        parents: vec![],
-        author: "T <t@example.com> 1 +0000".into(),
-        committer: "T <t@example.com> 1 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "root\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    });
+        vec![],
+        "T <t@example.com> 1 +0000",
+        "T <t@example.com> 1 +0000",
+        "root\n",
+    ));
     let commit = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &commit).expect("ref");
     let sorted = vec![commit];

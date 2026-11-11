@@ -85,10 +85,7 @@ fn status_conflicts(repo: &Repository) -> Vec<Conflict> {
 }
 
 fn deleted_by_us() -> Vec<Conflict> {
-    vec![Conflict {
-        path: "f".into(),
-        kind: ConflictKind::DeletedByUs,
-    }]
+    vec![Conflict::new("f", ConflictKind::DeletedByUs)]
 }
 
 /// The operation's conflicts, `status`, and system git all agree on the index grit wrote.

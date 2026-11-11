@@ -120,18 +120,13 @@ fn write_test_commit(
     ident: &str,
 ) -> grit_lib::error::Result<ObjectId> {
     use grit_lib::objects::{serialize_commit, CommitData};
-    let raw = serialize_commit(&CommitData {
+    let raw = serialize_commit(&CommitData::new(
         tree,
-        parents: parents.to_vec(),
-        author: ident.to_owned(),
-        committer: ident.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{msg}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    });
+        parents.to_vec(),
+        ident,
+        ident,
+        format!("{msg}\n"),
+    ));
     repo.odb().write(ObjectKind::Commit, &raw)
 }
 
@@ -218,17 +213,12 @@ fn plan_rewrite_preserves_encoding_when_message_unchanged() {
         .odb()
         .write(
             ObjectKind::Commit,
-            &serialize_commit(&CommitData {
-                tree: parent_tree,
-                parents: vec![parent],
-                author: ident.to_owned(),
-                committer: ident.to_owned(),
-                author_raw: Vec::new(),
-                committer_raw: Vec::new(),
-                encoding: enc_label.clone(),
-                message: message.clone(),
-                raw_message: raw_body.clone(),
-                extra_headers: Vec::new(),
+            &serialize_commit(&{
+                let mut commit =
+                    CommitData::new(parent_tree, vec![parent], ident, ident, message.clone());
+                commit.encoding = enc_label.clone();
+                commit.raw_message = raw_body.clone();
+                commit
             }),
         )
         .expect("write encoded commit");
@@ -505,17 +495,16 @@ fn plan_rewrite_strips_gpgsig_and_gpgsig_sha256() {
             .odb()
             .write(
                 ObjectKind::Commit,
-                &serialize_commit(&CommitData {
-                    tree: parent_tree,
-                    parents: vec![parent],
-                    author: "S <s@grit.test> 1 +0000".into(),
-                    committer: "S <s@grit.test> 1 +0000".into(),
-                    author_raw: Vec::new(),
-                    committer_raw: Vec::new(),
-                    encoding: None,
-                    message: format!("signed {case}\n"),
-                    raw_message: None,
-                    extra_headers: header.to_vec(),
+                &serialize_commit(&{
+                    let mut commit = CommitData::new(
+                        parent_tree,
+                        vec![parent],
+                        "S <s@grit.test> 1 +0000",
+                        "S <s@grit.test> 1 +0000",
+                        format!("signed {case}\n"),
+                    );
+                    commit.extra_headers = header.to_vec();
+                    commit
                 }),
             )
             .expect("write signed");

@@ -26,6 +26,7 @@ use crate::unicode_normalization::resolve_worktree_path_for_staging;
 
 /// Result of [`stage_worktree_changes`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StageWorktreeChangesOutcome {
     /// Index entries added, updated, or removed.
     pub changed: usize,

@@ -305,6 +305,7 @@ impl std::fmt::Debug for PromisorInfo {
 /// The promisor remotes a server advertises with the `promisor-remote` capability.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PromisorAdvertisement {
     /// Advertised remotes in advertisement order. Each has a name and a non-empty URL.
     pub remotes: Vec<PromisorInfo>,
@@ -640,6 +641,7 @@ impl PromisorCandidate {
 /// The client's verdict on every advertised promisor remote.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PromisorDecision {
     /// Every advertised remote, in advertisement order.
     pub candidates: Vec<PromisorCandidate>,
@@ -903,6 +905,7 @@ pub fn store_advertised_fields(
 /// [`FetchOutcome::promisor`](crate::transfer::FetchOutcome::promisor).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PromisorHandshake {
     /// The verdict on every advertised remote.
     pub decision: PromisorDecision,

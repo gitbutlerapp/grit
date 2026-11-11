@@ -24,6 +24,7 @@ impl RawRef {
 
 /// One ref returned from iteration, optionally with a peeled object id.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefEntry {
     /// Full ref name.
     pub name: RefName,
@@ -32,6 +33,25 @@ pub struct RefEntry {
     /// Peeled tip when `value` is symbolic and resolves, or when a direct ref's
     /// `packed-refs` record includes a `^` peel line.
     pub peeled: Option<ObjectId>,
+}
+
+impl RefEntry {
+    /// Build an iteration entry with no peeled object id, for example from a custom [`RefStore`](crate::refs::store::RefStore).
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: the full ref name.
+    /// - `value`: the direct or symbolic value.
+    #[must_use]
+    pub fn new(name: RefName, value: RawRef) -> Self {
+        Self {
+            name,
+            value,
+            peeled: None,
+        }
+    }
 }
 
 /// Compare-and-swap expectation for a single ref update.

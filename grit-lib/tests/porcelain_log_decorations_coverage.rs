@@ -95,16 +95,16 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     }
     if let HeadState::Branch { refname, .. } = &head {
         let items = vec![
-            grit_lib::porcelain::log::DecorationItem {
-                refname: Some("HEAD".into()),
-                display: "HEAD".into(),
-                kind: DecorationKind::Head,
-            },
-            grit_lib::porcelain::log::DecorationItem {
-                refname: Some(refname.clone()),
-                display: refname.clone(),
-                kind: DecorationKind::Branch,
-            },
+            grit_lib::porcelain::log::DecorationItem::new(
+                Some("HEAD".into()),
+                "HEAD".into(),
+                DecorationKind::Head,
+            ),
+            grit_lib::porcelain::log::DecorationItem::new(
+                Some(refname.clone()),
+                refname.clone(),
+                DecorationKind::Branch,
+            ),
         ];
         assert_eq!(current_branch_decoration_index(&items, &head), Some(1));
     }

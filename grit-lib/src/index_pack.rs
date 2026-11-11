@@ -112,6 +112,7 @@ impl FromIterator<ObjectKind> for ObjectKindCounts {
 
 /// Result of ingesting a received pack into an object database.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct IngestedPack {
     /// Object ids the pack delivered.
     pub object_ids: HashSet<ObjectId>,

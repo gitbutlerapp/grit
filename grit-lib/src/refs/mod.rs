@@ -428,6 +428,7 @@ pub(crate) fn commit_ref_batch_on_store(
 
 /// Per-ref result from `commit_ref_updates_non_atomic_on_store`.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefUpdateCommitOutcome {
     /// Full ref name from the input batch.
     pub name: String,

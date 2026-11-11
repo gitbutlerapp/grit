@@ -483,16 +483,15 @@ mod tests {
 
     #[test]
     fn summary_from_stats_keeps_counts_and_types() {
-        let stats = TransferStats {
-            objects: 7,
-            bytes: 2048,
-            kinds: Some(ObjectKindCounts {
-                commits: 2,
-                trees: 2,
-                blobs: 3,
-                tags: 0,
-            }),
-        };
+        let mut stats = TransferStats::default();
+        stats.objects = 7;
+        stats.bytes = 2048;
+        stats.kinds = Some(ObjectKindCounts {
+            commits: 2,
+            trees: 2,
+            blobs: 3,
+            tags: 0,
+        });
         let summary = TransferSummary::new(stats, Vec::new(), Duration::from_secs(1));
         assert!(summary.received_anything());
         assert_eq!(summary.objects, 7);

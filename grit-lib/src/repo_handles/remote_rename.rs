@@ -15,6 +15,7 @@ use crate::remote::is_valid_remote_name;
 
 /// Result of [`RepositoryRemotes::rename`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RemoteRename {
     /// Previous remote name.
     pub old: String,

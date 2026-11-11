@@ -93,12 +93,26 @@ pub struct MovedPath {
 /// The files a [`ConflictKind::DirectoryRenameBlocked`] directory rename did not move.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct BlockedMove {
     /// New files that would have moved to the destination; they stay where they were added.
     pub sources: Vec<String>,
     /// `true` when the adding side already has a file or directory at the destination; `false`
     /// when several new files would land on it.
     pub existing: bool,
+}
+
+impl BlockedMove {
+    /// Build the payload of a blocked directory rename.
+    ///
+    /// # Parameters
+    ///
+    /// - `sources`: files the rename did not move.
+    /// - `existing`: whether the destination directory already existed.
+    #[must_use]
+    pub fn new(sources: Vec<String>, existing: bool) -> Self {
+        Self { sources, existing }
+    }
 }
 
 /// The three names in a [`ConflictKind::RenameRename`] conflict.
@@ -187,12 +201,29 @@ impl ConflictKind {
 /// conflicts.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct Conflict {
     /// Repository-relative path.
     pub path: String,
     /// How the two sides collided on [`Self::path`].
     #[cfg_attr(feature = "serde-models", serde(flatten))]
     pub kind: ConflictKind,
+}
+
+impl Conflict {
+    /// Build a conflict record for `path`.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: repository-relative path.
+    /// - `kind`: how the two sides collided on `path`.
+    #[must_use]
+    pub fn new(path: impl Into<String>, kind: ConflictKind) -> Self {
+        Self {
+            path: path.into(),
+            kind,
+        }
+    }
 }
 
 /// Classify a path from the set of unmerged index stages it has.

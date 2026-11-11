@@ -200,18 +200,13 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
     let head_state = repo.references().head().expect("head");
     let _ = current_branch_decoration_index(&[], &head_state);
 
-    let c = CommitData {
-        tree: ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("tree"),
-        parents: Vec::new(),
-        author: String::new(),
-        committer: "C <c@d> 1700000000 +0000".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "subject\n".to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let c = CommitData::new(
+        ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("tree"),
+        Vec::new(),
+        String::new(),
+        "C <c@d> 1700000000 +0000",
+        "subject\n",
+    );
     let _ = submodule_commit_subject_line(&c);
     let _ = read_submodule_head_for_checkout(dir.path());
 

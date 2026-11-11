@@ -29,6 +29,7 @@ pub struct CommitFilesManyOptions {
 
 /// One commit's diff output in [`Diff::commit_files_many`] (same order as input oids).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CommitFilesResult {
     /// Per-file diff bodies for this commit.
     pub output: DiffFilesOutput,

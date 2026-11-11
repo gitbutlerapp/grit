@@ -338,6 +338,7 @@ pub enum CloneCheckout {
 
 /// Result of a successful [`clone`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct CloneOutcome {
     /// Source URL string from the options.
     pub url: String,
@@ -664,6 +665,7 @@ impl CloneIntoOptions {
 
 /// Result of [`clone_into`].
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct CloneIntoOutcome {
     /// Branch checked out, or detached tag checkout.
     pub head: CloneHead,
@@ -939,7 +941,7 @@ fn clone_after_claim(
     let mut fetch_outcome = remote.fetch(&repo, fetch_opts, progress, cancel, http_factory)?;
     if let crate::bundle_uri::BundleSeed::Seeded(seeded) = &bundle {
         crate::bundle_uri::remove_bundle_refs(&repo)?;
-        fetch_outcome.transfer += seeded.transfer;
+        fetch_outcome.transfer += seeded.transfer.clone();
     }
     if !preserve_injected_store {
         // Wire clone may upgrade an empty SHA-1 destination to the remote object format; reopen
@@ -1035,7 +1037,7 @@ fn clone_after_claim(
         checkout,
         branches_with_commits,
         repo,
-        transfer: fetch_outcome.transfer,
+        transfer: fetch_outcome.transfer.clone(),
         branches: fetch_outcome.branch_count(),
         tags: fetch_outcome.tag_count(),
         files,

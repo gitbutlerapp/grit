@@ -43,8 +43,9 @@ const V0_CAPABILITIES: &[&str] = &[
 ];
 
 /// Summary of one completed or partial upload-pack session.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct UploadOutcome {
     /// Bytes written to the client (advertisement, negotiation, sideband, pack).
     pub bytes_written: u64,
@@ -83,7 +84,7 @@ impl UploadSession {
     fn into_outcome(self, bytes_written: u64) -> UploadOutcome {
         UploadOutcome {
             bytes_written,
-            objects_sent: self.pack.map(|p| p.object_count).unwrap_or(0),
+            objects_sent: self.pack.as_ref().map_or(0, |p| p.object_count),
             negotiation_rounds: self.negotiation_rounds,
             pack: self.pack,
         }
@@ -94,7 +95,7 @@ impl UploadSession {
             .negotiation_rounds
             .saturating_add(other.negotiation_rounds);
         if let Some(p) = other.pack {
-            self.pack = Some(match self.pack {
+            self.pack = Some(match self.pack.take() {
                 None => p,
                 Some(existing) => PackStats {
                     object_count: existing.object_count.saturating_add(p.object_count),

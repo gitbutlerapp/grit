@@ -31,6 +31,7 @@ pub enum SignatureTimestamp {
 
 /// Parsed author or committer identity from a full header or reflog identity line.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Signature {
     /// Display name (may be empty).
     pub name: String,
@@ -530,6 +531,7 @@ pub(crate) fn committer_timestamp_for_until_filter_bytes(ident: &[u8]) -> i64 {
 
 /// Name and email from a `git commit --author`-style argument (`Name <email>` or bare email).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AuthorContact {
     /// Display name (may be empty when the argument is a bare email address).
     pub name: String,

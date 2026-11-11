@@ -107,6 +107,7 @@ pub enum ProgressUnit {
 /// streams in, when the sink asks for it with
 /// [`crate::fetch::Progress::wants_received_objects`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct ReceivedObjects {
     /// Objects fully received so far.
     pub received: u64,
@@ -114,6 +115,24 @@ pub struct ReceivedObjects {
     pub total: u64,
     /// How many of the received objects are deltas.
     pub deltas: u64,
+}
+
+impl ReceivedObjects {
+    /// Build a received-objects snapshot.
+    ///
+    /// # Parameters
+    ///
+    /// - `received`: objects fully received so far.
+    /// - `total`: objects in the pack, from its header.
+    /// - `deltas`: how many of the received objects are deltas.
+    #[must_use]
+    pub fn new(received: u64, total: u64, deltas: u64) -> Self {
+        Self {
+            received,
+            total,
+            deltas,
+        }
+    }
 }
 
 /// A sink for progress updates emitted by a library operation.

@@ -105,13 +105,10 @@ fn git_expectations(dir: &Path) -> Vec<TagSummary> {
                 "tag" => ObjectKind::Tag,
                 other => panic!("unexpected target kind {other}"),
             };
-            TagSummary {
-                name,
-                oid,
-                kind,
-                peeled,
-                target_kind,
-                annotation: None,
+            {
+                let mut summary = TagSummary::new(name, oid, kind, target_kind);
+                summary.peeled = peeled;
+                summary
             }
         })
         .collect()

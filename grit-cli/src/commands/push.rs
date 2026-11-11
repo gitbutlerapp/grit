@@ -440,11 +440,11 @@ fn push_transfer_stats(
             _ => {}
         }
     }
-    TransferStats {
-        objects: objects.max(sent.objects),
-        bytes: bytes.max(sent.bytes),
-        kinds: sent.kinds,
-    }
+    let mut stats = TransferStats::default();
+    stats.objects = objects.max(sent.objects);
+    stats.bytes = bytes.max(sent.bytes);
+    stats.kinds = sent.kinds;
+    stats
 }
 
 #[allow(clippy::too_many_arguments)]

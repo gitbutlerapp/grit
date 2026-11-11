@@ -134,6 +134,7 @@ impl From<RevParseError> for ResolveError {
 
 /// Full and shortened ref names for a spec (`rev-parse --symbolic-full-name` / `--abbrev-ref`).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ResolvedRefName {
     /// Canonical full ref name (for example `refs/heads/main`).
     pub full: String,
@@ -143,6 +144,7 @@ pub struct ResolvedRefName {
 
 /// Result of resolving one revision spec to a concrete object.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ResolvedObject {
     /// Resolved object id (after peel suffixes in the spec).
     pub oid: ObjectId,

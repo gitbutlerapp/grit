@@ -77,6 +77,7 @@ impl DiffTotals {
 /// Re-exported at the crate root as [`ListedFileDiff`](crate::diff::ListedFileDiff). Use
 /// [`crate::diff::targets::FileDiff`] when you need structured hunks from [`Diff::files`](crate::diff::Diff::files).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FileDiff {
     /// Display path (new side, or old for deletions).
     pub path: String,

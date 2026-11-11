@@ -76,18 +76,7 @@ fn build_rebase_plan_fixture(
     }
     let fork_tree = write_tree_from_index(repo.odb(), &index, "").expect("tree");
     let ident = "Bench <b@grit.test> 1 +0000";
-    let fork_raw = serialize_commit(&CommitData {
-        tree: fork_tree,
-        parents: vec![],
-        author: ident.into(),
-        committer: ident.into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "fork\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    });
+    let fork_raw = serialize_commit(&CommitData::new(fork_tree, vec![], ident, ident, "fork\n"));
     let fork = repo
         .odb()
         .write(ObjectKind::Commit, &fork_raw)
@@ -106,18 +95,13 @@ fn build_rebase_plan_fixture(
             body.len(),
         ));
         let tree = write_tree_from_index(repo.odb(), &index, "").expect("tree");
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
-            parents: vec![parent],
-            author: ident.into(),
-            committer: ident.into(),
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: format!("noise {i}\n"),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            vec![parent],
+            ident,
+            ident,
+            format!("noise {i}\n"),
+        ));
         parent = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
     }
     let onto = parent;
@@ -129,18 +113,13 @@ fn build_rebase_plan_fixture(
     idx.hash_algo = repo.odb().hash_algo();
     idx.add_or_replace(index_entry(b"f.txt", topic_blob, 6));
     let tip_tree = write_tree_from_index(repo.odb(), &idx, "").expect("tree");
-    let tip_raw = serialize_commit(&CommitData {
-        tree: tip_tree,
-        parents: vec![fork],
-        author: ident.into(),
-        committer: ident.into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "topic\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    });
+    let tip_raw = serialize_commit(&CommitData::new(
+        tip_tree,
+        vec![fork],
+        ident,
+        ident,
+        "topic\n",
+    ));
     let tip = repo.odb().write(ObjectKind::Commit, &tip_raw).expect("tip");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &tip).expect("ref");
     (root, repo, fork, onto, tip)

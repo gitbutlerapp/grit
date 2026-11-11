@@ -97,6 +97,7 @@ impl ChangeIdGenerator for OsChangeIdGenerator {
 
 /// A commit whose resolved change id matched a prefix lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ChangeIdMatch {
     /// Commit object id.
     pub oid: ObjectId,
@@ -106,6 +107,7 @@ pub struct ChangeIdMatch {
 
 /// Resolved change id plus whether it came from a stored header.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ResolvedChangeId {
     /// The effective change id.
     pub id: ChangeId,

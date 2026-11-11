@@ -125,18 +125,13 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
         };
         let ts = 1_700_000_000i64 + i as i64;
         let ident = bench_ident(ts);
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
-            parents: parent.into_iter().collect(),
-            author: ident.clone(),
-            committer: ident,
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: format!("history {i}\n"),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            parent.into_iter().collect(),
+            ident.clone(),
+            ident,
+            format!("history {i}\n"),
+        ));
         let oid = repo
             .odb()
             .write(ObjectKind::Commit, &raw)
@@ -156,15 +151,13 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
     }
 
     let tag_commit = commits[commits.len() / 2];
-    let tag = TagData {
-        object: tag_commit,
-        object_type: "commit".to_owned(),
-        tag: "bench-tag".to_owned(),
-        tagger: Some(bench_ident(1_700_050_000)),
-        extra_headers: Vec::new(),
-        message: "history bench tag\n".to_owned(),
-        raw_message: None,
-    };
+    let tag = TagData::new(
+        tag_commit,
+        "commit",
+        "bench-tag",
+        Some(bench_ident(1_700_050_000)),
+        "history bench tag\n",
+    );
     let tag_oid = repo
         .odb()
         .write(ObjectKind::Tag, &serialize_tag(&tag))

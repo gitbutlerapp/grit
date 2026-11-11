@@ -111,10 +111,7 @@ fn expected_kind() -> ConflictKind {
 fn expected_conflicts() -> Vec<Conflict> {
     ["a", "b", "c"]
         .into_iter()
-        .map(|path| Conflict {
-            path: path.into(),
-            kind: expected_kind(),
-        })
+        .map(|path| Conflict::new(path, expected_kind()))
         .collect()
 }
 

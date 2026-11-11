@@ -33,10 +33,10 @@ fn conflict_kind_phrase_classification() {
         ConflictKindPhrase::BothAdded
     );
     assert_eq!(
-        ConflictKind::DirectoryRenameBlocked(Box::new(grit_lib::operation::BlockedMove {
-            sources: vec!["a".to_owned()],
-            existing: true,
-        }))
+        ConflictKind::DirectoryRenameBlocked(Box::new(grit_lib::operation::BlockedMove::new(
+            vec!["a".to_owned()],
+            true
+        )))
         .phrase(),
         ConflictKindPhrase::DirectoryRenameBlocked
     );

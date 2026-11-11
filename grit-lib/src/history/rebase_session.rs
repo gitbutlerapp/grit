@@ -67,6 +67,7 @@ pub struct StartRebaseOptions {
 /// Snapshot when a resumable rebase stops on conflicts.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RebaseStop {
     /// Original commit that could not be replayed cleanly.
     pub commit: ObjectId,
@@ -124,6 +125,7 @@ pub enum RebaseOutcome {
 /// Result of [`History::abort_rebase`](super::History::abort_rebase).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RebaseAbort {
     /// Branches that something else moved while the rebase was stopped and that the abort
     /// reset to their pre-rebase tip: `old` is the tip that was overwritten (still reachable

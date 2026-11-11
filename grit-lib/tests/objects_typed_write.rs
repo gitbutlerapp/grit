@@ -61,18 +61,7 @@ fn file(name: &[u8], oid: ObjectId) -> TreeEntry {
 }
 
 fn hand_rolled_commit(tree: ObjectId, ident: &str) -> CommitData {
-    CommitData {
-        tree,
-        parents: Vec::new(),
-        author: ident.to_owned(),
-        committer: ident.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "msg\n".to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    }
+    CommitData::new(tree, Vec::new(), ident, ident, "msg\n")
 }
 
 #[test]

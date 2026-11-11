@@ -10,6 +10,7 @@ use crate::config::ConfigSet;
 
 /// A repository finding with its severity and listing visibility resolved.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct FsckDiagnostic<'a> {
     /// Original finding, borrowed from the report.
     pub issue: &'a FsckIssue,
@@ -21,6 +22,24 @@ pub struct FsckDiagnostic<'a> {
     /// hidden unless the summary was requested with `include_info` enabled;
     /// `missingTaggerEntry` remains visible even without that option.
     pub visible: bool,
+}
+
+impl<'a> FsckDiagnostic<'a> {
+    /// Build a resolved diagnostic for `issue`.
+    ///
+    /// # Parameters
+    ///
+    /// - `issue`: the original finding.
+    /// - `severity`: severity after configuration and strictness.
+    /// - `visible`: whether the finding belongs in the requested listing.
+    #[must_use]
+    pub fn new(issue: &'a FsckIssue, severity: FsckSeverity, visible: bool) -> Self {
+        Self {
+            issue,
+            severity,
+            visible,
+        }
+    }
 }
 
 /// Classified findings and aggregate integrity status.

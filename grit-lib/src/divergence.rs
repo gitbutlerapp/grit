@@ -318,6 +318,7 @@ impl Did {
 
 /// One commit, as both sides have it.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Change {
     /// The change id, or `patch:<patch id>` for a commit without one.
     pub key: String,
@@ -337,6 +338,7 @@ pub struct Change {
 
 /// Two diverged heads, explained.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Divergence {
     /// What it adds up to: the first scenario that needs a decision, else
     /// the main resolvable one.
@@ -1430,6 +1432,7 @@ impl Choice {
 
 /// One way out of a divergence, as offered for its scenario.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ResolveOption {
     /// What it does.
     pub choice: Choice,
@@ -1519,6 +1522,7 @@ impl Divergence {
 
 /// What putting two heads together made.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Combined {
     /// The new head, when it worked.
     pub head: Option<ObjectId>,
@@ -1972,6 +1976,7 @@ fn tree_conflicts_with_result(
 
 /// One commit of a head, by the key it's matched on.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Keyed {
     /// The change id, or `patch:<patch id>` for a commit without one.
     pub key: String,

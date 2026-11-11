@@ -469,6 +469,7 @@ impl CombinedStructuredLineKind {
 
 /// One line in a combined (`--cc`) hunk: parent-column markers plus text.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CombinedStructuredLine {
     /// One marker per parent: space, `+`, or `-` (Git combined diff columns).
     pub parents: Vec<char>,
@@ -480,6 +481,7 @@ pub struct CombinedStructuredLine {
 
 /// A combined hunk (`@@@` header and body lines).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CombinedStructuredHunk {
     /// Full `@@@` header line (without trailing newline).
     pub header: String,
@@ -489,6 +491,7 @@ pub struct CombinedStructuredHunk {
 
 /// Structured combined diff body (no `diff --cc` file header).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct CombinedStructuredTextDiff {
     /// Hunks in file order.
     pub hunks: Vec<CombinedStructuredHunk>,

@@ -83,18 +83,13 @@ fn build_linear_wide_repo(
 
         let ts = 1_700_000_000i64 + i as i64;
         let ident = format!("Bench <b@grit.test> {ts} +0000");
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
-            parents: parent.into_iter().collect(),
-            author: ident.clone(),
-            committer: ident,
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: format!("commit {i}\n"),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            parent.into_iter().collect(),
+            ident.clone(),
+            ident,
+            format!("commit {i}\n"),
+        ));
         let oid = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
         if i == 0 {
             oldest = Some(oid);

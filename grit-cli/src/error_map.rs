@@ -1772,20 +1772,17 @@ mod tests {
     fn wrapped_lock_held(holder: Option<grit_lib::lockfile::LockHolder>) -> (Error, PathBuf) {
         use grit_lib::error::LockHeldError;
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(WrappedLib(LibError::LockHeld(LockHeldError {
-            path: path.clone(),
+        let err = Error::new(WrappedLib(LibError::LockHeld(LockHeldError::new(
+            path.clone(),
             holder,
-        })))
+        ))))
         .context("staging files");
         (err, path)
     }
 
     #[test]
     fn nested_lock_held_gets_lock_prose_in_human_message() {
-        let (err, path) = wrapped_lock_held(Some(grit_lib::lockfile::LockHolder {
-            pid: 42,
-            running: false,
-        }));
+        let (err, path) = wrapped_lock_held(Some(grit_lib::lockfile::LockHolder::new(42, false)));
         assert!(err.downcast_ref::<LibError>().is_none());
         let human = crate::cli_messages::human_error_message(&err);
         assert!(

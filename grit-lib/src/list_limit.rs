@@ -10,6 +10,7 @@
 
 /// A list capped by an optional limit, with truncation when more items existed.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Limited<T> {
     /// Items returned (at most the requested limit).
     pub items: Vec<T>,

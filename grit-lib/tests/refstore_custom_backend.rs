@@ -70,10 +70,10 @@ impl RefStore for MapStore {
                 RawRef::Direct(_) => None,
                 RawRef::Symbolic(_) => resolve_symbolic(&state.refs, name).ok(),
             };
-            let entry = RefEntry {
-                name: RefName::from_trusted(name.clone()),
-                value: value.clone(),
-                peeled,
+            let entry = {
+                let mut entry = RefEntry::new(RefName::from_trusted(name.clone()), value.clone());
+                entry.peeled = peeled;
+                entry
             };
             if f(&entry).is_break() {
                 break;

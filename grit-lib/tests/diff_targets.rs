@@ -188,20 +188,19 @@ fn grit_raw(repo: &Repository, target: DiffTarget) -> Vec<String> {
         .map(|f| {
             let status = f.status;
             let path = f.path.clone();
-            let mut e = DiffEntry {
+            let mut e = DiffEntry::new(
                 status,
-                old_path: f.old_path.clone(),
-                new_path: if status == DiffStatus::Deleted {
+                f.old_path.clone(),
+                if status == DiffStatus::Deleted {
                     None
                 } else {
                     Some(path)
                 },
-                old_mode: f.old_mode.clone().map_or(FileMode::ABSENT, octal_mode),
-                new_mode: f.new_mode.clone().map_or(FileMode::ABSENT, octal_mode),
-                old_oid: f.old_oid,
-                new_oid: f.new_oid,
-                score: None,
-            };
+                f.old_mode.clone().map_or(FileMode::ABSENT, octal_mode),
+                f.new_mode.clone().map_or(FileMode::ABSENT, octal_mode),
+                f.old_oid,
+                f.new_oid,
+            );
             if status == DiffStatus::Deleted {
                 e.old_path = Some(f.path);
             }

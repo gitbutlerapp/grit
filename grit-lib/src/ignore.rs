@@ -41,6 +41,7 @@ impl fmt::Display for IgnoreSource {
 
 /// Metadata for a matching rule.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IgnoreMatch {
     /// Typed source of the matching pattern (see [`IgnoreSource`]).
     pub source: IgnoreSource,
@@ -54,6 +55,7 @@ pub struct IgnoreMatch {
 
 /// Result of checking one path against repository ignore rules.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IgnoreCheck {
     /// Repository-relative path that was queried.
     pub path: String,
@@ -93,6 +95,7 @@ pub struct IgnorePatternList {
 /// The pattern that decided an [`IgnorePatternList::last_match`] query.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[allow(dead_code)] // integration / re-export use only
+#[non_exhaustive]
 pub struct IgnorePatternMatch {
     /// Line number of the pattern in the parsed content (1-based).
     pub line_number: usize,

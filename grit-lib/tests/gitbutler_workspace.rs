@@ -90,14 +90,11 @@ fn detects_workspace_and_names_each_merged_head() {
     assert_eq!(
         workspace.heads,
         [
-            WorkspaceHead {
-                commit: rev(root, "one"),
-                branches: vec!["one".to_owned()],
-            },
-            WorkspaceHead {
-                commit: rev(root, "two"),
-                branches: vec!["two".to_owned(), "two-alias".to_owned()],
-            },
+            WorkspaceHead::new(rev(root, "one"), vec!["one".to_owned()]),
+            WorkspaceHead::new(
+                rev(root, "two"),
+                vec!["two".to_owned(), "two-alias".to_owned()]
+            ),
         ],
         "parent order, sorted names, no gitbutler/* branches"
     );
@@ -165,11 +162,7 @@ fn standing_without_counts_compares_nothing() {
     let standing = workspace.standing(&repo, &target).expect("standing");
     assert_eq!(
         standing,
-        WorkspaceStanding {
-            ahead: None,
-            newest_ahead: Vec::new(),
-            heads_ahead: vec![None, None],
-        }
+        WorkspaceStanding::new(None, Vec::new(), vec![None, None])
     );
     assert_eq!(workspace.commit, commit);
 }

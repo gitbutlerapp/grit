@@ -214,11 +214,11 @@ mod tests {
             ),
         };
         let config = ConfigSet::default();
-        let json = issue_to_json(FsckDiagnostic {
-            issue: &issue,
-            severity: issue_severity(&issue, &config, false),
-            visible: issue_visible_by_default(&issue, &config, false),
-        });
+        let json = issue_to_json(FsckDiagnostic::new(
+            &issue,
+            issue_severity(&issue, &config, false),
+            issue_visible_by_default(&issue, &config, false),
+        ));
         assert_eq!(json.kind, "missingObject");
         assert_eq!(json.severity, FsckSeverity::Error);
         assert!(json.oid.is_some());

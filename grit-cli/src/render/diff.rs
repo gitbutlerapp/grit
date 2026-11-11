@@ -376,15 +376,15 @@ pub fn diffstat_from_files(files: &[FileDiff]) -> DiffStat {
     DiffStat(
         files
             .iter()
-            .map(|file| FileStat {
-                path: file.path.clone(),
-                old_path: file.old_path.clone(),
-                status: file.status.into(),
-                binary: file.binary,
-                old_size: file.old_size.unwrap_or(0),
-                new_size: file.new_size.unwrap_or(0),
-                similarity: file.similarity,
-                lines: file.line_stat(),
+            .map(|file| {
+                let mut stat =
+                    FileStat::new(file.path.clone(), file.status.into(), file.line_stat());
+                stat.old_path = file.old_path.clone();
+                stat.binary = file.binary;
+                stat.old_size = file.old_size.unwrap_or(0);
+                stat.new_size = file.new_size.unwrap_or(0);
+                stat.similarity = file.similarity;
+                stat
             })
             .collect(),
     )

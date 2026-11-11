@@ -90,6 +90,7 @@ fn read_sparse_checkout_patterns(git_dir: &Path) -> Vec<String> {
 
 /// Provenance flags recorded when a repository is discovered or opened explicitly.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DiscoveryInfo {
     /// Opened via `GIT_DIR` or an explicit git directory (not upward discovery).
     pub explicit_git_dir: bool,
@@ -103,6 +104,7 @@ pub struct DiscoveryInfo {
 
 /// Result of [`Repository::init`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct InitOutcome {
     /// `true` when an existing repository was reinitialized in place.
     pub reinitialized: bool,

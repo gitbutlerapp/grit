@@ -39,15 +39,13 @@ fn write_commit_at(
 
 fn tag_annotated(repo: &Repository, name: &str, target: ObjectId, msg: &str) {
     let tagger = grit_lib::ident::Signature::new("T", "t@e.com", repo.identity_now()).expect("sig");
-    let data = TagData {
-        object: target,
-        object_type: "commit".into(),
-        tag: name.to_owned(),
-        tagger: Some(tagger.header_line()),
-        extra_headers: Vec::new(),
-        message: format!("{msg}\n"),
-        raw_message: None,
-    };
+    let data = TagData::new(
+        target,
+        "commit",
+        name,
+        Some(tagger.header_line()),
+        format!("{msg}\n"),
+    );
     let bytes = serialize_tag(&data);
     let oid = repo
         .odb()

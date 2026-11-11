@@ -184,6 +184,7 @@ impl RemoteRef {
 
 /// One advertised ref with its peeled `^{}` line folded in (see [`fold_peeled_refs`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PeeledRemoteRef {
     /// Full reference name (never ends in `^{}`).
     pub name: String,

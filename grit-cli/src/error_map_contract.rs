@@ -198,10 +198,9 @@ static CONTRACT: &[ContractRow] = &[
             Error::new(LibError::Hook(HookError::Failed {
                 hook_name: "pre-commit".into(),
                 status: 1,
-                output: HookOutput {
-                    stdout: b"out\n".to_vec(),
-                    stderr: b"err\n".to_vec(),
-                },
+                output: HookOutput::new(b"out
+".to_vec(), b"err
+".to_vec()),
             }))
         },
         kind: Some(ErrorKind::HookFailed),
@@ -212,13 +211,10 @@ static CONTRACT: &[ContractRow] = &[
     ContractRow {
         label: "lock_held",
         build: || {
-            Error::new(LibError::LockHeld(LockHeldError {
-                path: Path::new("/repo/.git/index.lock").into(),
-                holder: Some(LockHolder {
-                    pid: 42,
-                    running: false,
-                }),
-            }))
+            Error::new(LibError::LockHeld(LockHeldError::new(
+                Path::new("/repo/.git/index.lock"),
+                Some(LockHolder::new(42, false)),
+            )))
         },
         kind: Some(ErrorKind::LockHeld),
         exit: ExitStatus::Failure,
@@ -404,10 +400,10 @@ static CONTRACT: &[ContractRow] = &[
         label: "remove_blocked",
         build: || {
             Error::new(LibError::Worktree(WorktreeError::RemoveBlocked {
-                paths: vec![BlockedRemoval {
-                    path: "tracked.txt".into(),
-                    reason: RemoveBlockReason::LocalModifications,
-                }],
+                paths: vec![BlockedRemoval::new(
+                    "tracked.txt",
+                    RemoveBlockReason::LocalModifications,
+                )],
             }))
         },
         kind: None,
@@ -422,11 +418,11 @@ static CONTRACT: &[ContractRow] = &[
         build: || {
             Error::new(LibError::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
                     prefix: "abc".into(),
-                    candidates: vec![AmbiguousChangeIdHint {
-                        oid_hex: "f92d74e3874587aaf443d1db961d4e26dde13e9c".into(),
-                        change_id: "changeid123456".into(),
-                        subject: "fix bug".into(),
-                    }],
+                    candidates: vec![AmbiguousChangeIdHint::new(
+                        "f92d74e3874587aaf443d1db961d4e26dde13e9c",
+                        "changeid123456",
+                        "fix bug",
+                    )],
                 })))
         },
         kind: None,

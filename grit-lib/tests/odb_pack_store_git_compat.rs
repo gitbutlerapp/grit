@@ -69,10 +69,7 @@ fn git_cat_file(repo: &Path, oid: &ObjectId) -> Object {
         "git cat-file {kind_str} {hex}: {}",
         String::from_utf8_lossy(&out.stderr)
     );
-    Object {
-        kind,
-        data: out.stdout,
-    }
+    Object::new(kind, out.stdout)
 }
 
 fn git_batch_all_objects(repo: &Path) -> BTreeMap<ObjectId, (ObjectKind, u64)> {

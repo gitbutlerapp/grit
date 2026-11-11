@@ -41,7 +41,7 @@ fn hold_lock(lock_path: &Path, pid: Option<u64>) {
 
 fn expect_lock_held(err: Error) -> (std::path::PathBuf, Option<LockHolder>) {
     match err {
-        Error::LockHeld(grit_lib::error::LockHeldError { path, holder }) => (path, holder),
+        Error::LockHeld(grit_lib::error::LockHeldError { path, holder, .. }) => (path, holder),
         other => panic!("expected Error::LockHeld, got {other:?}"),
     }
 }
@@ -112,10 +112,7 @@ fn lock_holder_reports_live_pid_for_current_process() {
 
     assert_eq!(
         LockHolder::read(&lock_path),
-        Some(LockHolder {
-            pid: u64::from(std::process::id()),
-            running: true,
-        })
+        Some(LockHolder::new(u64::from(std::process::id()), true))
     );
 }
 
@@ -127,10 +124,7 @@ fn lock_holder_reports_stale_pid() {
 
     assert_eq!(
         LockHolder::read(&lock_path),
-        Some(LockHolder {
-            pid: DEAD_PID,
-            running: false,
-        })
+        Some(LockHolder::new(DEAD_PID, false))
     );
 }
 
@@ -159,10 +153,7 @@ fn index_lock_acquire_reports_typed_lock_held_with_holder() {
     assert_eq!(path, lock_path);
     assert_eq!(
         holder,
-        Some(LockHolder {
-            pid: u64::from(std::process::id()),
-            running: true,
-        })
+        Some(LockHolder::new(u64::from(std::process::id()), true))
     );
 
     hold_lock(&lock_path, Some(DEAD_PID));
@@ -206,13 +197,7 @@ fn stage_with_held_index_lock_returns_lock_held_and_git_sees_no_change() {
             path.canonicalize().expect("lock path"),
             lock_path.canonicalize().expect("lock path")
         );
-        assert_eq!(
-            holder,
-            pid.map(|pid| LockHolder {
-                pid,
-                running: pid != DEAD_PID,
-            })
-        );
+        assert_eq!(holder, pid.map(|pid| LockHolder::new(pid, pid != DEAD_PID)));
         assert_eq!(fs::read(&lock_path).expect("foreign lock kept"), b"");
         assert!(!wt.join(".git/index").exists(), "nothing was staged");
         if let Some(pid) = pid {

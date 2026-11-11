@@ -96,18 +96,8 @@ fn merge_diff_and_textconv_matrix_on_merge_commit() -> grit_lib::error::Result<(
 
     let config = repo.config().snapshot()?;
     let sides = [
-        CombinedParentSide {
-            mode: 0o100644,
-            oid: parsed.parents[0],
-            status: CombinedParentStatus::Modified,
-            rename_from: None,
-        },
-        CombinedParentSide {
-            mode: 0o100644,
-            oid: parsed.parents[1],
-            status: CombinedParentStatus::Modified,
-            rename_from: None,
-        },
+        CombinedParentSide::new(0o100644, parsed.parents[0], CombinedParentStatus::Modified),
+        CombinedParentSide::new(0o100644, parsed.parents[1], CombinedParentStatus::Modified),
     ];
     for path in &paths {
         let oid = blob_oid_at_path(repo.odb(), &parsed.tree, path).expect("blob oid");

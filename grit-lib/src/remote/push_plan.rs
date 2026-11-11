@@ -91,6 +91,7 @@ pub struct PushRequest {
 
 /// A fully resolved push target.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResolvedPush {
     /// Remote name to push to.
     pub remote: String,

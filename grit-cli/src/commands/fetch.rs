@@ -225,7 +225,7 @@ fn run_all(args: &FetchArgs, human_interactive: bool) -> Result<FetchAllOutcome>
     for (name, result) in raw {
         match result {
             Ok(outcome) => {
-                received += outcome.transfer;
+                received += outcome.transfer.clone();
                 let remote = remote_outcome(name, &outcome, args.dry_run);
                 total_updated += remote.updated;
                 remotes.push(remote);
@@ -393,20 +393,17 @@ mod map_remote_error_tests {
         use grit_lib::remote::transfer::RefUpdate;
 
         let oid = ObjectId::from_hex("a8e620a111111111111111111111111111111111").expect("oid");
-        grit_lib::remote::transfer::FetchOutcome {
-            updates: modes
-                .iter()
-                .map(|(name, mode)| RefUpdate {
-                    remote_ref: format!("refs/heads/{name}"),
-                    local_ref: Some(format!("refs/remotes/origin/{name}")),
-                    old_oid: None,
-                    new_oid: Some(oid),
-                    mode: *mode,
-                    note: None,
-                })
-                .collect(),
-            ..Default::default()
-        }
+        let mut outcome = grit_lib::remote::transfer::FetchOutcome::default();
+        outcome.updates = modes
+            .iter()
+            .map(|(name, mode)| {
+                let mut update = RefUpdate::new(format!("refs/heads/{name}"), *mode);
+                update.local_ref = Some(format!("refs/remotes/origin/{name}"));
+                update.new_oid = Some(oid);
+                update
+            })
+            .collect();
+        outcome
     }
 
     fn render(outcome: &super::FetchOutcome) -> (String, String) {

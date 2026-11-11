@@ -71,6 +71,7 @@ impl PrunableReason {
 /// One row returned by [`list_worktrees`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct WorktreeEntry {
     /// Absolute path to the working tree (for bare main worktree, the common git dir).
     pub path: PathBuf,
@@ -583,6 +584,7 @@ pub struct PruneWorktreesOptions {
 
 /// One linked worktree removed or that would be removed by [`prune_linked_worktrees`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PrunedWorktreeEntry {
     /// Working tree path from the registry.
     pub path: PathBuf,

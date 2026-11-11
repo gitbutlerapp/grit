@@ -65,6 +65,7 @@ pub(crate) enum LocalSizedRead {
 /// Streaming handle for a single object's uncompressed payload.
 ///
 /// The reader yields bytes after the Git object header (`"<kind> <size>\\0"`).
+#[non_exhaustive]
 pub struct ObjectStream<'a> {
     /// Resolved object type.
     pub kind: ObjectKind,
@@ -72,6 +73,21 @@ pub struct ObjectStream<'a> {
     pub size: u64,
     /// Payload bytes; must not include the object header.
     pub reader: Box<dyn Read + Send + 'a>,
+}
+
+impl<'a> ObjectStream<'a> {
+    /// Build a stream handle, typically from a custom
+    /// [`ObjectStore::open_stream`](ObjectStore::open_stream) implementation.
+    ///
+    /// # Parameters
+    ///
+    /// - `kind`: resolved object type.
+    /// - `size`: uncompressed payload length in bytes.
+    /// - `reader`: payload bytes, without the object header.
+    #[must_use]
+    pub fn new(kind: ObjectKind, size: u64, reader: Box<dyn Read + Send + 'a>) -> Self {
+        Self { kind, size, reader }
+    }
 }
 
 /// Read-only object storage: lookup, metadata, streaming, and enumeration.

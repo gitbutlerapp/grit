@@ -48,18 +48,13 @@ fn one_commit_repo() -> (tempfile::TempDir, Repository, ObjectId) {
         base_index_pos: 0,
     });
     let tree = write_tree_from_index(repo.odb(), &index, "").expect("tree");
-    let raw = serialize_commit(&CommitData {
+    let raw = serialize_commit(&CommitData::new(
         tree,
-        parents: vec![],
-        author: "T <t@example.com> 100 +0000".into(),
-        committer: "T <t@example.com> 100 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "m\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    });
+        vec![],
+        "T <t@example.com> 100 +0000",
+        "T <t@example.com> 100 +0000",
+        "m\n",
+    ));
     let commit = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &commit).expect("ref");
     (dir, repo, commit)
@@ -105,18 +100,13 @@ fn octopus_merge_graph() -> (tempfile::TempDir, Repository, ObjectId, Vec<Object
     .expect("init");
     let mk = |parents: Vec<ObjectId>, t: i64| -> ObjectId {
         let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
             parents,
-            author: format!("T <t@example.com> {t} +0000"),
-            committer: format!("T <t@example.com> {t} +0000"),
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: "m\n".into(),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            format!("T <t@example.com> {t} +0000"),
+            format!("T <t@example.com> {t} +0000"),
+            "m\n",
+        ));
         repo.odb().write(ObjectKind::Commit, &raw).expect("commit")
     };
     let p1 = mk(vec![], 1);
@@ -250,18 +240,13 @@ fn commit_tree_high_bit_and_parse_graph_dump() {
         base_index_pos: 0,
     });
     let tree = write_tree_from_index(repo.odb(), &index, "").expect("tree");
-    let raw = serialize_commit(&CommitData {
+    let raw = serialize_commit(&CommitData::new(
         tree,
-        parents: vec![],
-        author: "T <t@example.com> 1 +0000".into(),
-        committer: "T <t@example.com> 1 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "m\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    });
+        vec![],
+        "T <t@example.com> 1 +0000",
+        "T <t@example.com> 1 +0000",
+        "m\n",
+    ));
     let commit = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
     assert!(commit_tree_has_high_bit_paths(repo.odb(), commit));
     let info = load_commit_graph_commit_info(repo.odb(), commit).expect("info");
@@ -385,33 +370,23 @@ fn two_parent_graph_commit_matches_object() {
     .expect("init");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
     let parent = {
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
-            parents: vec![],
-            author: "T <t@example.com> 1 +0000".into(),
-            committer: "T <t@example.com> 1 +0000".into(),
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: "p\n".into(),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            vec![],
+            "T <t@example.com> 1 +0000",
+            "T <t@example.com> 1 +0000",
+            "p\n",
+        ));
         repo.odb().write(ObjectKind::Commit, &raw).expect("p")
     };
     let merge = {
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
-            parents: vec![parent, parent],
-            author: "T <t@example.com> 2 +0000".into(),
-            committer: "T <t@example.com> 2 +0000".into(),
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: "m\n".into(),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            vec![parent, parent],
+            "T <t@example.com> 2 +0000",
+            "T <t@example.com> 2 +0000",
+            "m\n",
+        ));
         repo.odb().write(ObjectKind::Commit, &raw).expect("m")
     };
     let mut sorted = vec![parent, merge];
@@ -461,18 +436,13 @@ fn two_commit_repo() -> (tempfile::TempDir, Repository, Vec<ObjectId>) {
     let mut sorted = Vec::new();
     for t in [1i64, 2] {
         let parents = sorted.last().copied().map(|p| vec![p]).unwrap_or_default();
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
             parents,
-            author: format!("T <t@example.com> {t} +0000"),
-            committer: format!("T <t@example.com> {t} +0000"),
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: "m\n".into(),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            format!("T <t@example.com> {t} +0000"),
+            format!("T <t@example.com> {t} +0000"),
+            "m\n",
+        ));
         sorted.push(repo.odb().write(ObjectKind::Commit, &raw).expect("c"));
     }
     sorted.sort();

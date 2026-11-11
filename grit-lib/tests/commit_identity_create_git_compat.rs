@@ -199,11 +199,9 @@ fn create_commit_rejects_unwritable_signatures() {
     let root = td.path();
     let repo = init(root);
     let time = OffsetDateTime::from_unix_timestamp(1).expect("time");
-    let injected = Signature {
-        name: "Name".into(),
-        email: "a@b>\nInjected: x".into(),
-        time,
-    };
+    // `Signature::new` rejects the injected email, so build a valid one and corrupt it.
+    let mut injected = Signature::new("Name", "a@b", time).expect("valid signature");
+    injected.email = "a@b>\nInjected: x".into();
 
     let bad = {
         let mut req = CommitRequest::new("x\n");

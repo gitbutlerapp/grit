@@ -33,6 +33,7 @@ use crate::refs::{self, Ref};
 /// Result of a loose-object prune.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PruneStats {
     /// Number of loose objects deleted.
     pub pruned: usize,

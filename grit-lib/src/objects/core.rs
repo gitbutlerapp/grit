@@ -911,6 +911,7 @@ impl FromStr for ObjectKind {
 /// Kind and uncompressed size of a Git object without loading its payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ObjectInfo {
     /// Object type after resolving any pack delta chain.
     pub kind: ObjectKind,
@@ -918,8 +919,23 @@ pub struct ObjectInfo {
     pub size: u64,
 }
 
+impl ObjectInfo {
+    /// Build object metadata, typically from a custom
+    /// [`ObjectStore::read_info`](crate::odb::store::ObjectStore::read_info) implementation.
+    ///
+    /// # Parameters
+    ///
+    /// - `kind`: object type after resolving any delta chain.
+    /// - `size`: uncompressed payload length in bytes (excluding the header).
+    #[must_use]
+    pub fn new(kind: ObjectKind, size: u64) -> Self {
+        Self { kind, size }
+    }
+}
+
 /// A decompressed, header-stripped Git object.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct Object {
     /// The type of this object.
     pub kind: ObjectKind,
@@ -1430,6 +1446,7 @@ pub(crate) fn find_tree_entry_by_name_dir_or_file_in_data(
 /// new commit, build a [`NewCommit`](crate::objects::NewCommit) and pass it to
 /// [`Objects::write_commit`](crate::objects::Objects::write_commit).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CommitData {
     /// The tree this commit points to.
     pub tree: ObjectId,
@@ -1459,6 +1476,43 @@ pub struct CommitData {
     /// [`serialize_commit`] always emits `tree`, `parent`, `author`, `committer`, and `encoding`
     /// from the structured fields, then appends these bytes before the blank line and message.
     pub extra_headers: Vec<u8>,
+}
+
+impl CommitData {
+    /// Build commit data from decoded header values, for [`serialize_commit`].
+    ///
+    /// The raw header fields, encoding, raw message and extra headers start empty, so
+    /// serialization writes `author`, `committer` and `message` as UTF-8. Set the remaining
+    /// public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `tree`: the tree the commit points to.
+    /// - `parents`: parent commit ids, in order.
+    /// - `author`: `author` header payload (`Name <email> <time> <tz>`).
+    /// - `committer`: `committer` header payload.
+    /// - `message`: commit message (everything after the blank line).
+    #[must_use]
+    pub fn new(
+        tree: ObjectId,
+        parents: Vec<ObjectId>,
+        author: impl Into<String>,
+        committer: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            tree,
+            parents,
+            author: author.into(),
+            committer: committer.into(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: None,
+            message: message.into(),
+            raw_message: None,
+            extra_headers: Vec::new(),
+        }
+    }
 }
 
 /// First paragraph of a commit message, folded like Git `%(contents:subject)`.
@@ -1685,6 +1739,7 @@ pub fn tag_object_line_oid(data: &[u8]) -> Option<ObjectId> {
 
 /// Parsed representation of an annotated tag object.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct TagData {
     /// The object this tag points to.
     pub object: ObjectId,
@@ -1702,6 +1757,38 @@ pub struct TagData {
     ///
     /// When set, [`serialize_tag`] writes these bytes unchanged so parse→serialize keeps the object id.
     pub raw_message: Option<Vec<u8>>,
+}
+
+impl TagData {
+    /// Build tag data for [`serialize_tag`], with no extra headers or raw message bytes.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `object`: the tagged object.
+    /// - `object_type`: its type name (for example `"commit"`).
+    /// - `tag`: the short tag name.
+    /// - `tagger`: `tagger` header payload, when present.
+    /// - `message`: tag message (everything after the blank line).
+    #[must_use]
+    pub fn new(
+        object: ObjectId,
+        object_type: impl Into<String>,
+        tag: impl Into<String>,
+        tagger: Option<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            object,
+            object_type: object_type.into(),
+            tag: tag.into(),
+            tagger,
+            extra_headers: Vec::new(),
+            message: message.into(),
+            raw_message: None,
+        }
+    }
 }
 
 /// Parse the raw data of a tag object.

@@ -272,11 +272,11 @@ impl ObjectStore for SqliteOdbStore {
                 detail: format!("object size overflow for {}", oid.to_hex()),
             })
         })?;
-        Ok(Some(ObjectStream {
-            kind: obj.kind,
+        Ok(Some(ObjectStream::new(
+            obj.kind,
             size,
-            reader: Box::new(io::Cursor::new(obj.data)),
-        }))
+            Box::new(io::Cursor::new(obj.data)),
+        )))
     }
 
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
@@ -537,22 +537,17 @@ fn parse_store_bytes(raw: &[u8]) -> Result<Object> {
             ),
         }));
     }
-    Ok(Object {
-        kind,
-        data: payload.to_vec(),
-    })
+    Ok(Object::new(kind, payload.to_vec()))
 }
 
 fn info_from_store_bytes(raw: &[u8]) -> Result<ObjectInfo> {
     let obj = parse_store_bytes(raw)?;
-    Ok(ObjectInfo {
-        kind: obj.kind,
-        size: u64::try_from(obj.data.len()).map_err(|_| {
-            Error::Object(ObjectError::Corrupt {
-                detail: "object size overflow".into(),
-            })
-        })?,
-    })
+    let size = u64::try_from(obj.data.len()).map_err(|_| {
+        Error::Object(ObjectError::Corrupt {
+            detail: "object size overflow".into(),
+        })
+    })?;
+    Ok(ObjectInfo::new(obj.kind, size))
 }
 
 /// End-to-end demo used by the `sqlite-object-store` example and integration test.

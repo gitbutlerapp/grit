@@ -123,10 +123,7 @@ impl CommandRunner for FailingRunner {
             return Err(err);
         }
         Ok(RunningCommand::from_recording(
-            CommandExit {
-                code: Some(0),
-                success: true,
-            },
+            CommandExit::new(Some(0), true),
             None,
             Vec::new(),
             false,

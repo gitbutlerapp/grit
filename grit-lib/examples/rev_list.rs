@@ -41,18 +41,13 @@ fn make_initial_commit(repo: &Repository) -> grit_lib::error::Result<grit_lib::o
         .load(&grit_lib::index::IndexLoadOptions::default())?;
     let tree_oid = write_tree_from_index(repo.odb(), &index, "")?;
 
-    let commit = CommitData {
-        tree: tree_oid,
-        parents: Vec::new(),
-        author: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        committer: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "root\n".to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let commit = CommitData::new(
+        tree_oid,
+        Vec::new(),
+        "Example <example@example.com> 1700000000 +0000",
+        "Example <example@example.com> 1700000000 +0000",
+        "root\n",
+    );
     let oid = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))?;

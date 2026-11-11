@@ -539,21 +539,16 @@ fn write_commit_object_flush_failure_rolls_back_staged() {
 
     let blob = repo.odb().write(ObjectKind::Blob, b"x\n").expect("blob");
     store.set_fail_flush(true);
-    let data = CommitData {
-        tree: repo.odb().empty_tree_oid().expect("empty tree"),
-        parents: vec![repo
+    let data = CommitData::new(
+        repo.odb().empty_tree_oid().expect("empty tree"),
+        vec![repo
             .revwalk()
             .resolve("HEAD", &grit_lib::revwalk::ResolveOptions::default())
             .expect("head")],
-        author: "T <t@example.com> 1700000000 +0000".into(),
-        committer: "T <t@example.com> 1700000000 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "fail flush\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        "T <t@example.com> 1700000000 +0000",
+        "T <t@example.com> 1700000000 +0000",
+        "fail flush\n",
+    );
     let err = write_commit_object(&repo, &data, Some(false)).expect_err("flush fails");
     assert!(matches!(err, Error::Io(_)));
     assert!(

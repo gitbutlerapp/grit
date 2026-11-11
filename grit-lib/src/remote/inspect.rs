@@ -45,6 +45,7 @@ pub enum RemoteBranchStateKind {
 
 /// One remote branch and how it relates to local tracking refs.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RemoteBranchState {
     /// Short branch name (the segment under `refs/heads/`).
     pub name: String,
@@ -54,6 +55,7 @@ pub struct RemoteBranchState {
 
 /// A local branch configured to pull from a remote via `branch.*` config.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RemotePullBranch {
     /// Local branch short name (`branch.<local>.remote` matches the remote).
     pub local: String,
@@ -63,6 +65,7 @@ pub struct RemotePullBranch {
 
 /// Result of inspecting one configured remote.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RemoteSummary {
     /// Remote name (config subsection).
     pub name: String,

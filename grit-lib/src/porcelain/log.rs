@@ -53,6 +53,7 @@ pub enum DecorationKind {
 
 /// One ref (or synthetic label) attached to a commit for `--decorate` / `%d`.
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct DecorationItem {
     /// Full ref name when this came from a real ref (used for `HEAD -> branch` folding).
     pub refname: Option<String>,
@@ -62,12 +63,31 @@ pub struct DecorationItem {
     pub kind: DecorationKind,
 }
 
+impl DecorationItem {
+    /// Build a decoration item.
+    ///
+    /// # Parameters
+    ///
+    /// - `refname`: full ref name, or `None` for a synthetic label.
+    /// - `display`: the text shown for it.
+    /// - `kind`: what kind of ref it is.
+    #[must_use]
+    pub fn new(refname: Option<String>, display: impl Into<String>, kind: DecorationKind) -> Self {
+        Self {
+            refname,
+            display: display.into(),
+            kind,
+        }
+    }
+}
+
 /// Per-commit-hex decoration lists, keyed by 40-char commit hex.
 pub type DecorationMap = HashMap<String, Vec<DecorationItem>>;
 
 /// One ref label attached to a commit for structured log/show JSON.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct CommitRefDecoration {
     /// Display name (short branch/tag label or full ref when `--decorate=full`).
     pub name: String,
@@ -75,9 +95,26 @@ pub struct CommitRefDecoration {
     pub kind: DecorationKind,
 }
 
+impl CommitRefDecoration {
+    /// Build a ref label.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: the label text.
+    /// - `kind`: what kind of ref it is.
+    #[must_use]
+    pub fn new(name: impl Into<String>, kind: DecorationKind) -> Self {
+        Self {
+            name: name.into(),
+            kind,
+        }
+    }
+}
+
 /// Commit metadata loaded once per oid for porcelain JSON (`log`, `show`, `revs`, …).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct LoadedCommit {
     /// Commit object id.
     pub oid: ObjectId,

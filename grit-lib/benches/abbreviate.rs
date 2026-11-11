@@ -44,18 +44,16 @@ impl ObjectStore for MinimalStore {
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
         let guard = self.objects.read().unwrap();
-        Ok(guard.get(oid).map(|(kind, data)| Object {
-            kind: *kind,
-            data: data.to_vec(),
-        }))
+        Ok(guard
+            .get(oid)
+            .map(|(kind, data)| Object::new(*kind, data.to_vec())))
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         let guard = self.objects.read().unwrap();
-        Ok(guard.get(oid).map(|(kind, data)| ObjectInfo {
-            kind: *kind,
-            size: data.len() as u64,
-        }))
+        Ok(guard
+            .get(oid)
+            .map(|(kind, data)| ObjectInfo::new(*kind, data.len() as u64)))
     }
 
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {

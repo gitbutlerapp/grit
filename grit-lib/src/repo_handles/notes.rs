@@ -44,6 +44,7 @@ impl NotesWriteOptions {
 /// One `(annotated object, note blob)` pair from a notes tree.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct NoteListing {
     /// Object the note is attached to.
     pub object: ObjectId,
@@ -53,6 +54,7 @@ pub struct NoteListing {
 
 /// One note with its contents, from [`RepositoryNotes::list_with_bodies`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct Note {
     /// Object the note is attached to.
     pub object: ObjectId,
@@ -64,6 +66,7 @@ pub struct Note {
 
 /// Preview of [`RepositoryNotes::add`] without writing objects, refs, or reflogs.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NoteAddPlan {
     /// Annotated object the note would attach to.
     pub object: ObjectId,
@@ -79,6 +82,7 @@ pub struct NoteAddPlan {
 
 /// Preview of removing a note on one object without writing objects, refs, or reflogs.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NoteRemovePlan {
     /// Annotated object whose note would be removed.
     pub object: ObjectId,
@@ -95,6 +99,7 @@ pub struct NoteRemovePlan {
 /// The removals compose: [`Self::notes_ref_tip_after`] is the single notes commit that
 /// `remove_many` would write for the same objects and [`NotesWriteOptions`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct NoteRemoveManyPlan {
     /// Objects whose notes would be removed, in request order. Objects without a note and
     /// repeated objects are left out, matching the return value of `remove_many`.

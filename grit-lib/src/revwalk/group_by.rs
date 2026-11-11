@@ -23,6 +23,7 @@ use crate::revwalk::{RevWalk, RevWalkListOptions};
 
 /// One author's commits after grouping a walk result.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AuthorGroup {
     /// Display name after mailmap (may be empty when only email is known).
     pub name: String,

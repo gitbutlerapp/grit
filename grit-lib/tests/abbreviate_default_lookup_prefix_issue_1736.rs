@@ -44,18 +44,16 @@ impl ObjectStore for MinimalStore {
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
         let guard = self.objects.read().unwrap_or_else(|e| e.into_inner());
-        Ok(guard.get(oid).map(|(kind, data)| Object {
-            kind: *kind,
-            data: data.clone(),
-        }))
+        Ok(guard
+            .get(oid)
+            .map(|(kind, data)| Object::new(*kind, data.clone())))
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
         let guard = self.objects.read().unwrap_or_else(|e| e.into_inner());
-        Ok(guard.get(oid).map(|(kind, data)| ObjectInfo {
-            kind: *kind,
-            size: data.len() as u64,
-        }))
+        Ok(guard
+            .get(oid)
+            .map(|(kind, data)| ObjectInfo::new(*kind, data.len() as u64)))
     }
 
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
@@ -224,17 +222,17 @@ impl ObjectStore for SortedStore {
     }
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        Ok(self.ids.contains(oid).then(|| Object {
-            kind: ObjectKind::Blob,
-            data: Vec::new(),
-        }))
+        Ok(self
+            .ids
+            .contains(oid)
+            .then(|| Object::new(ObjectKind::Blob, Vec::new())))
     }
 
     fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
-        Ok(self.ids.contains(oid).then_some(ObjectInfo {
-            kind: ObjectKind::Blob,
-            size: 0,
-        }))
+        Ok(self
+            .ids
+            .contains(oid)
+            .then_some(ObjectInfo::new(ObjectKind::Blob, 0)))
     }
 
     fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {

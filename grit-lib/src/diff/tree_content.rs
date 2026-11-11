@@ -93,6 +93,7 @@ fn per_entry_parallel_options(
 
 /// Tree diff entry with structured line hunks ready for CLI rendering.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TreeDiffStructured {
     /// Tree diff metadata (paths, modes, oids, status).
     pub entry: DiffEntry,

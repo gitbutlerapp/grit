@@ -43,6 +43,7 @@ pub struct ExecSpec {
 /// One `--exec` invocation at a specific commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ExecRunRecord {
     /// Commit checked out when the command ran.
     pub commit: ObjectId,
@@ -75,6 +76,7 @@ fn serialize_lossy_utf8<S: serde::Serializer>(
 /// Successful exec invocations captured during one verification or recovery call.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ExecReport {
     /// One row per command invocation, in execution order.
     pub runs: Vec<ExecRunRecord>,

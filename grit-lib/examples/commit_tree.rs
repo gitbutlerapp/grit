@@ -51,18 +51,13 @@ fn main() -> grit_lib::error::Result<()> {
     let tree_oid = write_tree_from_index(repo.odb(), &index, "")?;
     println!("tree: {tree_oid}");
 
-    let commit = CommitData {
-        tree: tree_oid,
-        parents: Vec::new(),
-        author: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        committer: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "initial example commit\n".to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let commit = CommitData::new(
+        tree_oid,
+        Vec::new(),
+        "Example <example@example.com> 1700000000 +0000",
+        "Example <example@example.com> 1700000000 +0000",
+        "initial example commit\n",
+    );
     let raw = serialize_commit(&commit);
     let commit_oid = repo.odb().write(ObjectKind::Commit, &raw)?;
     println!("commit: {commit_oid}");

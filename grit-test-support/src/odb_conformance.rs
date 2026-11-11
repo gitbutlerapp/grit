@@ -548,10 +548,10 @@ pub mod broken_store {
         }
 
         fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
-            Ok(self.inner.read_info(oid)?.map(|info| ObjectInfo {
-                kind: ObjectKind::Tag,
-                size: info.size,
-            }))
+            Ok(self
+                .inner
+                .read_info(oid)?
+                .map(|info| ObjectInfo::new(ObjectKind::Tag, info.size)))
         }
 
         fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {

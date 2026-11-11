@@ -1103,11 +1103,11 @@ mod tests {
         assert!(bytes_only.contains("3.00 MiB"), "{bytes_only}");
         assert!(!bytes_only.contains('%'), "{bytes_only}");
 
-        active.objects = Some(ReceivedObjects {
-            received: 250,
-            total: 1_000,
-            deltas: 100,
-        });
+        let mut received = ReceivedObjects::default();
+        received.received = 250;
+        received.total = 1_000;
+        received.deltas = 100;
+        active.objects = Some(received);
         let counted = visible(&render_live(&active, now, 0, 120, false));
         assert!(counted.contains("250/1,000"), "{counted}");
         assert!(counted.contains(" 25%"), "{counted}");
@@ -1115,10 +1115,7 @@ mod tests {
 
     #[test]
     fn overall_line_shows_share_and_time_left() {
-        let estimate = OverallEstimate {
-            fraction: 0.475,
-            remaining: Duration::from_secs(12),
-        };
+        let estimate = OverallEstimate::new(0.475, Duration::from_secs(12));
         let line = visible(&render_overall(Some(estimate), 0, 100, true));
         assert!(line.trim_start().starts_with("Overall"), "{line}");
         assert!(line.contains(" 47%"), "{line}");
@@ -1140,10 +1137,7 @@ mod tests {
 
     #[test]
     fn overall_line_fits_narrow_terminals() {
-        let estimate = OverallEstimate {
-            fraction: 0.5,
-            remaining: Duration::from_secs(75),
-        };
+        let estimate = OverallEstimate::new(0.5, Duration::from_secs(75));
         for width in [20_usize, 40, 60, 80, 200] {
             for e in [Some(estimate), None] {
                 let line = visible(&render_overall(e, 3, width, true));

@@ -70,18 +70,13 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
             .write(ObjectKind::Tree, &serialize_tree(&entries))
             .unwrap();
         let identity = "Stat Test <stat@example.com> 1700000000 +0000";
-        let data = CommitData {
+        let data = CommitData::new(
             tree,
-            parents: commits.last().copied().into_iter().collect(),
-            author: identity.into(),
-            committer: identity.into(),
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: format!("edit {i}\n"),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        };
+            commits.last().copied().into_iter().collect(),
+            identity,
+            identity,
+            format!("edit {i}\n"),
+        );
         commits.push(
             repo.odb()
                 .write(ObjectKind::Commit, &serialize_commit(&data))

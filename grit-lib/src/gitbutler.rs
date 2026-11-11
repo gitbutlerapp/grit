@@ -53,6 +53,7 @@ const GITBUTLER_BRANCH_PREFIX: &str = "refs/heads/gitbutler/";
 /// A checked-out GitButler workspace: `HEAD` is on [`WORKSPACE_BRANCH`] and its tip is the
 /// workspace commit ([`WORKSPACE_COMMIT_MARKER`] in its message).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GitButlerWorkspace {
     /// The workspace commit at the tip of [`WORKSPACE_BRANCH`].
     pub commit: ObjectId,
@@ -62,12 +63,26 @@ pub struct GitButlerWorkspace {
 
 /// One head merged into a [`GitButlerWorkspace`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WorkspaceHead {
     /// The merged commit (a parent of the workspace commit).
     pub commit: ObjectId,
     /// Short names of the local branches that point at [`Self::commit`], sorted, leaving out
     /// GitButler's own `gitbutler/*` branches. Empty when no branch points there.
     pub branches: Vec<String>,
+}
+
+impl WorkspaceHead {
+    /// Build a workspace head.
+    ///
+    /// # Parameters
+    ///
+    /// - `commit`: the head commit merged into the workspace.
+    /// - `branches`: branch names pointing at it, sorted.
+    #[must_use]
+    pub fn new(commit: ObjectId, branches: Vec<String>) -> Self {
+        Self { commit, branches }
+    }
 }
 
 impl GitButlerWorkspace {
@@ -173,6 +188,7 @@ impl GitButlerWorkspace {
 /// A [`GitButlerWorkspace`]'s standing against the target branch, from
 /// [`GitButlerWorkspace::standing`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WorkspaceStanding {
     /// Commits of the applied work the target lacks, not counting the workspace commit; `None`
     /// when the target comparison was made without counts.
@@ -183,6 +199,28 @@ pub struct WorkspaceStanding {
     /// For each of [`GitButlerWorkspace::heads`], in order, how many of its commits the target
     /// lacks; every entry is `None` when the target comparison was made without counts.
     pub heads_ahead: Vec<Option<usize>>,
+}
+
+impl WorkspaceStanding {
+    /// Build a workspace standing.
+    ///
+    /// # Parameters
+    ///
+    /// - `ahead`: commits of the applied work the target lacks, without the workspace commit.
+    /// - `newest_ahead`: the newest of those commits, newest first.
+    /// - `heads_ahead`: for each workspace head, in order, how many of its commits the target lacks.
+    #[must_use]
+    pub fn new(
+        ahead: Option<usize>,
+        newest_ahead: Vec<ObjectId>,
+        heads_ahead: Vec<Option<usize>>,
+    ) -> Self {
+        Self {
+            ahead,
+            newest_ahead,
+            heads_ahead,
+        }
+    }
 }
 
 #[cfg(test)]

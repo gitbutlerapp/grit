@@ -119,10 +119,7 @@ impl CommandRunner for CannedRunner {
             .unwrap_or_else(|e| e.into_inner())
             .push(spec.clone());
         Ok(RunningCommand::from_recording(
-            CommandExit {
-                code: Some(self.code),
-                success: self.code == 0,
-            },
+            CommandExit::new(Some(self.code), self.code == 0),
             Some(self.stdout.clone()),
             self.stderr.clone(),
             false,
@@ -208,10 +205,7 @@ fn injected_runner_output_goes_into_the_error_only() {
     };
     assert_eq!(
         output,
-        HookOutput {
-            stdout: b"runner stdout\n".to_vec(),
-            stderr: b"runner stderr\n".to_vec(),
-        }
+        HookOutput::new(b"runner stdout\n".to_vec(), b"runner stderr\n".to_vec())
     );
     let specs = runner.specs();
     assert_eq!(specs.len(), 1, "only pre-commit runs before the failure");
@@ -300,10 +294,7 @@ fn successful_hook_output_is_returned_in_the_result() {
     assert_eq!(
         result,
         HookResult::Success {
-            output: HookOutput {
-                stdout: b"args a b 1\n".to_vec(),
-                stderr: b"warn\n".to_vec(),
-            }
+            output: HookOutput::new(b"args a b 1\n".to_vec(), b"warn\n".to_vec())
         }
     );
     assert_eq!(result.status(), Some(0));
@@ -334,10 +325,7 @@ fn configured_and_script_hooks_append_output_in_run_order() {
     );
     assert_eq!(
         result.output(),
-        Some(&HookOutput {
-            stdout: b"o\no\n".to_vec(),
-            stderr: b"e\ne\n".to_vec(),
-        })
+        Some(&HookOutput::new(b"o\no\n".to_vec(), b"e\ne\n".to_vec()))
     );
 }
 

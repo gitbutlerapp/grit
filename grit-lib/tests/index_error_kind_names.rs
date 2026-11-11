@@ -26,7 +26,7 @@ fn index_error_kind_names_are_stable() {
 }
 
 fn sample_for_kind(slug: &str) -> IndexError {
-    use grit_lib::error::{GitDirPathOperation, LockHeldError, PathIoError, PathIoOperation};
+    use grit_lib::error::{GitDirPathOperation, LockHeldError, PathIoError};
     use grit_lib::index::{IndexChmodReason, IndexCorrupt, IndexCorruptReason};
     use std::path::PathBuf;
 
@@ -44,15 +44,12 @@ fn sample_for_kind(slug: &str) -> IndexError {
         "index_fsmonitor_extension_bad_version" => IndexError::FsmonitorExtensionBadVersion(9),
         "index_fsmonitor_extension_ewah_invalid" => IndexError::FsmonitorExtensionEwahInvalid,
         "cache_tree_corrupt" => IndexError::CacheTreeCorrupt,
-        "lock_held" => IndexError::LockHeld(LockHeldError {
-            path: PathBuf::from(".git/index.lock"),
-            holder: None,
-        }),
-        "git_dir_path_io" => IndexError::PathIo(PathIoError {
-            operation: PathIoOperation::GitDir(GitDirPathOperation::WriteIndex),
-            path: Some(PathBuf::from(".git/index")),
-            source: std::io::Error::from(std::io::ErrorKind::NotFound),
-        }),
+        "lock_held" => IndexError::LockHeld(LockHeldError::new(".git/index.lock", None)),
+        "git_dir_path_io" => IndexError::PathIo(PathIoError::git_dir(
+            ".git/index",
+            GitDirPathOperation::WriteIndex,
+            std::io::Error::from(std::io::ErrorKind::NotFound),
+        )),
         "message" => IndexError::Chmod {
             path: "f.txt".into(),
             reason: IndexChmodReason::UnmergedPath,

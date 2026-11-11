@@ -175,11 +175,25 @@ impl CommandSpec {
 
 /// Exit status of a completed child.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CommandExit {
     /// Process exit code when available.
     pub code: Option<i32>,
     /// Whether the process exited successfully.
     pub success: bool,
+}
+
+impl CommandExit {
+    /// Build an exit status.
+    ///
+    /// # Parameters
+    ///
+    /// - `code`: the process exit code, when available.
+    /// - `success`: whether the child exited successfully.
+    #[must_use]
+    pub fn new(code: Option<i32>, success: bool) -> Self {
+        Self { code, success }
+    }
 }
 
 impl From<ExitStatus> for CommandExit {
@@ -193,6 +207,7 @@ impl From<ExitStatus> for CommandExit {
 
 /// Output from [`RunningCommand::wait_with_output`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CommandOutput {
     /// Subprocess exit status from the filter command.
     pub status: CommandExit,

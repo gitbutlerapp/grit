@@ -237,10 +237,7 @@ fn git_cat_file(repo: &Path, oid: &ObjectId) -> Object {
         .output()
         .expect("cat-file");
     assert!(out.status.success());
-    Object {
-        kind,
-        data: out.stdout,
-    }
+    Object::new(kind, out.stdout)
 }
 
 fn git_batch_all_objects(repo: &Path) -> BTreeMap<ObjectId, (ObjectKind, u64)> {

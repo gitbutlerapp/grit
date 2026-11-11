@@ -60,6 +60,7 @@ pub enum GraphLineKind {
 
 /// A rendered graph prefix (two columns per lane: glyph + space), without commit text.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GraphRenderedLine {
     /// Graph prefix; always ends with a space when non-empty.
     pub prefix: String,

@@ -259,15 +259,11 @@ fn porcelain_checkout_glob_and_branch_tracking() {
         .references()
         .resolve("HEAD")
         .expect("head");
-    let pushed = PushRefResult {
-        local_ref: Some("refs/heads/main".to_owned()),
-        remote_ref: "refs/heads/main".to_owned(),
-        old_oid: None,
-        new_oid: Some(head),
-        forced: false,
-        deletion: false,
-        status: PushRefStatus::Ok,
-        message: None,
+    let pushed = {
+        let mut result = PushRefResult::new("refs/heads/main", PushRefStatus::Ok);
+        result.local_ref = Some("refs/heads/main".to_owned());
+        result.new_oid = Some(head);
+        result
     };
     repo.branches()
         .apply_push_remote_tracking_updates("origin", &[pushed])

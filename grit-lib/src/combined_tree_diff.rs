@@ -156,6 +156,7 @@ pub enum CombinedParentStatus {
 
 /// One path in a combined diff: merge result tree vs each parent tree.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CombinedDiffPath {
     /// Path relative to repository root.
     pub path: String,
@@ -167,8 +168,34 @@ pub struct CombinedDiffPath {
     pub parents: Vec<CombinedParentSide>,
 }
 
+impl CombinedDiffPath {
+    /// Build a combined-diff path.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: the path in the merge result.
+    /// - `merge_mode`: the merge result's mode.
+    /// - `merge_oid`: the merge result's object id.
+    /// - `parents`: one side per parent, in parent order.
+    #[must_use]
+    pub fn new(
+        path: impl Into<String>,
+        merge_mode: u32,
+        merge_oid: ObjectId,
+        parents: Vec<CombinedParentSide>,
+    ) -> Self {
+        Self {
+            path: path.into(),
+            merge_mode,
+            merge_oid,
+            parents,
+        }
+    }
+}
+
 /// One parent's contribution at a combined-diff path.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CombinedParentSide {
     /// `mode` field.
     pub mode: u32,
@@ -178,6 +205,27 @@ pub struct CombinedParentSide {
     pub status: CombinedParentStatus,
     /// Source path when this parent saw the result as a rename (`-M`); `None` otherwise.
     pub rename_from: Option<String>,
+}
+
+impl CombinedParentSide {
+    /// Build one parent's side of a combined-diff path, with no rename source.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `mode`: the parent's mode at this path.
+    /// - `oid`: the parent's object id at this path.
+    /// - `status`: how the merge result differs from this parent.
+    #[must_use]
+    pub fn new(mode: u32, oid: ObjectId, status: CombinedParentStatus) -> Self {
+        Self {
+            mode,
+            oid,
+            status,
+            rename_from: None,
+        }
+    }
 }
 
 /// Options for the multitree walk.

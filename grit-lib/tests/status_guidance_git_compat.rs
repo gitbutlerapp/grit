@@ -86,18 +86,12 @@ fn merge_conflicts_group_by_kind_and_point_at_resolution() {
     assert_eq!(
         model.conflict_groups(),
         vec![
-            ConflictGroup {
-                kind: ConflictKind::BothModified,
-                paths: vec!["both.txt".to_owned()],
-            },
-            ConflictGroup {
-                kind: ConflictKind::DeletedByUs,
-                paths: vec!["gone-here.txt".to_owned()],
-            },
-            ConflictGroup {
-                kind: ConflictKind::DeletedByThem,
-                paths: vec!["gone-there.txt".to_owned()],
-            },
+            ConflictGroup::new(ConflictKind::BothModified, vec!["both.txt".to_owned()]),
+            ConflictGroup::new(ConflictKind::DeletedByUs, vec!["gone-here.txt".to_owned()]),
+            ConflictGroup::new(
+                ConflictKind::DeletedByThem,
+                vec!["gone-there.txt".to_owned()]
+            ),
         ]
     );
     assert_eq!(

@@ -39,6 +39,7 @@ use crate::worktree::worktree_rules::WorktreeRules;
 
 /// One changed path with both sides' bytes loaded for diffing.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FileChange {
     /// Display path (new path, or old path for a deletion).
     pub path: String,

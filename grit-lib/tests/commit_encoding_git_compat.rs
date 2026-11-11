@@ -61,17 +61,12 @@ fn grit_write_encoded_commit(
         "encoding {encoding} should produce raw body"
     );
     let id = ident();
-    let data = CommitData {
-        tree,
-        parents: parent.into_iter().collect(),
-        author: id.clone(),
-        committer: id,
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: enc_label,
-        message,
-        raw_message: raw_body,
-        extra_headers: Vec::new(),
+    let data = {
+        let mut commit =
+            CommitData::new(tree, parent.into_iter().collect(), id.clone(), id, message);
+        commit.encoding = enc_label;
+        commit.raw_message = raw_body;
+        commit
     };
     repo.odb()
         .write(ObjectKind::Commit, &serialize_commit(&data))

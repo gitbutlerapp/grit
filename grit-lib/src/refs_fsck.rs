@@ -45,6 +45,7 @@ pub enum RefsFsckSeverity {
 
 /// One diagnostic (use `format_refs_fsck_line` for Git-compatible output).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RefsFsckIssue {
     /// `severity` field.
     pub severity: RefsFsckSeverity,
@@ -54,6 +55,31 @@ pub struct RefsFsckIssue {
     pub msg_id: &'static str,
     /// `detail` field.
     pub detail: String,
+}
+
+impl RefsFsckIssue {
+    /// Build a refs fsck diagnostic.
+    ///
+    /// # Parameters
+    ///
+    /// - `severity`: the diagnostic severity.
+    /// - `path`: the ref or file the issue is about.
+    /// - `msg_id`: the Git fsck message id (for example `badRefContent`).
+    /// - `detail`: detail text.
+    #[must_use]
+    pub fn new(
+        severity: RefsFsckSeverity,
+        path: impl Into<String>,
+        msg_id: &'static str,
+        detail: impl Into<String>,
+    ) -> Self {
+        Self {
+            severity,
+            path: path.into(),
+            msg_id,
+            detail: detail.into(),
+        }
+    }
 }
 
 /// `error: path: msgId: detail` / `warning: ...`

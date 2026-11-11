@@ -36,18 +36,13 @@ fn write_headerless_commit(
     if let Some(p) = parent {
         parents.push(p);
     }
-    let data = CommitData {
+    let data = CommitData::new(
         tree,
         parents,
-        author: "T <t@example.com> 1 +0000".into(),
-        committer: "T <t@example.com> 1 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        "T <t@example.com> 1 +0000",
+        "T <t@example.com> 1 +0000",
+        format!("{message}\n"),
+    );
     let bytes = serialize_commit(&data);
     repo.odb()
         .write(ObjectKind::Commit, &bytes)
@@ -76,18 +71,13 @@ fn write_commit_with_id(
     if let Some(p) = parent {
         parents.push(p);
     }
-    let mut data = CommitData {
+    let mut data = CommitData::new(
         tree,
         parents,
-        author: "T <t@example.com> 1 +0000".into(),
-        committer: "T <t@example.com> 1 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        "T <t@example.com> 1 +0000",
+        "T <t@example.com> 1 +0000",
+        format!("{message}\n"),
+    );
     set_change_id(&mut data, id);
     let bytes = serialize_commit(&data);
     repo.odb()

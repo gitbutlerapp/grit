@@ -228,6 +228,7 @@ pub enum RevParseError {
 
 /// One commit when a change-id lookup is ambiguous.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AmbiguousChangeIdHint {
     /// Full commit object id (hex).
     pub oid_hex: String,
@@ -237,8 +238,31 @@ pub struct AmbiguousChangeIdHint {
     pub subject: String,
 }
 
+impl AmbiguousChangeIdHint {
+    /// Build one candidate for an ambiguous change-id error.
+    ///
+    /// # Parameters
+    ///
+    /// - `oid_hex`: full commit object id in hex.
+    /// - `change_id`: the commit's resolved change id.
+    /// - `subject`: first line of the commit message.
+    #[must_use]
+    pub fn new(
+        oid_hex: impl Into<String>,
+        change_id: impl Into<String>,
+        subject: impl Into<String>,
+    ) -> Self {
+        Self {
+            oid_hex: oid_hex.into(),
+            change_id: change_id.into(),
+            subject: subject.into(),
+        }
+    }
+}
+
 /// One candidate line when a short object id is ambiguous.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AmbiguousObjectHint {
     /// Full or abbreviated hex object id.
     pub oid_hex: String,

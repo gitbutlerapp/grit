@@ -73,6 +73,7 @@ pub enum DiffTarget {
 /// instead (structured hunks and line counts are optional there).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct FileDiff {
     /// Display path (new path, or old path for a deletion).
     pub path: String,
@@ -108,6 +109,7 @@ pub struct FileDiff {
 
 /// Resolved diff mode and normalized pathspecs.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct DiffArguments {
     /// What to diff.
     pub target: DiffTarget,
@@ -1428,6 +1430,7 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
 }
 
 /// Staged and unstaged file diffs for hunk id assignment (one staged scan per call).
+#[non_exhaustive]
 pub struct HunkDiffBundle {
     /// Unstaged side file rows.
     pub unstaged: Vec<FileDiff>,

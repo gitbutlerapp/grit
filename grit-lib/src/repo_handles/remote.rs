@@ -792,6 +792,7 @@ pub enum SetHead {
 
 /// Result of [`RepositoryRemotes::set_head`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SetHeadOutcome {
     /// New symref target, or `None` when deleted.
     pub target: Option<String>,
@@ -817,6 +818,7 @@ pub struct RemoveOptions {
 
 /// Outcome of removing a remote.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RemoteRemoval {
     /// Removed remote name.
     pub name: String,
@@ -989,6 +991,7 @@ pub enum RemoteUrlKind {
 
 /// Result of [`RepositoryRemotes::set_url`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct UrlChange {
     /// Previous URL for the selected kind, if any.
     pub old: Option<String>,
@@ -998,6 +1001,7 @@ pub struct UrlChange {
 
 /// A remote that has a `remote.<name>.*` section in config.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConfiguredRemote {
     /// Remote name (the config subsection).
     pub name: String,

@@ -5,9 +5,6 @@
 use grit_lib::change_id::ChangeId;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind, RenamedPaths};
-use grit_lib::porcelain::log::{CommitRefDecoration, DecorationKind, LoadedCommit};
-use grit_lib::porcelain::status::StatusModel;
-use grit_lib::state::HeadState;
 use serde_json::Value;
 
 fn assert_serialize<T: serde::Serialize + ?Sized>() {}
@@ -118,78 +115,14 @@ fn porcelain_dtos_serialize_to_stable_json_shapes() {
     let change_json = serde_json::to_value(&change_id).expect("change id");
     assert!(change_json.is_string());
 
-    let decoration = CommitRefDecoration {
-        name: "main".into(),
-        kind: DecorationKind::Branch,
-    };
-    let deco_json = serde_json::to_value(&decoration).expect("decoration");
-    assert_eq!(deco_json["kind"], Value::String("branch".into()));
-
-    let loaded = LoadedCommit {
-        oid,
-        parents: vec![],
-        author: sample_signature(),
-        committer: sample_signature(),
-        message: "m".into(),
-        refs: vec![decoration],
-        change_id,
-        change_id_stored: false,
-    };
-    let loaded_json = serde_json::to_value(&loaded).expect("LoadedCommit");
-    assert_eq!(loaded_json["author"]["email"], "ada@example.com");
-    assert_eq!(
-        loaded_json["committer"]["date"],
-        "2023-11-14T14:13:20-08:00"
-    );
-
-    let state = grit_lib::state::WtStatusState {
-        merge_in_progress: true,
-        ..Default::default()
-    };
-    let operation = grit_lib::state::status_operation(&state, true);
-    let status = StatusModel {
-        head: HeadState::Detached { oid },
-        head_tree: None,
-        state,
-        index: grit_lib::index::Index::new(),
-        staged: vec![],
-        unstaged: vec![],
-        untracked: vec![],
-        embedded_repositories: vec![],
-        ignored: vec![],
-        conflicts: vec!["a.txt".into()],
-        conflict_details: vec![Conflict {
-            path: "a.txt".into(),
-            kind: ConflictKind::BothModified,
-        }],
-        operation,
-        stash_count: 0,
-        index_sparse_on_disk: false,
-        sparse_directory_prefixes: vec![],
-        interrupted_rewrite: Some(
-            grit_lib::porcelain::status::InterruptedRewrite::FinishedCheckout,
-        ),
-    };
-    let status_json = serde_json::to_value(&status).expect("StatusModel");
-    assert_eq!(status_json["state"]["merge_in_progress"], true);
-    assert_eq!(status_json["conflict_details"][0]["path"], "a.txt");
-    assert_eq!(status_json["operation"]["kind"], "merge");
-    assert!(status_json["operation"]["next_steps"]
-        .as_array()
-        .is_some_and(|steps| !steps.is_empty()));
-    assert_eq!(
-        status_json["conflict_details"],
-        serde_json::json!([{"path": "a.txt", "kind": "both_modified"}])
-    );
-
-    let rename = Conflict {
-        path: "a".into(),
-        kind: ConflictKind::RenameRename(Box::new(RenamedPaths {
+    let rename = Conflict::new(
+        "a",
+        ConflictKind::RenameRename(Box::new(RenamedPaths {
             base_path: "a".into(),
             ours_path: "b".into(),
             theirs_path: "c".into(),
         })),
-    };
+    );
     assert_eq!(
         serde_json::to_value(&rename).expect("rename conflict"),
         serde_json::json!({
@@ -209,11 +142,7 @@ fn porcelain_dtos_serialize_to_stable_json_shapes() {
         ConflictKind::DeletedByUs,
         ConflictKind::DeletedByThem,
     ] {
-        let json = serde_json::to_value(Conflict {
-            path: "p".into(),
-            kind: kind.clone(),
-        })
-        .expect("conflict");
+        let json = serde_json::to_value(Conflict::new("p", kind.clone())).expect("conflict");
         assert_eq!(json["kind"], kind.as_str());
     }
 }
@@ -224,16 +153,15 @@ fn diff_entry_modes_serialize_as_octal_strings() {
     use grit_lib::objects::FileMode;
 
     let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
-    let entry = DiffEntry {
-        status: DiffStatus::TypeChanged,
-        old_path: Some("link".into()),
-        new_path: Some("link".into()),
-        old_mode: FileMode::REGULAR,
-        new_mode: FileMode::SYMLINK,
-        old_oid: oid,
-        new_oid: oid,
-        score: None,
-    };
+    let entry = DiffEntry::new(
+        DiffStatus::TypeChanged,
+        Some("link".into()),
+        Some("link".into()),
+        FileMode::REGULAR,
+        FileMode::SYMLINK,
+        oid,
+        oid,
+    );
     let json = serde_json::to_value(&entry).expect("DiffEntry");
     assert_eq!(json["old_mode"], "100644");
     assert_eq!(json["new_mode"], "120000");
@@ -251,13 +179,10 @@ fn errors_serialize_with_kind_and_message() {
     let err = grit_lib::error::Error::Cancelled;
     assert_eq!(err.kind_name(), "cancelled");
 
-    let err = grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError {
-        path: std::path::PathBuf::from(".git/index.lock"),
-        holder: Some(grit_lib::lockfile::LockHolder {
-            pid: 42,
-            running: true,
-        }),
-    });
+    let err = grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError::new(
+        std::path::PathBuf::from(".git/index.lock"),
+        Some(grit_lib::lockfile::LockHolder::new(42, true)),
+    ));
     let json = serde_json::to_value(&err).expect("LockHeld");
     assert_eq!(json["kind"], "lock_held");
     assert_eq!(json["area"], "lock_held");
@@ -275,11 +200,11 @@ fn errors_serialize_with_kind_and_message() {
 
 #[test]
 fn commit_author_info_serializes_rfc3339_date() {
-    let info = grit_lib::porcelain::commit::CommitAuthorInfo {
-        name: "Ada Lovelace".into(),
-        email: "ada@example.com".into(),
-        date: "1700000000 -0800".into(),
-    };
+    let info = grit_lib::porcelain::commit::CommitAuthorInfo::new(
+        "Ada Lovelace",
+        "ada@example.com",
+        "1700000000 -0800",
+    );
     let json = serde_json::to_value(&info).expect("CommitAuthorInfo");
     assert_eq!(
         json,
@@ -292,11 +217,9 @@ fn commit_author_info_serializes_rfc3339_date() {
 }
 
 #[test]
-fn index_entry_and_branch_summary_json_shapes() {
+fn index_entry_json_shape() {
     use grit_lib::index::IndexEntry;
     use grit_lib::objects::{FileMode, ObjectId};
-    use grit_lib::refs::branch_tracking::BranchSummary;
-    use time::OffsetDateTime;
 
     let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
     let entry = IndexEntry {
@@ -319,44 +242,20 @@ fn index_entry_and_branch_summary_json_shapes() {
     let json = serde_json::to_value(&entry).expect("IndexEntry");
     assert_eq!(json["path"], "src/main.rs");
     assert_eq!(json["mode"], "100644");
-
-    let summary = BranchSummary {
-        name: "main".into(),
-        full_ref: "refs/heads/main".into(),
-        is_remote: false,
-        current: true,
-        oid,
-        subject: Some("init".into()),
-        committer_time: Some(OffsetDateTime::UNIX_EPOCH),
-        upstream: None,
-        worktree: None,
-    };
-    let json = serde_json::to_value(&summary).expect("BranchSummary");
-    let date = json["committer_time"].as_str().expect("date");
-    assert!(
-        date == "1970-01-01T00:00:00+00:00" || date == "1970-01-01T00:00:00Z",
-        "{date}"
-    );
 }
 
 fn stash_and_branch_outcomes_serialize() {
     let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
-    let entry = grit_lib::stash::StashEntry {
-        index: 0,
-        oid,
-        message: "WIP on main".into(),
-    };
+    let entry = grit_lib::stash::StashEntry::new(0, oid, "WIP on main");
     let json = serde_json::to_value(&entry).expect("StashEntry");
     assert_eq!(json["oid"], oid.to_hex());
 
-    let list = grit_lib::porcelain::branch::BranchList {
-        current: Some("main".into()),
-        branches: vec![grit_lib::porcelain::branch::LocalBranch {
-            name: "main".into(),
-            oid,
-            current: true,
-        }],
-    };
+    let list = grit_lib::porcelain::branch::BranchList::new(
+        Some("main".into()),
+        vec![grit_lib::porcelain::branch::LocalBranch::new(
+            "main", oid, true,
+        )],
+    );
     let json = serde_json::to_value(&list).expect("BranchList");
     assert_eq!(json["branches"][0]["name"], "main");
 }

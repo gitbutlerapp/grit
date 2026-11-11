@@ -53,12 +53,29 @@ const MAX_UNFINISHED_FRACTION: f64 = 0.99;
 
 /// A snapshot of overall progress.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct OverallEstimate {
     /// Share of the whole operation done, from `0.0` to `1.0`. It never goes
     /// down between calls, and stays below `1.0` until every phase finished.
     pub fraction: f64,
     /// Estimated time until the operation finishes.
     pub remaining: Duration,
+}
+
+impl OverallEstimate {
+    /// Build an estimate snapshot.
+    ///
+    /// # Parameters
+    ///
+    /// - `fraction`: share of the operation done, from `0.0` to `1.0`.
+    /// - `remaining`: estimated time until the operation finishes.
+    #[must_use]
+    pub fn new(fraction: f64, remaining: Duration) -> Self {
+        Self {
+            fraction,
+            remaining,
+        }
+    }
 }
 
 /// The phases of a clone, in the order they run.
@@ -123,7 +140,7 @@ struct Active {
 /// let secs = Duration::from_secs;
 /// let mut est = OverallEstimator::new(true);
 /// est.start(ProgressPhase::ReceivingObjects, ProgressUnit::Bytes, None, secs(1));
-/// est.received_objects(ReceivedObjects { received: 500, total: 1_000, deltas: 300 }, secs(3));
+/// est.received_objects(ReceivedObjects::new(500, 1_000, 300), secs(3));
 /// let now = est.estimate(secs(3)).unwrap();
 /// assert!(now.fraction > 0.3 && now.fraction < 0.7);
 /// ```

@@ -208,6 +208,7 @@ fn set_head_delete() {
         target,
         previous_target,
         dry_run,
+        ..
     } = repo
         .remotes()
         .set_head("origin", SetHead::Delete, false, None)

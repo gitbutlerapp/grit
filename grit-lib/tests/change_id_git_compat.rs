@@ -61,18 +61,13 @@ fn change_id_header_passes_git_and_grit_fsck() {
         })
         .expect("read head");
     let tree = parse_commit(&head.data).expect("parse head").tree;
-    let mut data = CommitData {
+    let mut data = CommitData::new(
         tree,
-        parents: vec![],
-        author: "T <t@example.com> 1 +0000".into(),
-        committer: "T <t@example.com> 1 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "with change id\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        vec![],
+        "T <t@example.com> 1 +0000",
+        "T <t@example.com> 1 +0000",
+        "with change id\n",
+    );
     set_change_id(
         &mut data,
         &ChangeId::parse_reverse_hex("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").expect("id"),
@@ -156,18 +151,13 @@ fn signed_commit_keeps_change_id_before_gpgsig() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let tree = repo.odb().write(ObjectKind::Tree, b"").expect("empty tree");
-    let mut data = CommitData {
+    let mut data = CommitData::new(
         tree,
-        parents: vec![],
-        author: "T <t@example.com> 1700000000 +0000".into(),
-        committer: "T <t@example.com> 1700000000 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "signed change id\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        vec![],
+        "T <t@example.com> 1700000000 +0000",
+        "T <t@example.com> 1700000000 +0000",
+        "signed change id\n",
+    );
     set_change_id(&mut data, &ChangeId::from_bytes(&[0x11; 16]));
     let config = repo.config().snapshot().expect("config");
     let signed = repo.commits().prepare_bytes(&data, None).expect("sign");

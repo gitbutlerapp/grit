@@ -435,10 +435,10 @@ fn pull_rebase_conflict_stops_like_git_and_continues() {
     assert_eq!(outcome.autostash, None);
     assert_eq!(
         outcome.conflicts,
-        Some(vec![grit_lib::operation::Conflict {
-            path: "conflict.txt".into(),
-            kind: grit_lib::operation::ConflictKind::BothAdded,
-        }])
+        Some(vec![grit_lib::operation::Conflict::new(
+            "conflict.txt",
+            grit_lib::operation::ConflictKind::BothAdded
+        )])
     );
     assert_eq!(
         rev(&grit_dir, "refs/heads/main"),

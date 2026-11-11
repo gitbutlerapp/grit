@@ -68,18 +68,19 @@ Loose ref updates, `packed-refs`, the index, config, commit-graph, and reftable 
 
 When `.git/index.lock` is still held after the budget, [`stage`](rustdoc:grit_lib::index::IndexFile::stage_for_commit) and [`IndexLock::acquire`](rustdoc:grit_lib::index::IndexLock::acquire) return [`Error::LockHeld`](rustdoc:grit_lib::error::Error::LockHeld) with the lock `path`. The index is unchanged. Low-level loose-ref helpers use the same variant, while ref-store transactions retain `RefStoreError::LockHeld { name }`. Grit-owned index locks write a pid sidecar next to the lock (`index~pid.lock`) by default ([`grit_lockfile_pid_enabled`](rustdoc:grit_lib::lockfile::grit_lockfile_pid_enabled); set `core.lockfilePid=false` to opt out). The sidecar records the holder as a [`LockHolder`](rustdoc:grit_lib::lockfile::LockHolder); its `running` field records whether that process existed when checked. Converting [`LockError::Held`](rustdoc:grit_lib::lockfile::LockError::Held) with `?` preserves these fields; other `LockError` variants retain their I/O source. [`LockHolder::remove_if_stale`](rustdoc:grit_lib::lockfile::LockHolder::remove_if_stale) removes the lock and sidecar when the holder has exited (used during interrupted rewrite recovery; ordinary acquire never steals a foreign lock).
 
-For callers migrating from `Error::IndexLocked`, match `Error::LockHeld { path, holder }` instead of `{ lock_path, holder }`, and import `LockHolder` from `grit_lib::lockfile` instead of `grit_lib::error`. [`LockHolder::read`](rustdoc:grit_lib::lockfile::LockHolder::read) replaces the removed prose helper `format_index_lock_blocked_detail` when inspecting a pid sidecar directly. [`pid_path_for_lock`](rustdoc:grit_lib::lockfile::pid_path_for_lock) names the sidecar path for a lock file.
+For callers migrating from `Error::IndexLocked`, match `Error::LockHeld(LockHeldError { path, holder, .. })` instead of `{ lock_path, holder }`, and import `LockHolder` from `grit_lib::lockfile` instead of `grit_lib::error`. [`LockHolder::read`](rustdoc:grit_lib::lockfile::LockHolder::read) replaces the removed prose helper `format_index_lock_blocked_detail` when inspecting a pid sidecar directly. [`pid_path_for_lock`](rustdoc:grit_lib::lockfile::pid_path_for_lock) names the sidecar path for a lock file.
 
 ```rust
 use grit_lib::error::Error;
 use grit_lib::lockfile::LockHolder;
 
 fn explain(err: &Error) -> Option<String> {
-    let Error::LockHeld { path, holder } = err else {
+    let Error::LockHeld(held) = err else {
         return None;
     };
-    Some(match holder {
-        Some(LockHolder { running: false, pid }) => {
+    let path = &held.path;
+    Some(match held.holder {
+        Some(LockHolder { running: false, pid, .. }) => {
             format!("{} is stale (process {pid} exited); remove it", path.display())
         }
         Some(LockHolder { pid, .. }) => format!("process {pid} holds {}", path.display()),

@@ -386,10 +386,14 @@ mod tests {
                 anyhow::Error::new(grit_lib::error::Error::Hook(HookError::Failed {
                     hook_name: "pre-commit".into(),
                     status: 1,
-                    output: HookOutput {
-                        stdout: b"out\n".to_vec(),
-                        stderr: b"err\n".to_vec(),
-                    },
+                    output: HookOutput::new(
+                        b"out
+"
+                        .to_vec(),
+                        b"err
+"
+                        .to_vec(),
+                    ),
                 })),
                 ExitStatus::Failure,
             ),

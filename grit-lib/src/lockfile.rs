@@ -519,6 +519,7 @@ pub(crate) fn backoff_delay(lock_path: &Path, attempt: u32, jitter: &dyn LockJit
 /// With `core.lockfilePid` enabled, the lock owner writes `pid <n>` to a sidecar named after
 /// the lock (`index.lock` → `index~pid.lock`). Git and grit share this layout.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LockHolder {
     /// Process id read from the sidecar.
     pub pid: u64,
@@ -530,6 +531,17 @@ pub struct LockHolder {
 }
 
 impl LockHolder {
+    /// Build a lock-holder record.
+    ///
+    /// # Parameters
+    ///
+    /// - `pid`: process id recorded in the pid sidecar.
+    /// - `running`: whether that process exists right now.
+    #[must_use]
+    pub fn new(pid: u64, running: bool) -> Self {
+        Self { pid, running }
+    }
+
     /// Read the holder recorded for `lock_path` and probe whether it is still running.
     ///
     /// `lock_path` is the lock file itself (for example `.git/index.lock`).

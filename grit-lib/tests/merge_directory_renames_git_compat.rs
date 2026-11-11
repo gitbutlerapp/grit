@@ -394,12 +394,12 @@ fn reported_conflicts_name_the_directory_rename() {
 }
 
 fn moved_conflict() -> Conflict {
-    Conflict {
-        path: "b/new".into(),
-        kind: ConflictKind::DirectoryRenameMoved(Box::new(MovedPath {
+    Conflict::new(
+        "b/new",
+        ConflictKind::DirectoryRenameMoved(Box::new(MovedPath {
             original_path: "a/new".into(),
         })),
-    }
+    )
 }
 
 #[test]
@@ -558,10 +558,7 @@ fn split_directory_stops_without_unmerged_paths() {
     };
     assert_eq!(
         details,
-        vec![Conflict {
-            path: "a".into(),
-            kind: ConflictKind::DirectoryRenameSplit,
-        }]
+        vec![Conflict::new("a", ConflictKind::DirectoryRenameSplit)]
     );
     assert!(root.join(".git/MERGE_HEAD").exists());
     assert!(root.join("a/new").exists());
@@ -588,10 +585,7 @@ fn grit_reads_the_index_git_leaves_after_a_directory_rename_conflict() {
         .expect("index");
     assert_eq!(
         conflicts_from_index(&index),
-        vec![Conflict {
-            path: "b/new".into(),
-            kind: ConflictKind::AddedByThem,
-        }]
+        vec![Conflict::new("b/new", ConflictKind::AddedByThem)]
     );
 }
 
@@ -634,12 +628,12 @@ fn moved_file_conflicts_round_trip_through_conflicts_from_tree_merge() {
     .expect("merge trees");
     assert_eq!(
         conflicts_from_tree_merge(&merged),
-        vec![Conflict {
-            path: "b/f".into(),
-            kind: ConflictKind::DirectoryRenameMoved(Box::new(MovedPath {
+        vec![Conflict::new(
+            "b/f",
+            ConflictKind::DirectoryRenameMoved(Box::new(MovedPath {
                 original_path: "a/f".into(),
-            })),
-        }]
+            }))
+        )]
     );
 }
 

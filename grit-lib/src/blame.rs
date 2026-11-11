@@ -1391,6 +1391,7 @@ pub(crate) type PromisorHydrateHook = fn(&Repository, ObjectId);
 
 /// A single line attribution produced by [`compute_blame`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlameLine {
     /// Commit that last modified this line.
     pub oid: ObjectId,
@@ -5242,6 +5243,7 @@ impl BlameFinalSource {
 
 /// One blamed line returned by [`blame_file`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlameAttributedLine {
     /// Commit that last modified this line.
     pub commit: ObjectId,
@@ -5273,6 +5275,7 @@ pub struct BlameAttributedLine {
 
 /// A contiguous run of blamed lines sharing commit, path, and original line sequence.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlameHunk {
     /// Commit that last modified every line in this hunk.
     pub commit: ObjectId,
@@ -5299,6 +5302,7 @@ pub struct BlameHunk {
 
 /// Metadata for a commit referenced by [`BlameResult::lines`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlameCommitInfo {
     /// Author identity line (`Name <email> <epoch> <tz>`); empty when the commit has no
     /// `author` header. For uncommitted lines this is the placeholder identity Git reports
@@ -5312,6 +5316,7 @@ pub struct BlameCommitInfo {
 
 /// Full blame result for one file at one revision.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlameResult {
     /// Blamed lines in final-line order (after any line-range filter).
     pub lines: Vec<BlameAttributedLine>,

@@ -76,25 +76,15 @@ fn combined_paths_and_formatters() {
             .tree
     };
     let p1_oid = blob_oid_at_path(&odb, &p1_tree, "file.txt").expect("p1 blob");
-    let mut path = CombinedDiffPath {
-        path: "file.txt".to_owned(),
-        merge_mode: 0o100644,
-        merge_oid: blob_oid_at_path(&odb, &merge_tree, "file.txt").expect("merge blob"),
-        parents: vec![
-            CombinedParentSide {
-                status: CombinedParentStatus::Added,
-                mode: 0,
-                oid: zero_oid(),
-                rename_from: None,
-            },
-            CombinedParentSide {
-                status: CombinedParentStatus::Modified,
-                mode: 0o100644,
-                oid: p1_oid,
-                rename_from: None,
-            },
+    let mut path = CombinedDiffPath::new(
+        "file.txt",
+        0o100644,
+        blob_oid_at_path(&odb, &merge_tree, "file.txt").expect("merge blob"),
+        vec![
+            CombinedParentSide::new(0, zero_oid(), CombinedParentStatus::Added),
+            CombinedParentSide::new(0o100644, p1_oid, CombinedParentStatus::Modified),
         ],
-    };
+    );
     enrich_combined_path_renames(&odb, &mut path, &parents, &merge_tree, 50);
     let blob = read_blob_at_path(&odb, &merge_tree, "file.txt").expect("read");
     let cfg = ConfigSet::new();

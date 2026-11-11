@@ -429,6 +429,7 @@ pub struct MergeTreeStage {
 
 /// A three-way merge result stored in the object database ([`write_merge_tree`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WrittenMergeTree {
     /// Merged tree, present in the object database. Conflicted files hold conflict-marker
     /// content, exactly like the tree `git merge-tree --write-tree` writes.
@@ -1488,6 +1489,7 @@ pub struct ContinueOptions {
 
 /// Result of [`continue_merge`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ContinueOutcome {
     /// New merge commit OID.
     pub oid: ObjectId,

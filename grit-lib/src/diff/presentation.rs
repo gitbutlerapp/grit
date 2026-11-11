@@ -10,6 +10,7 @@ use super::{DiffStatus, InexactRenameDetectionSkipped, TreeDiffStructured};
 
 /// One structured hunk optionally decorated with a stable [`HunkId`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AnnotatedStructuredHunk {
     /// The hunk body and line metadata.
     pub hunk: StructuredHunk,

@@ -32,6 +32,7 @@ impl Default for FsckObjectOptions {
 
 /// Git-compatible fsck failure for loose object validation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FsckError {
     /// CamelCase message id (e.g. `missingTree`).
     pub id: &'static str,

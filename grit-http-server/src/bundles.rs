@@ -290,9 +290,9 @@ pub fn build(
 /// `manifest`, on a server reached at `base_url` (`http://host:port`).
 #[must_use]
 pub fn bundle_list(manifest: &BundleManifest, base_url: &str, name: &str) -> BundleList {
-    BundleList {
-        mode: BundleListMode::All,
-        bundles: vec![BundleListEntry {
+    BundleList::new(
+        BundleListMode::All,
+        vec![BundleListEntry {
             id: "clone".to_owned(),
             uri: format!(
                 "{}/{name}/{BUNDLES_PATH}/{}",
@@ -303,7 +303,7 @@ pub fn bundle_list(manifest: &BundleManifest, base_url: &str, name: &str) -> Bun
             // (2.50) skips advertised lists that use it during a clone.
             creation_token: None,
         }],
-    }
+    )
 }
 
 /// The background thread that keeps every repository's bundle current.

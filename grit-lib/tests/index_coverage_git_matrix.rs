@@ -186,7 +186,11 @@ fn index_lock_held_reports_lock_path() {
     let lock_path = tmp.path().join("index.lock");
     fs::write(&lock_path, b"").expect("touch lock");
     match IndexLock::acquire(&path, None) {
-        Err(grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError { path, holder })) => {
+        Err(grit_lib::error::Error::LockHeld(grit_lib::error::LockHeldError {
+            path,
+            holder,
+            ..
+        })) => {
             assert_eq!(path, lock_path);
             assert_eq!(holder, None);
         }

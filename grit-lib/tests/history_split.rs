@@ -304,18 +304,13 @@ fn split_in_bare_repository() {
         .odb()
         .write(
             grit_lib::objects::ObjectKind::Commit,
-            &grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData {
-                tree: empty,
-                parents: vec![],
-                author: committer(0),
-                committer: committer(0),
-                author_raw: vec![],
-                committer_raw: vec![],
-                encoding: None,
-                message: "root\n".into(),
-                raw_message: None,
-                extra_headers: vec![],
-            }),
+            &grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData::new(
+                empty,
+                vec![],
+                committer(0),
+                committer(0),
+                "root\n",
+            )),
         )
         .expect("root commit");
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &root).expect("ref");
@@ -347,18 +342,13 @@ fn split_in_bare_repository() {
         .odb()
         .write(
             grit_lib::objects::ObjectKind::Commit,
-            &grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData {
-                tree: child_tree,
-                parents: vec![root],
-                author: committer(1),
-                committer: committer(1),
-                author_raw: vec![],
-                committer_raw: vec![],
-                encoding: None,
-                message: "tip\n".into(),
-                raw_message: None,
-                extra_headers: vec![],
-            }),
+            &grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData::new(
+                child_tree,
+                vec![root],
+                committer(1),
+                committer(1),
+                "tip\n",
+            )),
         )
         .expect("tip");
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &tip).expect("update tip");

@@ -267,28 +267,26 @@ fn asymmetric_matrix_exact_matches_still_pair() {
 
     let mut entries = Vec::new();
     for i in 0..5 {
-        entries.push(DiffEntry {
-            status: DiffStatus::Deleted,
-            old_path: Some(format!("old{i}.txt")),
-            new_path: None,
-            old_mode: FileMode::REGULAR,
-            new_mode: FileMode::ABSENT,
-            old_oid: oid,
-            new_oid: zero_oid(),
-            score: None,
-        });
+        entries.push(DiffEntry::new(
+            DiffStatus::Deleted,
+            Some(format!("old{i}.txt")),
+            None,
+            FileMode::REGULAR,
+            FileMode::ABSENT,
+            oid,
+            zero_oid(),
+        ));
     }
     for i in 0..50 {
-        entries.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(format!("new{i}.txt")),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: zero_oid(),
-            new_oid: oid,
-            score: None,
-        });
+        entries.push(DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some(format!("new{i}.txt")),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            zero_oid(),
+            oid,
+        ));
     }
 
     let detected = repo

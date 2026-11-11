@@ -56,18 +56,13 @@ fn commit_file(
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let commit = objects::CommitData {
+    let commit = objects::CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: "T <t@t> 0 +0000".into(),
-        committer: "T <t@t> 0 +0000".into(),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "c\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        "T <t@t> 0 +0000",
+        "T <t@t> 0 +0000",
+        "c\n",
+    );
     let co = repo
         .odb()
         .write(

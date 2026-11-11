@@ -476,18 +476,13 @@ fn apply_rewrite_bare_repository() {
     )
     .expect("open bare");
     let empty = grit.odb().write(ObjectKind::Tree, &[]).expect("tree");
-    let commit = grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData {
-        tree: empty,
-        parents: vec![],
-        author: committer(0),
-        committer: committer(0),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "root\n".into(),
-        raw_message: None,
-        extra_headers: vec![],
-    });
+    let commit = grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData::new(
+        empty,
+        vec![],
+        committer(0),
+        committer(0),
+        "root\n",
+    ));
     let oid = grit
         .odb()
         .write(ObjectKind::Commit, &commit)
@@ -1118,7 +1113,7 @@ fn interrupted_rewrite_apply_waits_for_index_lock_holder() {
                 if matches!(
                     e.as_ref(),
                     grit_lib::revwalk::history::HistoryEngineError::LockHeld(
-                        grit_lib::error::LockHeldError { path, holder: Some(h) }
+                        grit_lib::error::LockHeldError { path, holder: Some(h), .. }
                     ) if *path == lock && h.running
                 )
         ),

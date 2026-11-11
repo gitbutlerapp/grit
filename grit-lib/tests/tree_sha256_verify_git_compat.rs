@@ -390,15 +390,13 @@ fn changed_blob_detected() {
         .trim()
         .parse()
         .unwrap();
-    let mut tag = TagData {
-        object: commit2,
-        object_type: "commit".into(),
-        tag: "stale-digest".into(),
-        tagger: Some("T <t@example.com> 1 +0000".into()),
-        extra_headers: Vec::new(),
-        message: "body\n".into(),
-        raw_message: None,
-    };
+    let mut tag = TagData::new(
+        commit2,
+        "commit",
+        "stale-digest",
+        Some("T <t@example.com> 1 +0000".into()),
+        "body\n",
+    );
     set_extra_header(
         &mut tag.extra_headers,
         TREE_SHA256_HEADER,
@@ -434,15 +432,13 @@ fn unsigned_tag_with_header_reports_missing_signature() {
         .unwrap();
     let repo = Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("open");
     let digest = tree_sha256_digest(&repo, commit);
-    let mut tag = TagData {
-        object: commit,
-        object_type: "commit".into(),
-        tag: "unsigned".into(),
-        tagger: Some("T <t@example.com> 1 +0000".into()),
-        extra_headers: Vec::new(),
-        message: "body\n".into(),
-        raw_message: None,
-    };
+    let mut tag = TagData::new(
+        commit,
+        "commit",
+        "unsigned",
+        Some("T <t@example.com> 1 +0000".into()),
+        "body\n",
+    );
     set_extra_header(
         &mut tag.extra_headers,
         TREE_SHA256_HEADER,
@@ -1120,10 +1116,10 @@ fn verify_tag_deep_nested_missing_submodule_path_from_root() {
     assert_eq!(verification.tree_sha256, None);
     assert_eq!(
         verification.missing_submodules,
-        vec![MissingSubmodule {
-            path: "inner/mid/leaf".to_owned(),
-            reason: MissingSubmoduleReason::NotCheckedOut,
-        }]
+        vec![MissingSubmodule::new(
+            "inner/mid/leaf",
+            MissingSubmoduleReason::NotCheckedOut
+        )]
     );
     assert!(!verification.is_ok());
 }

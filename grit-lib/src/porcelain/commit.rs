@@ -173,6 +173,7 @@ pub(crate) fn run_commit_message_hooks(
 
 /// Author name, email, and date suffix from a written commit header line.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CommitAuthorInfo {
     /// Author display name.
     pub name: String,
@@ -183,6 +184,22 @@ pub struct CommitAuthorInfo {
 }
 
 impl CommitAuthorInfo {
+    /// Build author info.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: author name.
+    /// - `email`: author email.
+    /// - `date`: date suffix (`<seconds> <tz>`).
+    #[must_use]
+    pub fn new(name: impl Into<String>, email: impl Into<String>, date: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            email: email.into(),
+            date: date.into(),
+        }
+    }
+
     /// Parse [`Self::name`], [`Self::email`], and [`Self::date`] as a [`Signature`].
     #[must_use]
     pub fn signature(&self) -> Signature {
@@ -293,6 +310,7 @@ impl CommitRequest {
 /// One path-level change that would be recorded in a commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct CommitFile {
     /// Primary path (`git diff --name-status` path column).
     pub path: String,
@@ -304,6 +322,7 @@ pub struct CommitFile {
 
 /// Planned commit contents and metadata (see [`plan_commit`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CommitPlan {
     /// Paths that differ from the parent tree, in `git diff --name-status` order.
     pub files: Vec<CommitFile>,
@@ -932,6 +951,7 @@ fn enrich_commit_message(
 /// Result of [`create_commit`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct CommitOutcome {
     /// OID of the new commit object written to the object database.
     pub oid: ObjectId,

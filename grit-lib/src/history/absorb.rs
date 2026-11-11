@@ -58,6 +58,7 @@ pub struct HunkRange {
 
 /// A staged hunk assigned to a historical commit.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HunkAssignment {
     /// Repository-relative path.
     pub path: String,
@@ -112,6 +113,7 @@ pub enum UnassignedReason {
 
 /// A local branch tip excluded from the absorb stack when `--base` is omitted.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AbsorbExcludedRef {
     /// Full ref name (for example `refs/heads/review`).
     pub ref_name: String,
@@ -153,6 +155,7 @@ fn format_hidden_by_ref_message(refs: &[AbsorbExcludedRef]) -> String {
 
 /// A staged hunk left in the index.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct UnassignedHunk {
     /// Repository-relative path.
     pub path: String,
@@ -166,6 +169,7 @@ pub struct UnassignedHunk {
 
 /// Result of [`History::absorb`](super::History::absorb): rewrite plan plus assignment detail.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AbsorbPlan {
     /// Combined rewrite for every assigned target.
     pub plan: RewritePlan,

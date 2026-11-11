@@ -91,18 +91,13 @@ fn grit_pick(repo: &Repository, source_hex: &str) -> grit_lib::error::Result<()>
     grit_lib::diff::merge_trees::apply_tree_merge_output_to_index(&mut index, &merged);
     index_handle.write(&mut index)?;
     repo.checkout().checkout(Some(&head_tree), &new_tree)?;
-    let commit_data = CommitData {
-        tree: new_tree,
-        parents: vec![head_oid],
-        author: source.author.clone(),
-        committer: source.committer.clone(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: source.message.clone(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let commit_data = CommitData::new(
+        new_tree,
+        vec![head_oid],
+        source.author.clone(),
+        source.committer.clone(),
+        source.message.clone(),
+    );
     let new_oid = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit_data))?;

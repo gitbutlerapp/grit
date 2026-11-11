@@ -321,6 +321,7 @@ pub enum BaseSource {
 /// A resolved branch that another branch is measured against.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ComparisonBase {
     /// Short display name: the full ref abbreviated (`origin/main`) for an upstream, or the
     /// candidate as configured or listed in [`DEFAULT_TARGET_CANDIDATES`] for a target.
@@ -354,6 +355,7 @@ pub struct TargetComparisonOptions {
 /// Ahead-of-target view of the current branch (`grit shortlog` / `grit ahead`).
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct TargetComparison {
     /// Current branch short name.
     pub branch: String,
@@ -756,6 +758,7 @@ pub struct StandingOptions {
 
 /// Symmetric comparison of the current branch tip against one tracked ref (target or upstream).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TrackedComparison {
     /// Short display name (`origin/main`, `main`, …).
     pub name: String,
@@ -791,6 +794,7 @@ pub enum StandingHeader {
 
 /// Target and upstream standing for the current HEAD (status header / JSON).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BranchStanding {
     /// Current branch short name, or `None` when HEAD is detached or invalid.
     pub branch: Option<String>,
@@ -898,6 +902,7 @@ pub enum StatusIntegrationAction {
 
 /// Footer hint for integrating commits the branch is behind.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StatusIntegrationHint {
     /// Suggested command kind.
     pub action: StatusIntegrationAction,
@@ -1258,6 +1263,7 @@ impl TargetTipLists {
 
 /// Symmetric comparison of a branch tip with a base commit.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TipComparison {
     /// Commits reachable from the tip but not from the base (full count).
     pub ahead: usize,

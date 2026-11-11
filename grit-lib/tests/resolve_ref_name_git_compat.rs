@@ -43,7 +43,7 @@ fn assert_ref_names(repo: &Repository, wt: &std::path::Path, spec: &str) {
         let git_line = git_rev_parse_ref(wt, abbrev, spec);
         match (&grit, &git_line) {
             (None, None) => {}
-            (Some(ResolvedRefName { full, short }), Some(expected)) => {
+            (Some(ResolvedRefName { full, short, .. }), Some(expected)) => {
                 let grit_out = if abbrev { short } else { full };
                 assert_eq!(
                     grit_out, expected,

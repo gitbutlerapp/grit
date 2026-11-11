@@ -431,6 +431,8 @@ mod object_write_regression;
 mod repository_config_snapshot_tests;
 #[cfg(test)]
 mod rustdoc_placeholder_guard;
+#[cfg(all(test, feature = "serde-models"))]
+mod serde_model_tests;
 #[cfg(test)]
 mod status_clean_tree_regression;
 #[cfg(test)]

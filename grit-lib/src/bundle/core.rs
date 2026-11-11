@@ -69,6 +69,7 @@ impl FilterSpec {
 
 /// Parsed bundle header (everything before the `PACK` stream).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BundleHeader {
     /// Header version (`2` or `3`).
     pub version: BundleVersion,
@@ -94,6 +95,7 @@ pub struct UnbundledRef {
 
 /// Result of ingesting a bundle's embedded pack into a repository.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct UnbundleOutcome {
     /// Ref tips from the bundle header (refs are not updated on disk by unbundle).
     pub refs: Vec<UnbundledRef>,
@@ -105,6 +107,7 @@ pub struct UnbundleOutcome {
 
 /// Outcome of [`Bundle::verify`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BundleVerifyReport {
     /// Prerequisites missing from the object database.
     pub missing_prerequisites: Vec<(ObjectId, Option<String>)>,
@@ -288,6 +291,7 @@ pub struct BundlePrerequisite {
 
 /// Planned bundle contents without writing a file.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BundleCreatePlan {
     /// Ref tips that would be listed in the header.
     pub refs: Vec<BundleRefEntry>,
@@ -299,6 +303,7 @@ pub struct BundleCreatePlan {
 
 /// One ref movement that would occur when applying bundle header tips locally.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BundleRefUpdatePlan {
     /// Ref to update.
     pub name: String,
@@ -310,6 +315,7 @@ pub struct BundleRefUpdatePlan {
 
 /// Planned unbundle work: verification outcome and ref updates without ingesting the pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BundleUnbundlePlan {
     /// Verification against the open repository.
     pub verify: BundleVerifyReport,

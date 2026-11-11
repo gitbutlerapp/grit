@@ -106,6 +106,7 @@ impl ResetOptions {
 /// Non-mutating preview of [`reset_to_commit`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ResetPreview {
     /// Tracked paths whose staged or unstaged edits a hard reset would discard.
     pub would_overwrite: Vec<String>,
@@ -124,6 +125,7 @@ pub struct ResetPreview {
 /// Result of [`reset_to_commit`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ResetOutcome {
     /// `soft`, `mixed`, `hard`, or `keep`.
     pub mode: ResetMode,

@@ -25,18 +25,13 @@ fn commit_from_tree(
     parents: &[grit_lib::objects::ObjectId],
     message: &str,
 ) -> grit_lib::error::Result<grit_lib::objects::ObjectId> {
-    let commit = CommitData {
+    let commit = CommitData::new(
         tree,
-        parents: parents.to_vec(),
-        author: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        committer: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: message.to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parents.to_vec(),
+        "Example <example@example.com> 1700000000 +0000",
+        "Example <example@example.com> 1700000000 +0000",
+        message,
+    );
     repo.odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
 }

@@ -20,6 +20,7 @@ use crate::check_ref_format::{check_refname_format, RefFormatOptions};
 /// Holds a parsed refspec, capturing the
 /// modifier flags and the source/destination sides of the mapping.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefspecItem {
     /// The `+` modifier was present (force / non-fast-forward update).
     pub force: bool,

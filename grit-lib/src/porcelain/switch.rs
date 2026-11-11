@@ -88,6 +88,7 @@ pub struct SwitchOptions {
 /// Result of [`switch_repository`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct SwitchOutcome {
     /// Short name of the branch `HEAD` is on after the switch, or `None` when `HEAD` is detached.
     pub branch: Option<String>,

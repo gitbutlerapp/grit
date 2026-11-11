@@ -46,18 +46,13 @@ fn commit_tree(
     if let Some(p) = parent {
         parents.push(p);
     }
-    let commit = CommitData {
-        tree: tree_oid,
+    let commit = CommitData::new(
+        tree_oid,
         parents,
-        author: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        committer: "Example <example@example.com> 1700000000 +0000".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        "Example <example@example.com> 1700000000 +0000",
+        "Example <example@example.com> 1700000000 +0000",
+        format!("{message}\n"),
+    );
     repo.odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
 }

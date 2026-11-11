@@ -32,6 +32,7 @@ pub struct ExpireOptions {
 
 /// Per-ref prune count from [`RepositoryReflogs::expire`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefExpireResult {
     /// Full ref name (for example `refs/heads/main` or `HEAD`).
     pub ref_name: String,
@@ -41,6 +42,7 @@ pub struct RefExpireResult {
 
 /// Summary returned by [`RepositoryReflogs::expire`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReflogExpireOutcome {
     /// Total reflog entries removed across all processed refs.
     pub entries_pruned: usize,
@@ -52,6 +54,7 @@ pub struct ReflogExpireOutcome {
 
 /// One reflog line with its newest-first index (`0` is the latest entry).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IndexedReflogEntry {
     /// Index in newest-first order (`ref@{{index}}`).
     pub index: usize,
@@ -76,6 +79,7 @@ pub struct ReflogQuery {
 
 /// One page of reflog query results.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReflogPage {
     /// Matching entries in newest-first order with global reflog indices.
     pub entries: Vec<IndexedReflogEntry>,

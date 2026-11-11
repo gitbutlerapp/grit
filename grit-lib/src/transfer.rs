@@ -185,6 +185,7 @@ pub(crate) struct FetchApplyReflog<'a> {
 /// The resolved outcome of one reference during a fetch.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RefUpdate {
     /// The remote-side ref name (e.g. `refs/heads/main`).
     pub remote_ref: String,
@@ -198,6 +199,28 @@ pub struct RefUpdate {
     pub mode: UpdateMode,
     /// Optional human-readable note (reason text), for embedder display.
     pub note: Option<String>,
+}
+
+impl RefUpdate {
+    /// Build an update for `remote_ref` with no local ref, object ids or note.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote_ref`: the remote-side ref name.
+    /// - `mode`: how the update resolved.
+    #[must_use]
+    pub fn new(remote_ref: impl Into<String>, mode: UpdateMode) -> Self {
+        Self {
+            remote_ref: remote_ref.into(),
+            local_ref: None,
+            old_oid: None,
+            new_oid: None,
+            mode,
+            note: None,
+        }
+    }
 }
 
 /// Which tags to fetch alongside the requested refs.
@@ -661,8 +684,9 @@ pub fn resolve_fetch_tags(
 }
 
 /// Object and byte counts for objects received during a fetch or clone.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct TransferStats {
     /// Objects installed from the received pack (zero when nothing was transferred).
     pub objects: u64,
@@ -709,6 +733,7 @@ impl std::ops::AddAssign for TransferStats {
 /// The structured result of a fetch, ready for the embedder's ref-store apply.
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct FetchOutcome {
     /// Per-ref resolved updates.
     pub updates: Vec<RefUpdate>,
@@ -1105,6 +1130,7 @@ impl PrePushGate<'_> {
 /// The structured result of a push. Reuses [`PushRefResult`] for per-ref status.
 #[derive(Clone, Debug, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PushOutcome {
     /// Per-ref resolved results (status, old/new oid, reason).
     pub results: Vec<PushRefResult>,

@@ -8,6 +8,7 @@ use crate::error::{NotARepositoryReason, PathIoError};
 
 /// One or more unknown `extensions.*` keys (repository format version ≥ 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct UnknownRepositoryExtensions {
     /// Extension names from the config file, in sorted order.
     pub extensions: Vec<String>,
@@ -30,6 +31,7 @@ impl fmt::Display for UnknownRepositoryExtensions {
 
 /// Format version 0 with `extensions.*` keys that require format version 1.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct V1OnlyExtensionsInFormatZero {
     /// Extension names from the config file, in sorted order.
     pub extensions: Vec<String>,

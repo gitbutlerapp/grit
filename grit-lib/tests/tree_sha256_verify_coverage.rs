@@ -20,29 +20,23 @@ fn public_tag_verify_types() {
             check_signature: false,
             gpg: GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
         },
-        TagVerification {
-            signature: SignatureVerdict::NotChecked,
-            tree_sha256: None,
-            missing_submodules: vec![],
+        TagVerification::new(SignatureVerdict::NotChecked, None, vec![]),
+        {
+            let mut verdict = TreeSha256Verdict::new(
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .parse()
+                    .unwrap(),
+                "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+                    .parse()
+                    .unwrap(),
+            );
+            verdict
         },
-        TreeSha256Verdict {
-            claimed: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                .parse()
-                .unwrap(),
-            computed: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-                .parse()
-                .unwrap(),
-            excluded: vec![],
-            bogus_excluded: vec![],
-            cycles: vec![],
-            files: 0,
-            submodules: 0,
-        },
-        TreeSha256TagHeaders {
-            target: "0000000000000000000000000000000000000001".parse().unwrap(),
-            claimed: None,
-            excluded: vec![],
-        },
+        TreeSha256TagHeaders::new(
+            "0000000000000000000000000000000000000001".parse().unwrap(),
+            None,
+            vec![],
+        ),
     );
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &grit_lib::repo::InitOptions::default()).unwrap();
@@ -73,14 +67,10 @@ fn public_verify_tag_by_name() {
     ));
     let lightweight = TagError::Lightweight { name: "v1".into() };
     assert_eq!(lightweight.to_string(), "tag 'v1' is lightweight");
-    let _ = VerifiedTag {
-        name: "v1".into(),
-        oid: "0000000000000000000000000000000000000001".parse().unwrap(),
-        target: "0000000000000000000000000000000000000002".parse().unwrap(),
-        verification: TagVerification {
-            signature: SignatureVerdict::NotChecked,
-            tree_sha256: None,
-            missing_submodules: vec![],
-        },
-    };
+    let _ = VerifiedTag::new(
+        "v1",
+        "0000000000000000000000000000000000000001".parse().unwrap(),
+        "0000000000000000000000000000000000000002".parse().unwrap(),
+        TagVerification::new(SignatureVerdict::NotChecked, None, vec![]),
+    );
 }

@@ -139,15 +139,13 @@ fn grit_written_tag_extra_headers_pass_git_fsck_strict() {
         .parse()
         .expect("oid");
 
-    let mut tag = TagData {
-        object: commit,
-        object_type: "commit".into(),
-        tag: "with-extra".into(),
-        tagger: Some("T <t@example.com> 1 +0000".into()),
-        extra_headers: Vec::new(),
-        message: "tag body\n".into(),
-        raw_message: None,
-    };
+    let mut tag = TagData::new(
+        commit,
+        "commit",
+        "with-extra",
+        Some("T <t@example.com> 1 +0000".into()),
+        "tag body\n",
+    );
     set_extra_header(
         &mut tag.extra_headers,
         "tree-sha256",
@@ -176,16 +174,18 @@ fn grit_fsck_ignores_tag_extra_headers() {
         .parse()
         .expect("oid");
 
-    let tag = TagData {
-        object: commit,
-        object_type: "commit".into(),
-        tag: "fsck-extra".into(),
-        tagger: Some("T <t@example.com> 1 +0000".into()),
-        extra_headers:
+    let tag = {
+        let mut tag = TagData::new(
+            commit,
+            "commit",
+            "fsck-extra",
+            Some("T <t@example.com> 1 +0000".into()),
+            "body\n",
+        );
+        tag.extra_headers =
             b"tree-sha256 e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n"
-                .to_vec(),
-        message: "body\n".into(),
-        raw_message: None,
+                .to_vec();
+        tag
     };
     let bytes = serialize_tag(&tag);
     let tag_oid = repo

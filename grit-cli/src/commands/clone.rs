@@ -302,8 +302,12 @@ fn clone_into(
         _ => (None, None, None),
     };
     let elapsed = started.elapsed();
-    let transfer = TransferSummary::new(outcome.transfer, term_progress.phases().to_vec(), elapsed)
-        .with_milestones(term_progress.milestones().to_vec());
+    let transfer = TransferSummary::new(
+        outcome.transfer.clone(),
+        term_progress.phases().to_vec(),
+        elapsed,
+    )
+    .with_milestones(term_progress.milestones().to_vec());
 
     let (branch, detached, tag) = match &outcome.head {
         CloneHead::Branch(name) => (Some(name.clone()), false, None),

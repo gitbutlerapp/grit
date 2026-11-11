@@ -117,6 +117,7 @@ pub struct ReplaySequenceRequest {
 
 /// One commit produced by a replay step, paired with its source.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReplayCreated {
     /// Commit that was cherry-picked or reverted.
     pub source: ObjectId,
@@ -126,6 +127,31 @@ pub struct ReplayCreated {
     pub change_id: Option<ChangeId>,
     /// First non-blank line of `new_oid`'s message, trimmed (empty when the message is blank).
     pub subject: String,
+}
+
+impl ReplayCreated {
+    /// Build a replayed-commit record.
+    ///
+    /// # Parameters
+    ///
+    /// - `source`: the commit that was replayed.
+    /// - `new_oid`: the commit the replay created.
+    /// - `change_id`: the new commit's change id, when it has one.
+    /// - `subject`: the new commit's subject line.
+    #[must_use]
+    pub fn new(
+        source: ObjectId,
+        new_oid: ObjectId,
+        change_id: Option<ChangeId>,
+        subject: impl Into<String>,
+    ) -> Self {
+        Self {
+            source,
+            new_oid,
+            change_id,
+            subject: subject.into(),
+        }
+    }
 }
 
 /// In-memory prediction of [`start_replay_sequence`] (no refs, index, worktree, or on-disk object writes).

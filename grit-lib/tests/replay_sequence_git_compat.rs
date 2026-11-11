@@ -318,10 +318,7 @@ fn commit_after_pick_conflict_finishes_sequence_issue_2262() {
     .expect("pick");
     fs::write(root.path().join("f.txt"), "a\nRES\nc\n").unwrap();
 
-    let req = {
-        let mut req = CommitRequest::new("resolved pick".to_owned());
-        req
-    };
+    let req = CommitRequest::new("resolved pick".to_owned());
     let mut progress = NullProgress;
     repo.commits()
         .create(
@@ -1024,18 +1021,18 @@ fn continue_after_range_conflict_pairs_all_created_sources() {
     assert_eq!(
         created,
         vec![
-            ReplayCreated {
-                source: c1,
-                new_oid: created[0].new_oid,
-                change_id: created[0].change_id.clone(),
-                subject: "t1 conflict".into(),
-            },
-            ReplayCreated {
-                source: c2,
-                new_oid: created[1].new_oid,
-                change_id: created[1].change_id.clone(),
-                subject: "t2 clean".into(),
-            },
+            ReplayCreated::new(
+                c1,
+                created[0].new_oid,
+                created[0].change_id.clone(),
+                "t1 conflict"
+            ),
+            ReplayCreated::new(
+                c2,
+                created[1].new_oid,
+                created[1].change_id.clone(),
+                "t2 clean"
+            ),
         ]
     );
     assert_ne!(created[0].new_oid, created[1].new_oid);

@@ -46,18 +46,13 @@ fn write_linear_commits(repo: &Repository, count: usize) -> grit_lib::objects::O
         let tree = write_tree_from_index(repo.odb(), &index, "").expect("tree");
         let ts = 1_700_000_000i64 + i as i64;
         let ident = format!("T <t@example.com> {ts} +0000");
-        let raw = serialize_commit(&CommitData {
+        let raw = serialize_commit(&CommitData::new(
             tree,
-            parents: parent.into_iter().collect(),
-            author: ident.clone(),
-            committer: ident,
-            author_raw: Vec::new(),
-            committer_raw: Vec::new(),
-            encoding: None,
-            message: format!("c{i}\n"),
-            raw_message: None,
-            extra_headers: Vec::new(),
-        });
+            parent.into_iter().collect(),
+            ident.clone(),
+            ident,
+            format!("c{i}\n"),
+        ));
         tip = repo.odb().write(ObjectKind::Commit, &raw).expect("commit");
         parent = Some(tip);
     }

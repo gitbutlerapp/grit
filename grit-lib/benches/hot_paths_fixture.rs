@@ -356,18 +356,13 @@ fn commit_all(repo: &Repository, message: &str) -> Result<ObjectId> {
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     let parent = repo.references().resolve("HEAD").ok();
-    let commit_data = CommitData {
+    let commit_data = CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: BENCH_IDENT.to_owned(),
-        committer: BENCH_IDENT.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        BENCH_IDENT,
+        BENCH_IDENT,
+        format!("{message}\n"),
+    );
     let bytes = serialize_commit(&commit_data);
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &oid)?;
@@ -475,18 +470,13 @@ fn write_tree_commit(
     parents: &[ObjectId],
     message: &str,
 ) -> ObjectId {
-    let commit_data = CommitData {
+    let commit_data = CommitData::new(
         tree,
-        parents: parents.to_vec(),
-        author: BENCH_IDENT.to_owned(),
-        committer: BENCH_IDENT.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parents.to_vec(),
+        BENCH_IDENT,
+        BENCH_IDENT,
+        format!("{message}\n"),
+    );
     let bytes = serialize_commit(&commit_data);
     repo.odb()
         .write(ObjectKind::Commit, &bytes)

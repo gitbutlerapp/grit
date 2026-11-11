@@ -18,6 +18,7 @@ const FORMAT_VERSION: u32 = 1;
 
 /// Parsed `.git/grit/history-last` contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HistoryLastRecord {
     /// Operation that produced this record (`drop`, `rebase`, `undo`, …).
     pub operation: String,

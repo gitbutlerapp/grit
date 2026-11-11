@@ -38,6 +38,7 @@ pub enum WorktreeRepairKind {
 
 /// One repair action recorded by [`repair_worktrees`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WorktreeRepair {
     /// Working tree root that was repaired.
     pub path: PathBuf,

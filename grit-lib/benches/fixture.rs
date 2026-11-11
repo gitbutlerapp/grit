@@ -188,18 +188,13 @@ fn grit_record_commit(
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())?;
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
-    let commit_data = CommitData {
+    let commit_data = CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: BENCH_IDENT.to_owned(),
-        committer: BENCH_IDENT.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        BENCH_IDENT,
+        BENCH_IDENT,
+        format!("{message}\n"),
+    );
     let bytes = serialize_commit(&commit_data);
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &oid)?;

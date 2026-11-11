@@ -19,26 +19,24 @@ fn disjoint_f_vs_g_entries(n: usize) -> (TempDir, Repository, Vec<DiffEntry>) {
         let new_oid = odb
             .write(ObjectKind::Blob, format!("new payload {i}\n").as_bytes())
             .expect("new blob");
-        entries.push(DiffEntry {
-            status: DiffStatus::Deleted,
-            old_path: Some(format!("a/d{}/f{}.txt", i / 50, i % 50)),
-            new_path: None,
-            old_mode: FileMode::REGULAR,
-            new_mode: FileMode::ABSENT,
+        entries.push(DiffEntry::new(
+            DiffStatus::Deleted,
+            Some(format!("a/d{}/f{}.txt", i / 50, i % 50)),
+            None,
+            FileMode::REGULAR,
+            FileMode::ABSENT,
             old_oid,
-            new_oid: zero_oid(),
-            score: None,
-        });
-        entries.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(format!("b/d{}/g{}.txt", i / 50, i % 50)),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: zero_oid(),
+            zero_oid(),
+        ));
+        entries.push(DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some(format!("b/d{}/g{}.txt", i / 50, i % 50)),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            zero_oid(),
             new_oid,
-            score: None,
-        });
+        ));
     }
     (root, repo, entries)
 }

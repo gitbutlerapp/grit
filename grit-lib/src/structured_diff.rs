@@ -22,6 +22,7 @@ pub(crate) use line_engine::{
 
 /// Bytes of one file side prepared for diffing.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SideBytes {
     /// Raw file contents.
     pub data: Vec<u8>,
@@ -71,6 +72,7 @@ impl SideBytes {
 /// One run of text within a line, with optional intra-line emphasis.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct StructuredSegment {
     /// Visible characters for this run (may be a substring of the line).
     pub text: String,
@@ -94,6 +96,7 @@ pub enum StructuredLineKind {
 /// One rendered line in a structured hunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct StructuredLine {
     /// Whether this line is context, an addition, or a deletion.
     pub kind: StructuredLineKind,
@@ -110,6 +113,7 @@ pub struct StructuredLine {
 /// A contiguous run of changes plus surrounding context.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct StructuredHunk {
     /// 1-based starting line on the old side (unified hunk header).
     pub old_start: usize,
@@ -127,6 +131,7 @@ pub struct StructuredHunk {
 
 /// Line-level diff of two text sides (no file metadata).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StructuredTextDiff {
     /// Line hunks between two text sides (no paths or modes).
     pub hunks: Vec<StructuredHunk>,
@@ -134,6 +139,7 @@ pub struct StructuredTextDiff {
 
 /// File metadata plus a structured line diff.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StructuredFileDiff {
     /// Old git mode (octal string), when present.
     pub old_mode: Option<String>,

@@ -278,16 +278,15 @@ fn entry(
     old: (&str, ObjectId),
     new: (&str, ObjectId),
 ) -> DiffEntry {
-    DiffEntry {
+    DiffEntry::new(
         status,
-        old_path: (old.0 != "000000").then(|| path.to_owned()),
-        new_path: (new.0 != "000000").then(|| path.to_owned()),
-        old_mode: FileMode::new(u32::from_str_radix(old.0, 8).expect("octal mode")),
-        new_mode: FileMode::new(u32::from_str_radix(new.0, 8).expect("octal mode")),
-        old_oid: old.1,
-        new_oid: new.1,
-        score: None,
-    }
+        (old.0 != "000000").then(|| path.to_owned()),
+        (new.0 != "000000").then(|| path.to_owned()),
+        FileMode::new(u32::from_str_radix(old.0, 8).expect("octal mode")),
+        FileMode::new(u32::from_str_radix(new.0, 8).expect("octal mode")),
+        old.1,
+        new.1,
+    )
 }
 
 fn resolved_patch(repo: &Repository, files: &[PatchResolvedSide]) -> Vec<u8> {

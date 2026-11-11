@@ -60,18 +60,13 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
     let parent = repo.references().resolve("HEAD").ok();
-    let commit_data = CommitData {
+    let commit_data = CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: "Test <t@example.com>".to_owned(),
-        committer: "Test <t@example.com>".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        "Test <t@example.com>",
+        "Test <t@example.com>",
+        format!("{message}\n"),
+    );
     let bytes = serialize_commit(&commit_data);
     let commit_oid = repo
         .odb()

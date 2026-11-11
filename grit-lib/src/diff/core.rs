@@ -2476,6 +2476,7 @@ impl DiffStatus {
 /// A single diff entry representing one changed path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct DiffEntry {
     /// The status of this change.
     pub status: DiffStatus,
@@ -2497,6 +2498,38 @@ pub struct DiffEntry {
 }
 
 impl DiffEntry {
+    /// Build a diff entry with no similarity score.
+    ///
+    /// Set [`Self::score`] directly for renames and copies.
+    ///
+    /// # Parameters
+    ///
+    /// - `status`: the change kind.
+    /// - `old_path` / `new_path`: paths on each side (`None` for an added or deleted side).
+    /// - `old_mode` / `new_mode`: modes on each side ([`FileMode::ABSENT`] for a missing side).
+    /// - `old_oid` / `new_oid`: object ids on each side (zero for a missing side).
+    #[must_use]
+    pub fn new(
+        status: DiffStatus,
+        old_path: Option<String>,
+        new_path: Option<String>,
+        old_mode: FileMode,
+        new_mode: FileMode,
+        old_oid: ObjectId,
+        new_oid: ObjectId,
+    ) -> Self {
+        Self {
+            status,
+            old_path,
+            new_path,
+            old_mode,
+            new_mode,
+            old_oid,
+            new_oid,
+            score: None,
+        }
+    }
+
     /// The primary path for display (new_path for adds, old_path for deletes).
     #[must_use]
     pub fn path(&self) -> &str {
@@ -9231,6 +9264,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
 
 /// Emitted when unmatched rename candidates exceed [`diff.renameLimit`](https://git-scm.com/docs/git-config#Documentation/git-config.txt-diffrenameLimit) after exact and basename pairing.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct InexactRenameDetectionSkipped {
     /// Unmatched delete-side candidates still eligible for inexact pairing.
     pub unmatched_sources: usize,

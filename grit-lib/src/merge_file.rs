@@ -95,6 +95,7 @@ pub(crate) fn tree_merge_diff_algorithm(explicit: Option<&str>) -> &str {
 }
 
 /// Result of a three-way merge.
+#[non_exhaustive]
 pub struct MergeOutput {
     /// Merged file content.
     pub content: Vec<u8>,

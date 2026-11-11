@@ -53,6 +53,7 @@ pub struct BranchListQuery {
 /// Upstream of a local branch when `branch.<name>.merge` / `.remote` is set.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct UpstreamStatus {
     /// Full upstream ref (`refs/remotes/...` or `refs/heads/...`).
     pub full_ref: String,
@@ -72,6 +73,7 @@ pub struct UpstreamStatus {
 
 /// One row from [`list_branches`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BranchSummary {
     /// Short display name (`main`, `origin/main`, …).
     pub name: String,

@@ -403,12 +403,15 @@ pub fn lock_held(path: &Path, holder: Option<LockHolder>) -> Error {
         None => format!(
             "another process holds {shown}; if none is running, remove the stale lock and retry"
         ),
-        Some(LockHolder { pid, running: true }) => format!(
+        Some(LockHolder {
+            pid, running: true, ..
+        }) => format!(
             "process {pid} holds {shown}; wait for it to finish, or remove the lock if that process is not grit or git"
         ),
         Some(LockHolder {
             pid,
             running: false,
+            ..
         }) => format!(
             "{shown} is a stale lock left by process {pid}, which is no longer running; remove it and retry"
         ),

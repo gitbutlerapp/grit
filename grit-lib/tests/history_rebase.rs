@@ -630,18 +630,7 @@ fn rebase_onto_bare_repository() {
         .odb()
         .write(
             ObjectKind::Commit,
-            &serialize_commit(&CommitData {
-                tree: empty,
-                parents: vec![],
-                author: ident.into(),
-                committer: ident.into(),
-                author_raw: vec![],
-                committer_raw: vec![],
-                encoding: None,
-                message: "root\n".into(),
-                raw_message: None,
-                extra_headers: vec![],
-            }),
+            &serialize_commit(&CommitData::new(empty, vec![], ident, ident, "root\n")),
         )
         .expect("root");
     let tree_u = tree_with(&grit, "f.txt", b"1\n").expect("tree u");
@@ -649,18 +638,7 @@ fn rebase_onto_bare_repository() {
         .odb()
         .write(
             ObjectKind::Commit,
-            &serialize_commit(&CommitData {
-                tree: tree_u,
-                parents: vec![root],
-                author: ident.into(),
-                committer: ident.into(),
-                author_raw: vec![],
-                committer_raw: vec![],
-                encoding: None,
-                message: "u\n".into(),
-                raw_message: None,
-                extra_headers: vec![],
-            }),
+            &serialize_commit(&CommitData::new(tree_u, vec![root], ident, ident, "u\n")),
         )
         .expect("u");
     let tree_tip = tree_with(&grit, "f.txt", b"2\n").expect("tree tip");
@@ -668,36 +646,14 @@ fn rebase_onto_bare_repository() {
         .odb()
         .write(
             ObjectKind::Commit,
-            &serialize_commit(&CommitData {
-                tree: tree_tip,
-                parents: vec![u],
-                author: ident.into(),
-                committer: ident.into(),
-                author_raw: vec![],
-                committer_raw: vec![],
-                encoding: None,
-                message: "tip\n".into(),
-                raw_message: None,
-                extra_headers: vec![],
-            }),
+            &serialize_commit(&CommitData::new(tree_tip, vec![u], ident, ident, "tip\n")),
         )
         .expect("tip");
     let onto = grit
         .odb()
         .write(
             ObjectKind::Commit,
-            &serialize_commit(&CommitData {
-                tree: tree_u,
-                parents: vec![root],
-                author: ident.into(),
-                committer: ident.into(),
-                author_raw: vec![],
-                committer_raw: vec![],
-                encoding: None,
-                message: "onto\n".into(),
-                raw_message: None,
-                extra_headers: vec![],
-            }),
+            &serialize_commit(&CommitData::new(tree_u, vec![root], ident, ident, "onto\n")),
         )
         .expect("onto");
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &tip).expect("ref");
@@ -1035,10 +991,10 @@ fn plan_rebase_conflict_reports_paths_changes_nothing() {
         RebasePlan::Conflict { conflicts, .. } => {
             assert_eq!(
                 conflicts,
-                vec![grit_lib::operation::Conflict {
-                    path: "conflict.txt".into(),
-                    kind: grit_lib::operation::ConflictKind::BothAdded,
-                }]
+                vec![grit_lib::operation::Conflict::new(
+                    "conflict.txt",
+                    grit_lib::operation::ConflictKind::BothAdded
+                )]
             );
         }
         other => panic!("expected conflict, got {other:?}"),

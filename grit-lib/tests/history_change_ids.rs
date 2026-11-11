@@ -113,17 +113,10 @@ fn grit_commit_with_id(
     change_id_hex: Option<&str>,
     extra_headers: &[u8],
 ) -> ObjectId {
-    let mut data = CommitData {
-        tree,
-        parents: parents.to_vec(),
-        author: AUTHOR.into(),
-        committer: AUTHOR.into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: message.into(),
-        raw_message: None,
-        extra_headers: extra_headers.to_vec(),
+    let mut data = {
+        let mut commit = CommitData::new(tree, parents.to_vec(), AUTHOR, AUTHOR, message);
+        commit.extra_headers = extra_headers.to_vec();
+        commit
     };
     if let Some(id) = change_id_hex {
         set_change_id(&mut data, &cid(id));

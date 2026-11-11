@@ -20,6 +20,7 @@ type Result<T> = std::result::Result<T, Error>;
 
 /// Legacy line-shaped entry kept for API compatibility; prefer [`MailmapTable`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MailmapEntry {
     /// Canonical name (`None` = keep original).
     pub canonical_name: Option<String>,

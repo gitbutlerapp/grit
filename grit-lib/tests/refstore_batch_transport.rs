@@ -98,25 +98,17 @@ fn push_tracking_remote_refs_one_reftable_transaction() {
         use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
 
         let results = vec![
-            PushRefResult {
-                local_ref: Some("refs/heads/alpha".to_owned()),
-                remote_ref: "refs/heads/alpha".to_owned(),
-                old_oid: None,
-                new_oid: Some(c1),
-                forced: false,
-                deletion: false,
-                status: PushRefStatus::Ok,
-                message: None,
+            {
+                let mut result = PushRefResult::new("refs/heads/alpha", PushRefStatus::Ok);
+                result.local_ref = Some("refs/heads/alpha".to_owned());
+                result.new_oid = Some(c1);
+                result
             },
-            PushRefResult {
-                local_ref: Some("refs/heads/beta".to_owned()),
-                remote_ref: "refs/heads/beta".to_owned(),
-                old_oid: None,
-                new_oid: Some(c2),
-                forced: false,
-                deletion: false,
-                status: PushRefStatus::Ok,
-                message: None,
+            {
+                let mut result = PushRefResult::new("refs/heads/beta", PushRefStatus::Ok);
+                result.local_ref = Some("refs/heads/beta".to_owned());
+                result.new_oid = Some(c2);
+                result
             },
         ];
 

@@ -112,18 +112,15 @@ fn stat_and_patch_details_give_the_same_diffstat() {
 
 #[test]
 fn diffstat_from_rows_sums_totals_in_order() {
-    let row = |path: &str, insertions, deletions| FileStat {
-        path: path.to_owned(),
-        old_path: None,
-        status: DiffStatus::Modified,
-        binary: false,
-        old_size: 0,
-        new_size: 0,
-        similarity: None,
-        lines: LineStat {
-            insertions,
-            deletions,
-        },
+    let row = |path: &str, insertions, deletions| {
+        FileStat::new(
+            path,
+            DiffStatus::Modified,
+            LineStat {
+                insertions,
+                deletions,
+            },
+        )
     };
     let stat: DiffStat = [row("z", 100, 0), row("a", 1, 1)].into_iter().collect();
     assert_eq!(stat.files()[0].path, "z");

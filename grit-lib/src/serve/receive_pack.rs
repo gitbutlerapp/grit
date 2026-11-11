@@ -441,6 +441,7 @@ pub enum RefUpdateRefusal {
 /// The result of one requested ref update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RefUpdateResult {
     /// Full name of the ref the client asked to change.
     pub refname: String,
@@ -450,6 +451,27 @@ pub struct RefUpdateResult {
     pub new: Option<ObjectId>,
     /// Why the update was refused, or `None` when it was applied.
     pub error: Option<RefUpdateRefusal>,
+}
+
+impl RefUpdateResult {
+    /// Build the result of one requested ref update, with no refusal.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `refname`: the ref the client asked to update.
+    /// - `old`: its value before the push, if it existed.
+    /// - `new`: its requested new value (`None` for a deletion).
+    #[must_use]
+    pub fn new(refname: impl Into<String>, old: Option<ObjectId>, new: Option<ObjectId>) -> Self {
+        Self {
+            refname: refname.into(),
+            old,
+            new,
+            error: None,
+        }
+    }
 }
 
 /// Why a pushed pack could not be stored.
@@ -735,6 +757,7 @@ pub struct HookRunRecord {
 /// What a push session did.
 #[derive(Debug, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ReceiveOutcome {
     /// Why the pushed pack could not be stored, when it could not.
     pub unpack_error: Option<UnpackError>,

@@ -445,11 +445,10 @@ mod tests {
 
     #[test]
     fn pushes_of_the_target_are_told_what_to_do_instead() {
-        let result = |refname: &str, error: Option<RefUpdateRefusal>| RefUpdateResult {
-            refname: refname.to_owned(),
-            old: None,
-            new: None,
-            error,
+        let result = |refname: &str, error: Option<RefUpdateRefusal>| {
+            let mut result = RefUpdateResult::new(refname, None, None);
+            result.error = error;
+            result
         };
         let refused = Some(RefUpdateRefusal::TargetBranch {
             target: "main".to_owned(),

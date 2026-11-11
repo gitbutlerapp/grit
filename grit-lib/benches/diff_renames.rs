@@ -59,28 +59,26 @@ fn fixture() -> &'static RenameBenchFixture {
 
         let mut entries: Vec<DiffEntry> = Vec::with_capacity(N * 2);
         for (path, oid) in deleted {
-            entries.push(DiffEntry {
-                status: DiffStatus::Deleted,
-                old_path: Some(path),
-                new_path: None,
-                old_mode: FileMode::REGULAR,
-                new_mode: FileMode::ABSENT,
-                old_oid: oid,
-                new_oid: zero_oid(),
-                score: None,
-            });
+            entries.push(DiffEntry::new(
+                DiffStatus::Deleted,
+                Some(path),
+                None,
+                FileMode::REGULAR,
+                FileMode::ABSENT,
+                oid,
+                zero_oid(),
+            ));
         }
         for (path, oid) in added {
-            entries.push(DiffEntry {
-                status: DiffStatus::Added,
-                old_path: None,
-                new_path: Some(path),
-                old_mode: FileMode::ABSENT,
-                new_mode: FileMode::REGULAR,
-                old_oid: zero_oid(),
-                new_oid: oid,
-                score: None,
-            });
+            entries.push(DiffEntry::new(
+                DiffStatus::Added,
+                None,
+                Some(path),
+                FileMode::ABSENT,
+                FileMode::REGULAR,
+                zero_oid(),
+                oid,
+            ));
         }
 
         RenameBenchFixture {
@@ -152,26 +150,24 @@ fn adoc_fixture(count: usize, lines: usize, unique: bool) -> RenameBenchFixture 
         }
         let old_oid = odb.write(ObjectKind::Blob, &old_data).expect("write old");
         let new_oid = odb.write(ObjectKind::Blob, &new_data).expect("write new");
-        entries.push(DiffEntry {
-            status: DiffStatus::Deleted,
-            old_path: Some(format!("old/doc-{i}.txt")),
-            new_path: None,
-            old_mode: FileMode::REGULAR,
-            new_mode: FileMode::ABSENT,
+        entries.push(DiffEntry::new(
+            DiffStatus::Deleted,
+            Some(format!("old/doc-{i}.txt")),
+            None,
+            FileMode::REGULAR,
+            FileMode::ABSENT,
             old_oid,
-            new_oid: zero_oid(),
-            score: None,
-        });
-        entries.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(format!("new/doc-{i}.adoc")),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: zero_oid(),
+            zero_oid(),
+        ));
+        entries.push(DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some(format!("new/doc-{i}.adoc")),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            zero_oid(),
             new_oid,
-            score: None,
-        });
+        ));
     }
 
     RenameBenchFixture {
@@ -222,26 +218,24 @@ fn basename_duplicate_fixture(count: usize, rename_limit: i64) -> RenameBenchFix
         let anchor = format!("anchor {i}\n").into_bytes();
         let anchor_oid = odb.write(ObjectKind::Blob, &anchor).expect("anchor");
 
-        entries.push(DiffEntry {
-            status: DiffStatus::Deleted,
-            old_path: Some(format!("old/{i}/anchor.txt")),
-            new_path: None,
-            old_mode: FileMode::REGULAR,
-            new_mode: FileMode::ABSENT,
-            old_oid: anchor_oid,
-            new_oid: zero_oid(),
-            score: None,
-        });
-        entries.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(format!("new/{i}/anchor.txt")),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: zero_oid(),
-            new_oid: anchor_oid,
-            score: None,
-        });
+        entries.push(DiffEntry::new(
+            DiffStatus::Deleted,
+            Some(format!("old/{i}/anchor.txt")),
+            None,
+            FileMode::REGULAR,
+            FileMode::ABSENT,
+            anchor_oid,
+            zero_oid(),
+        ));
+        entries.push(DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some(format!("new/{i}/anchor.txt")),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            zero_oid(),
+            anchor_oid,
+        ));
 
         let old_readme = format!("readme body {i} line one\nline two\n").into_bytes();
         let mut new_readme = old_readme.clone();
@@ -253,26 +247,24 @@ fn basename_duplicate_fixture(count: usize, rename_limit: i64) -> RenameBenchFix
             .write(ObjectKind::Blob, &new_readme)
             .expect("new readme");
 
-        entries.push(DiffEntry {
-            status: DiffStatus::Deleted,
-            old_path: Some(format!("old/{i}/readme.txt")),
-            new_path: None,
-            old_mode: FileMode::REGULAR,
-            new_mode: FileMode::ABSENT,
+        entries.push(DiffEntry::new(
+            DiffStatus::Deleted,
+            Some(format!("old/{i}/readme.txt")),
+            None,
+            FileMode::REGULAR,
+            FileMode::ABSENT,
             old_oid,
-            new_oid: zero_oid(),
-            score: None,
-        });
-        entries.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(format!("new/{i}/readme.txt")),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: zero_oid(),
+            zero_oid(),
+        ));
+        entries.push(DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some(format!("new/{i}/readme.txt")),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            zero_oid(),
             new_oid,
-            score: None,
-        });
+        ));
     }
 
     RenameBenchFixture {
@@ -296,26 +288,24 @@ fn basename_disjoint_duplicate_fixture(count: usize) -> RenameBenchFixture {
         let new_oid = odb
             .write(ObjectKind::Blob, format!("new payload {i}\n").as_bytes())
             .expect("write new");
-        entries.push(DiffEntry {
-            status: DiffStatus::Deleted,
-            old_path: Some(format!("a/d{}/f{}.txt", i / 50, i % 50)),
-            new_path: None,
-            old_mode: FileMode::REGULAR,
-            new_mode: FileMode::ABSENT,
+        entries.push(DiffEntry::new(
+            DiffStatus::Deleted,
+            Some(format!("a/d{}/f{}.txt", i / 50, i % 50)),
+            None,
+            FileMode::REGULAR,
+            FileMode::ABSENT,
             old_oid,
-            new_oid: zero_oid(),
-            score: None,
-        });
-        entries.push(DiffEntry {
-            status: DiffStatus::Added,
-            old_path: None,
-            new_path: Some(format!("b/d{}/g{}.txt", i / 50, i % 50)),
-            old_mode: FileMode::ABSENT,
-            new_mode: FileMode::REGULAR,
-            old_oid: zero_oid(),
+            zero_oid(),
+        ));
+        entries.push(DiffEntry::new(
+            DiffStatus::Added,
+            None,
+            Some(format!("b/d{}/g{}.txt", i / 50, i % 50)),
+            FileMode::ABSENT,
+            FileMode::REGULAR,
+            zero_oid(),
             new_oid,
-            score: None,
-        });
+        ));
     }
     RenameBenchFixture {
         _root: root,

@@ -185,16 +185,19 @@ fn apply_rejects_context_mismatch() {
 
 fn apply_rejects_context_mismatch_impl() -> TestResult {
     let old = b"one\ntwo\n";
-    let hunks = vec![Hunk {
-        old_start: 1,
-        old_count: 1,
-        new_start: 1,
-        new_count: 1,
-        first_body_line: 2,
-        lines: vec![
-            HunkLine::Remove("NOT-IN-FILE".to_string()),
-            HunkLine::Add("x".to_string()),
-        ],
+    let hunks = vec![{
+        let mut hunk = Hunk::new(
+            1,
+            1,
+            1,
+            1,
+            vec![
+                HunkLine::Remove("NOT-IN-FILE".to_string()),
+                HunkLine::Add("x".to_string()),
+            ],
+        );
+        hunk.first_body_line = 2;
+        hunk
     }];
     match apply_hunks_to_blob(old, &hunks, &ApplyOptions::default()) {
         Err(ApplyError::ContextMismatch { .. }) | Err(ApplyError::UnexpectedEof { .. }) => Ok(()),

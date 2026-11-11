@@ -337,15 +337,7 @@ fn parse_tag_non_utf8_message_roundtrip_preserves_bytes() {
 #[test]
 fn serialize_tag_empty_message_has_no_extra_blank_line() {
     let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
-    let tag = TagData {
-        object: tree,
-        object_type: "commit".to_string(),
-        tag: "empty-msg".to_string(),
-        tagger: None,
-        extra_headers: Vec::new(),
-        message: String::new(),
-        raw_message: None,
-    };
+    let tag = TagData::new(tree, "commit", "empty-msg", None, String::new());
     let bytes = serialize_tag(&tag);
     let parsed = parse_tag(&bytes).expect("parse");
     assert!(parsed.message.is_empty());
@@ -355,32 +347,25 @@ fn serialize_tag_empty_message_has_no_extra_blank_line() {
 #[test]
 fn serialize_parse_commit_tag_tree_identity() {
     let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
-    let commit = CommitData {
+    let commit = CommitData::new(
         tree,
-        parents: vec![],
-        author: "A <a@example.com>".to_string(),
-        committer: "C <c@example.com>".to_string(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "hello\n".to_string(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        vec![],
+        "A <a@example.com>",
+        "C <c@example.com>",
+        "hello\n",
+    );
     let bytes = serialize_commit(&commit);
     let back = parse_commit(&bytes).unwrap();
     assert_eq!(back.tree, tree);
     assert_eq!(back.message, "hello\n");
 
-    let tag = TagData {
-        object: tree,
-        object_type: "commit".to_string(),
-        tag: "v1".to_string(),
-        tagger: Some("T <t@example.com> 1 +0000".to_string()),
-        extra_headers: Vec::new(),
-        message: "tag msg".to_string(),
-        raw_message: None,
-    };
+    let tag = TagData::new(
+        tree,
+        "commit",
+        "v1",
+        Some("T <t@example.com> 1 +0000".to_string()),
+        "tag msg",
+    );
     let tag_bytes = serialize_tag(&tag);
     let tag_back = parse_tag(&tag_bytes).unwrap();
     assert_eq!(tag_back.tag, "v1");
@@ -389,17 +374,12 @@ fn serialize_parse_commit_tag_tree_identity() {
 #[test]
 fn serialize_commit_with_encoding_and_raw_author_bytes() {
     let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
-    let commit = CommitData {
-        tree,
-        parents: vec![tree],
-        author: "visible".to_string(),
-        committer: "committer".to_string(),
-        author_raw: b"Raw Author <r@example.com> 1 +0000".to_vec(),
-        committer_raw: Vec::new(),
-        encoding: Some("UTF-8".to_string()),
-        message: String::new(),
-        raw_message: Some(b"raw-body".to_vec()),
-        extra_headers: Vec::new(),
+    let commit = {
+        let mut commit = CommitData::new(tree, vec![tree], "visible", "committer", String::new());
+        commit.author_raw = b"Raw Author <r@example.com> 1 +0000".to_vec();
+        commit.encoding = Some("UTF-8".to_string());
+        commit.raw_message = Some(b"raw-body".to_vec());
+        commit
     };
     let bytes = serialize_commit(&commit);
     let parsed = parse_commit(&bytes).expect("parse");

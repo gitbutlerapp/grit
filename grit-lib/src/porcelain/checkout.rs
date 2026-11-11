@@ -668,6 +668,7 @@ impl ProgressSink for ChunkProgressSink<'_> {
 /// Populated-tree checkout metadata (case-insensitive path collisions).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct CheckoutOutcome {
     /// Stage-0 paths that share a worktree slot when `core.ignorecase` is set.
     pub path_collisions: Vec<String>,

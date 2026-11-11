@@ -247,6 +247,7 @@ fn config_for_status_rename_detection(config: &ConfigSet) -> ConfigSet {
 /// A renderer is a pure function of this model plus the chosen output format.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct StatusModel {
     /// The resolved HEAD (branch, detached, or unborn).
     pub head: HeadState,
@@ -280,10 +281,6 @@ pub struct StatusModel {
     pub operation: Option<Operation>,
     /// Number of stash entries (for the optional stash footer / `--show-stash`).
     pub stash_count: usize,
-    /// Whether the on-disk index used the sparse-directory format.
-    pub index_sparse_on_disk: bool,
-    /// Sparse-directory prefixes present in the on-disk index, if any.
-    pub sparse_directory_prefixes: Vec<Vec<u8>>,
     /// What [`status`] did about a rewrite apply (rebase, history edit) that was killed after
     /// moving refs, or `None` when none was pending.
     pub interrupted_rewrite: Option<InterruptedRewrite>,
@@ -316,11 +313,25 @@ impl From<crate::history::RewriteApplyRecovery> for InterruptedRewrite {
 
 /// Unmerged paths that share one [`ConflictKind`], from [`StatusModel::conflict_groups`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConflictGroup {
     /// How the two sides collided for every path in [`Self::paths`].
     pub kind: ConflictKind,
     /// Repository-relative paths, in the model's (sorted) conflict order.
     pub paths: Vec<String>,
+}
+
+impl ConflictGroup {
+    /// Build a group of unmerged paths sharing one conflict kind.
+    ///
+    /// # Parameters
+    ///
+    /// - `kind`: the shared conflict kind.
+    /// - `paths`: the paths, sorted.
+    #[must_use]
+    pub fn new(kind: ConflictKind, paths: Vec<String>) -> Self {
+        Self { kind, paths }
+    }
 }
 
 /// What to do next with the repository, from [`StatusModel::guidance`].
@@ -2458,14 +2469,6 @@ pub(crate) fn status(
         crate::index::IndexParseContext::from_policy(repo.thread_policy()),
     )?;
     let index_mtime = index.source_mtime;
-    let sparse_directory_prefixes: Vec<Vec<u8>> = index
-        .entries
-        .iter()
-        .filter(|e| e.is_sparse_directory_placeholder())
-        .map(|e| e.path.clone())
-        .collect();
-    let index_sparse_on_disk =
-        index.sparse_directories || index.has_sparse_directory_placeholders();
     if !opts.pathspec.is_entire_tree() {
         crate::porcelain::index_from_tree::expand_sparse_for_pathspecs(
             repo,
@@ -2666,8 +2669,6 @@ pub(crate) fn status(
         conflict_details,
         operation,
         stash_count,
-        index_sparse_on_disk,
-        sparse_directory_prefixes,
         interrupted_rewrite,
     })
 }
@@ -3166,8 +3167,6 @@ mod guidance_tests {
             conflict_details: Vec::new(),
             operation: None,
             stash_count: 0,
-            index_sparse_on_disk: false,
-            sparse_directory_prefixes: Vec::new(),
             interrupted_rewrite: None,
         }
     }

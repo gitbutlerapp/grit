@@ -73,16 +73,15 @@ fn grit_raw(repo: &Repository, target: &DiffTarget) -> Vec<String> {
         .expect("files")
         .into_iter()
         .map(|f| {
-            format_raw(&DiffEntry {
-                status: f.status,
-                old_path: Some(f.path.clone()),
-                new_path: Some(f.path),
-                old_mode: f.old_mode.map_or(FileMode::ABSENT, octal_mode),
-                new_mode: f.new_mode.map_or(FileMode::ABSENT, octal_mode),
-                old_oid: f.old_oid,
-                new_oid: f.new_oid,
-                score: None,
-            })
+            format_raw(&DiffEntry::new(
+                f.status,
+                Some(f.path.clone()),
+                Some(f.path),
+                f.old_mode.map_or(FileMode::ABSENT, octal_mode),
+                f.new_mode.map_or(FileMode::ABSENT, octal_mode),
+                f.old_oid,
+                f.new_oid,
+            ))
         })
         .collect()
 }

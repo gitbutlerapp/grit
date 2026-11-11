@@ -79,6 +79,7 @@ pub struct BranchRenameOptions {
 
 /// Outcome of [`rename_branch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RenameBranchOutcome {
     /// Previous short branch name.
     pub old: String,
@@ -94,6 +95,7 @@ pub struct RenameBranchOutcome {
 
 /// Outcome of [`create_branch`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct CreateBranchOutcome {
     /// Short branch name.
     pub name: String,
@@ -226,6 +228,7 @@ pub(crate) fn resolve_create_tracking(
 /// One local branch in a [`BranchList`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct LocalBranch {
     /// Short branch name (without `refs/heads/`).
     pub name: String,
@@ -235,14 +238,46 @@ pub struct LocalBranch {
     pub current: bool,
 }
 
+impl LocalBranch {
+    /// Build a local-branch row.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: short branch name.
+    /// - `oid`: the branch tip.
+    /// - `current`: whether `HEAD` points at the branch.
+    #[must_use]
+    pub fn new(name: impl Into<String>, oid: ObjectId, current: bool) -> Self {
+        Self {
+            name: name.into(),
+            oid,
+            current,
+        }
+    }
+}
+
 /// Result of [`list_branches`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct BranchList {
     /// Branch `HEAD` is attached to, or `None` when `HEAD` is detached or invalid.
     pub current: Option<String>,
     /// Every local branch, sorted by name.
     pub branches: Vec<LocalBranch>,
+}
+
+impl BranchList {
+    /// Build a branch listing.
+    ///
+    /// # Parameters
+    ///
+    /// - `current`: the current branch, if any.
+    /// - `branches`: the branches.
+    #[must_use]
+    pub fn new(current: Option<String>, branches: Vec<LocalBranch>) -> Self {
+        Self { current, branches }
+    }
 }
 
 /// List the local branches (`refs/heads/*`) of `repo`, sorted by name.
@@ -286,6 +321,7 @@ pub struct BranchDeleteOptions {
 
 /// Result of [`Branches::delete`](crate::repo_handles::Branches::delete).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DeletedBranch {
     /// Short branch name that was deleted.
     pub name: String,

@@ -62,6 +62,7 @@ pub enum HookStdio {
 /// When several hooks run for one event (configured `hook.<name>.*` entries, then the hooks
 /// directory script), their output is appended in run order.
 #[derive(Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HookOutput {
     /// Everything the hooks wrote to stdout.
     pub stdout: Vec<u8>,
@@ -79,6 +80,17 @@ impl std::fmt::Debug for HookOutput {
 }
 
 impl HookOutput {
+    /// Build captured hook output.
+    ///
+    /// # Parameters
+    ///
+    /// - `stdout`: bytes the hooks wrote to stdout.
+    /// - `stderr`: bytes the hooks wrote to stderr.
+    #[must_use]
+    pub fn new(stdout: Vec<u8>, stderr: Vec<u8>) -> Self {
+        Self { stdout, stderr }
+    }
+
     /// Whether no output was captured on either stream.
     #[must_use]
     pub fn is_empty(&self) -> bool {

@@ -288,13 +288,13 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
         }
         let ordered = all_blob_paths_in_tree_order(repo.odb(), &parsed.tree);
         for path in ordered {
-            let mut cpath = grit_lib::diff::combined_tree_diff::CombinedDiffPath {
-                path: path.clone(),
-                merge_mode: 0o100644,
-                merge_oid: blob_oid_at_path(repo.odb(), &parsed.tree, &path)
+            let mut cpath = grit_lib::diff::combined_tree_diff::CombinedDiffPath::new(
+                path.clone(),
+                0o100644,
+                blob_oid_at_path(repo.odb(), &parsed.tree, &path)
                     .unwrap_or_else(grit_lib::diff::zero_oid),
-                parents: vec![],
-            };
+                vec![],
+            );
             enrich_combined_path_renames(repo.odb(), &mut cpath, &parsed.parents, &parsed.tree, 50);
         }
     }

@@ -99,18 +99,13 @@ fn all_groups(repo: &Repository) -> Vec<(String, Vec<AuthorGroup>)> {
 
 fn write_commit(repo: &Repository, parents: &[ObjectId], author: &str, n: usize) -> ObjectId {
     let ident = format!("{author} {} +0000", 1_700_000_000 + n);
-    let data = CommitData {
-        tree: ObjectId::from_hex(EMPTY_TREE).expect("empty tree"),
-        parents: parents.to_vec(),
-        author: ident.clone(),
-        committer: ident,
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("commit {n}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let data = CommitData::new(
+        ObjectId::from_hex(EMPTY_TREE).expect("empty tree"),
+        parents.to_vec(),
+        ident.clone(),
+        ident,
+        format!("commit {n}\n"),
+    );
     repo.odb()
         .write(ObjectKind::Commit, &serialize_commit(&data))
         .expect("write commit")

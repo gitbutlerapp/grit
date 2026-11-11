@@ -405,6 +405,7 @@ pub enum StashMode {
 /// Paths that would be recorded by
 /// [`RepositoryStash::preview`](crate::repo_handles::RepositoryStash::preview).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StashPreview {
     /// Repository-relative paths with tracked changes that would be stashed.
     pub paths: Vec<String>,
@@ -539,6 +540,7 @@ pub struct StashDiffOptions {
 
 /// Result of [`RepositoryStash::branch`](crate::repo_handles::RepositoryStash::branch).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StashBranchOutcome {
     /// Short name of the branch created at the stash base commit.
     pub branch: String,
@@ -558,6 +560,7 @@ pub struct StashBranchOutcome {
 /// (`stash@{{index}}` in newest-first order).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct StashEntry {
     /// Index matching `stash@{{index}}` (0 is newest).
     pub index: usize,
@@ -565,6 +568,24 @@ pub struct StashEntry {
     pub oid: ObjectId,
     /// Reflog message (what `git stash list` prints after the colon).
     pub message: String,
+}
+
+impl StashEntry {
+    /// Build a stash entry.
+    ///
+    /// # Parameters
+    ///
+    /// - `index`: newest-first index (`stash@{{index}}`).
+    /// - `oid`: the W commit id.
+    /// - `message`: the reflog message.
+    #[must_use]
+    pub fn new(index: usize, oid: ObjectId, message: impl Into<String>) -> Self {
+        Self {
+            index,
+            oid,
+            message: message.into(),
+        }
+    }
 }
 
 /// How to address a stash entry or a stash-shaped commit.
@@ -1778,6 +1799,7 @@ pub(crate) fn store_stash(
 /// Result of a successful [`RepositoryStash::push`](crate::repo_handles::RepositoryStash::push).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct StashPushResult {
     /// The W commit object id stored on `refs/stash`.
     pub oid: ObjectId,
@@ -2687,6 +2709,7 @@ pub(crate) fn apply_stash_oid(
 /// [`RepositoryStash::pop`](crate::repo_handles::RepositoryStash::pop).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct StashApplyOutcome {
     /// Paths left with conflict stages (1–3) in the index, in index order, each with the
     /// [`ConflictKind`](crate::operation::ConflictKind) `status` reports for it.

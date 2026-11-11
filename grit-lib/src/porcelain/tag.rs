@@ -168,6 +168,7 @@ pub struct Ident {
 
 /// Annotated tag message and tagger metadata for list output.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TagAnnotation {
     /// First-line subject (`format_subject` / `contents:subject`).
     pub subject: String,
@@ -184,6 +185,7 @@ pub struct TagAnnotation {
 /// One tag in the result of [`list_tags`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct TagSummary {
     /// Short tag name (without `refs/tags/`).
     pub name: String,
@@ -197,6 +199,35 @@ pub struct TagSummary {
     pub target_kind: ObjectKind,
     /// Present for annotated tags after reading the tag object.
     pub annotation: Option<TagAnnotation>,
+}
+
+impl TagSummary {
+    /// Build a tag row with no peeled id or annotation.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: the tag name.
+    /// - `oid`: the object the tag ref points at.
+    /// - `kind`: lightweight or annotated.
+    /// - `target_kind`: the kind of the object the tag finally names.
+    #[must_use]
+    pub fn new(
+        name: impl Into<String>,
+        oid: ObjectId,
+        kind: TagKind,
+        target_kind: ObjectKind,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            oid,
+            kind,
+            target_kind,
+            peeled: None,
+            annotation: None,
+        }
+    }
 }
 
 #[cfg(feature = "serde-models")]
@@ -287,6 +318,7 @@ pub struct CreateTagRequest {
 /// Result of [`create_tag`].
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct CreateTagOutcome {
     /// Short tag name (without `refs/tags/`).
     pub name: String,
@@ -766,6 +798,7 @@ pub(crate) fn delete_tag(repo: &Repository, name: &str, dry_run: bool) -> Result
 
 /// Result of [`verify_tag_by_name`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct VerifiedTag {
     /// Short tag name (without `refs/tags/`).
     pub name: String,
@@ -775,6 +808,31 @@ pub struct VerifiedTag {
     pub target: ObjectId,
     /// Signature and `tree-sha256` verdicts.
     pub verification: TagVerification,
+}
+
+impl VerifiedTag {
+    /// Build a verified-tag result.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: the tag name.
+    /// - `oid`: the tag object id.
+    /// - `target`: the tagged object id.
+    /// - `verification`: the verification outcome.
+    #[must_use]
+    pub fn new(
+        name: impl Into<String>,
+        oid: ObjectId,
+        target: ObjectId,
+        verification: TagVerification,
+    ) -> Self {
+        Self {
+            name: name.into(),
+            oid,
+            target,
+            verification,
+        }
+    }
 }
 
 /// Verify the annotated tag at `refs/tags/<name>`.

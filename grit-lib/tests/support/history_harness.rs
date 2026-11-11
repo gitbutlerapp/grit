@@ -877,6 +877,7 @@ pub fn expand_token_for_rev_list(
         negative,
         symmetric_left,
         symmetric_right,
+        ..
     } = repo.revwalk().parse_tokens(&[token])?;
     opts.symmetric_left = symmetric_left;
     opts.symmetric_right = symmetric_right;

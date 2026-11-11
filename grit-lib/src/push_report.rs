@@ -49,6 +49,7 @@ impl PushRefStatus {
 /// One reference's resolved push result, ready for display.
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PushRefResult {
     /// The local ref name (source side), e.g. `refs/heads/next`. `None` for deletions.
     pub local_ref: Option<String>,
@@ -66,6 +67,30 @@ pub struct PushRefResult {
     pub status: PushRefStatus,
     /// Extra reason text (used for `[remote rejected]`).
     pub message: Option<String>,
+}
+
+impl PushRefResult {
+    /// Build a push result for `remote_ref` with no local ref, object ids or message.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote_ref`: the destination ref on the remote.
+    /// - `status`: the resolved status.
+    #[must_use]
+    pub fn new(remote_ref: impl Into<String>, status: PushRefStatus) -> Self {
+        Self {
+            remote_ref: remote_ref.into(),
+            status,
+            local_ref: None,
+            old_oid: None,
+            new_oid: None,
+            forced: false,
+            deletion: false,
+            message: None,
+        }
+    }
 }
 
 #[cfg(test)]

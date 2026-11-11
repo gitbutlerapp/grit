@@ -47,6 +47,7 @@ pub const WORKSPACE_SNAPSHOT_PIN_REF_PREFIX: &str = "refs/grit/workspace-snapsho
 /// A point-in-time workspace snapshot suitable for undo/redo in front ends.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize, serde::Deserialize))]
+#[non_exhaustive]
 pub struct WorkspaceSnapshot {
     /// Resolved `HEAD` at capture time.
     pub head: HeadState,

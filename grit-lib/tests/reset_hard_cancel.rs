@@ -85,18 +85,13 @@ fn commit_file(
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let commit = objects::CommitData {
+    let commit = objects::CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: identity_line(),
-        committer: identity_line(),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "c\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        identity_line(),
+        identity_line(),
+        "c\n",
+    );
     let co = repo
         .odb()
         .write(
@@ -322,18 +317,13 @@ fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<Objec
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let commit = objects::CommitData {
+    let commit = objects::CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: identity_line(),
-        committer: identity_line(),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "c\n".into(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        identity_line(),
+        identity_line(),
+        "c\n",
+    );
     let co = repo
         .odb()
         .write(

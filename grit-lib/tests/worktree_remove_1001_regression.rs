@@ -159,18 +159,13 @@ fn commit_staged_without_index_stat_refresh(
         .expect("index");
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("write tree");
-    let commit_data = CommitData {
+    let commit_data = CommitData::new(
         tree,
-        parents: parent.into_iter().collect(),
-        author: "Test <t@example.com> 1000000000 +0000".into(),
-        committer: "Test <t@example.com> 1000000000 +0000".into(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{message}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+        parent.into_iter().collect(),
+        "Test <t@example.com> 1000000000 +0000",
+        "Test <t@example.com> 1000000000 +0000",
+        format!("{message}\n"),
+    );
     let bytes = serialize_commit(&commit_data);
     let oid = repo
         .odb()

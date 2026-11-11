@@ -26,6 +26,7 @@ pub struct TagVerifyOptions {
 
 /// Combined signature and tree-sha256 verification outcome.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TagVerification {
     /// OpenPGP / SSH signature result.
     pub signature: SignatureVerdict,
@@ -36,6 +37,26 @@ pub struct TagVerification {
 }
 
 impl TagVerification {
+    /// Build a combined verification outcome.
+    ///
+    /// # Parameters
+    ///
+    /// - `signature`: the signature verdict.
+    /// - `tree_sha256`: the tree-sha256 verdict, when the tag claims a digest.
+    /// - `missing_submodules`: submodules that blocked recomputing the digest.
+    #[must_use]
+    pub fn new(
+        signature: SignatureVerdict,
+        tree_sha256: Option<TreeSha256Verdict>,
+        missing_submodules: Vec<MissingSubmodule>,
+    ) -> Self {
+        Self {
+            signature,
+            tree_sha256,
+            missing_submodules,
+        }
+    }
+
     /// True when the signature is good or was not checked, and any claimed digest
     /// matches a recomputation with no bogus `tree-sha256-excluded` paths.
     ///
@@ -83,6 +104,7 @@ pub enum SignatureVerdict {
 
 /// Recomputed tree-sha256 compared to the tag header claim.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TreeSha256Verdict {
     /// Digest recorded in the tag header.
     pub claimed: TreeSha256,
@@ -100,8 +122,32 @@ pub struct TreeSha256Verdict {
     pub submodules: usize,
 }
 
+impl TreeSha256Verdict {
+    /// Build a verdict comparing a claimed digest with a recomputed one, with no exclusions, cycles or counts.
+    ///
+    /// Set the remaining public fields directly when they apply.
+    ///
+    /// # Parameters
+    ///
+    /// - `claimed`: the digest the tag claims.
+    /// - `computed`: the recomputed digest.
+    #[must_use]
+    pub fn new(claimed: TreeSha256, computed: TreeSha256) -> Self {
+        Self {
+            claimed,
+            computed,
+            excluded: Vec::new(),
+            bogus_excluded: Vec::new(),
+            cycles: Vec::new(),
+            files: 0,
+            submodules: 0,
+        }
+    }
+}
+
 /// Parsed tree-sha256-related headers from a raw annotated tag object.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TreeSha256TagHeaders {
     /// `object` header (commit or other peeled target).
     pub target: ObjectId,
@@ -109,6 +155,24 @@ pub struct TreeSha256TagHeaders {
     pub claimed: Option<TreeSha256>,
     /// Paths from `tree-sha256-excluded` headers, in tag order.
     pub excluded: Vec<String>,
+}
+
+impl TreeSha256TagHeaders {
+    /// Build parsed tree-sha256 tag headers.
+    ///
+    /// # Parameters
+    ///
+    /// - `target`: the tagged object.
+    /// - `claimed`: the claimed digest, when present.
+    /// - `excluded`: excluded submodule paths.
+    #[must_use]
+    pub fn new(target: ObjectId, claimed: Option<TreeSha256>, excluded: Vec<String>) -> Self {
+        Self {
+            target,
+            claimed,
+            excluded,
+        }
+    }
 }
 
 /// Read tree-sha256 headers from a raw tag object (header block through the first blank line).

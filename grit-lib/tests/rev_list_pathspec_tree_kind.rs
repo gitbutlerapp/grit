@@ -27,18 +27,13 @@ fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
         .objects()
         .write(ObjectKind::Blob, &tree_body)
         .expect("tree bytes stored as blob");
-    let commit = CommitData {
-        tree: tree_as_blob,
-        parents: vec![],
-        author: "T <t@example.com> 1 +0000".to_owned(),
-        committer: "T <t@example.com> 1 +0000".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "bad tree link\n".to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
+    let commit = CommitData::new(
+        tree_as_blob,
+        vec![],
+        "T <t@example.com> 1 +0000",
+        "T <t@example.com> 1 +0000",
+        "bad tree link\n",
+    );
     let commit_oid = repo
         .objects()
         .write(ObjectKind::Commit, &serialize_commit(&commit))

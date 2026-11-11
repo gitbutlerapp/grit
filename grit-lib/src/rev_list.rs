@@ -766,6 +766,7 @@ impl Default for RevListOptions {
 
 /// Parents and subjects collected during a bounded `--graph` rev-list walk.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct LogGraphLinkage {
     /// Display parent lists keyed by commit id.
     pub parents: HashMap<ObjectId, Vec<ObjectId>>,
@@ -775,6 +776,7 @@ pub struct LogGraphLinkage {
 
 /// Final commit selection result.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RevListResult {
     /// Selected commits in final output order, after skip/max/reverse.
     pub commits: Vec<ObjectId>,
@@ -903,6 +905,7 @@ impl RevListResult {
 /// paired with a particular counterpart.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct CherryMatch {
     /// The shared stable patch-id (path-limited when the walk has paths).
     pub patch_id: ObjectId,

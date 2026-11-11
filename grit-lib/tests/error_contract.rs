@@ -8,8 +8,6 @@
 
 use std::collections::HashSet;
 
-use std::path::PathBuf;
-
 use grit_lib::error::{Error, LockHeldError, NotARepositoryReason, RepositoryError};
 use grit_lib::index::IndexError;
 use grit_lib::porcelain::CommitError;
@@ -451,11 +449,7 @@ fn area_enum_area_agrees_with_the_umbrella() {
     );
     assert_eq!(RemoteError::HttpUnavailable.area(), "remote");
 
-    let lock: Error = IndexError::LockHeld(LockHeldError {
-        path: PathBuf::from("index.lock"),
-        holder: None,
-    })
-    .into();
+    let lock: Error = IndexError::LockHeld(LockHeldError::new("index.lock", None)).into();
     assert!(matches!(lock, Error::LockHeld(_)), "{lock:?}");
     assert_eq!(lock.area(), "lock_held");
 }

@@ -80,12 +80,12 @@ fn refs_fsck_reports_bad_symref_and_formats_line() {
         "{issues:?}"
     );
 
-    let sample = RefsFsckIssue {
-        severity: grit_lib::refs::refs_fsck::RefsFsckSeverity::Error,
-        path: "refs/heads/sample".into(),
-        msg_id: "badRefName".into(),
-        detail: "demo".into(),
-    };
+    let sample = RefsFsckIssue::new(
+        grit_lib::refs::refs_fsck::RefsFsckSeverity::Error,
+        "refs/heads/sample",
+        "badRefName".into(),
+        "demo",
+    );
     let line = format_refs_fsck_line(&sample);
     assert!(line.contains("badRefName"));
 }

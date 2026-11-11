@@ -44,12 +44,12 @@ fn issue_msg_id_and_severity_and_format() {
     let line = format_fsck_line(&issue, &config, false);
     assert!(line.contains("missingObject"));
 
-    let bad_ref = FsckIssue::BadRef(RefsFsckIssue {
-        severity: grit_lib::refs::refs_fsck::RefsFsckSeverity::Warning,
-        path: "refs/heads/x".into(),
-        msg_id: "badRefName",
-        detail: "demo".into(),
-    });
+    let bad_ref = FsckIssue::BadRef(RefsFsckIssue::new(
+        grit_lib::refs::refs_fsck::RefsFsckSeverity::Warning,
+        "refs/heads/x",
+        "badRefName",
+        "demo",
+    ));
     assert_eq!(issue_msg_id(&bad_ref), "badRefName");
     assert_eq!(issue_severity(&bad_ref, &config, true), FsckSeverity::Error);
 

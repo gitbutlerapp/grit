@@ -52,6 +52,7 @@ pub enum RerereEventKind {
 /// One rerere status event for a path.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RerereEvent {
     /// Repository-relative path whose conflict rerere handled.
     pub path: String,

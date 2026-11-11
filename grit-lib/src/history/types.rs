@@ -137,6 +137,7 @@ impl RewriteOptions {
 /// One original commit and its replacement (if any).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RewrittenCommit {
     /// Commit OID before rewrite.
     pub old: ObjectId,
@@ -167,6 +168,7 @@ pub struct PlannedRefUpdate {
 /// Effect on `HEAD` from the rewrite (commit pointer and trees).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct HeadEffect {
     /// Whether `HEAD`'s commit OID changes.
     pub commit_changes: bool,
@@ -187,6 +189,7 @@ pub struct HeadEffect {
 /// Result of [`History::plan_rewrite`](super::History::plan_rewrite): new objects are already in the ODB.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RewritePlan {
     /// Every original commit in rewrite order and its replacement.
     pub commits: Vec<RewrittenCommit>,
@@ -283,6 +286,7 @@ pub enum UndoMode {
 /// Result of [`History::undo_last`](super::History::undo_last).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct UndoOutcome {
     /// Ref updates that were applied or would be applied (`--dry-run`).
     pub ref_updates: Vec<PlannedRefUpdate>,
@@ -304,6 +308,7 @@ pub struct UndoOutcome {
 /// Result of [`History::apply`](super::History::apply) and the fixup and absorb applies.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct AppliedRewrite {
     /// Ref updates that were committed.
     pub ref_updates: Vec<PlannedRefUpdate>,

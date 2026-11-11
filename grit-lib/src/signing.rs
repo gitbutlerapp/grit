@@ -835,6 +835,7 @@ fn memchr(buf: &[u8], from: usize, needle: u8) -> Option<usize> {
 
 /// A parsed signature check result.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct SignatureCheck {
     /// The detached armored signature extracted from the object.
     pub signature: Vec<u8>,

@@ -73,18 +73,13 @@ fn write_test_commit(
     committer: &str,
 ) -> grit_lib::error::Result<grit_lib::objects::ObjectId> {
     use grit_lib::objects::{serialize_commit, CommitData};
-    let raw = serialize_commit(&CommitData {
+    let raw = serialize_commit(&CommitData::new(
         tree,
-        parents: parents.to_vec(),
-        author: author.to_owned(),
-        committer: committer.to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{msg}\n"),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    });
+        parents.to_vec(),
+        author,
+        committer,
+        format!("{msg}\n"),
+    ));
     repo.odb().write(ObjectKind::Commit, &raw)
 }
 

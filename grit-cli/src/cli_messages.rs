@@ -40,23 +40,14 @@ mod tests {
 
     fn wrapped_lock_held(holder: Option<LockHolder>) -> (Error, PathBuf) {
         let path = PathBuf::from("/repo/.git/index.lock");
-        let err = Error::new(Wrapper(
-            LockHeldError {
-                path: path.clone(),
-                holder,
-            }
-            .into(),
-        ))
-        .context("staging files");
+        let err = Error::new(Wrapper(LockHeldError::new(path.clone(), holder).into()))
+            .context("staging files");
         (err, path)
     }
 
     #[test]
     fn nested_lock_held_gets_lock_prose_in_human_message() {
-        let (err, path) = wrapped_lock_held(Some(LockHolder {
-            pid: 42,
-            running: false,
-        }));
+        let (err, path) = wrapped_lock_held(Some(LockHolder::new(42, false)));
         assert!(err.downcast_ref::<LibError>().is_none());
         let human = human_error_message(&err);
         assert!(

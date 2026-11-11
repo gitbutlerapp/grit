@@ -88,11 +88,14 @@ fn reword_rejects_unwritable_committer_before_writing_objects() {
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let grit = open_grit(wt);
     let objects_before = git(wt, &["count-objects", "-v"]);
-    let injected = grit_lib::ident::Signature {
-        name: "Injected\nextra-header value".into(),
-        email: "r@grit.test".into(),
-        time: time::OffsetDateTime::from_unix_timestamp(1).expect("time"),
-    };
+    // `Signature::new` rejects the injected name, so build a valid one and corrupt it.
+    let mut injected = grit_lib::ident::Signature::new(
+        "Injected",
+        "r@grit.test",
+        time::OffsetDateTime::from_unix_timestamp(1).expect("time"),
+    )
+    .expect("valid signature");
+    injected.name = "Injected\nextra-header value".into();
     let err = grit
         .history()
         .reword(
@@ -327,18 +330,13 @@ fn reword_in_bare_repository() {
         .odb()
         .write(grit_lib::objects::ObjectKind::Tree, &[])
         .expect("tree");
-    let commit_bytes = grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData {
-        tree: empty,
-        parents: vec![],
-        author: committer(0),
-        committer: committer(0),
-        author_raw: vec![],
-        committer_raw: vec![],
-        encoding: None,
-        message: "root\n".into(),
-        raw_message: None,
-        extra_headers: vec![],
-    });
+    let commit_bytes = grit_lib::objects::serialize_commit(&grit_lib::objects::CommitData::new(
+        empty,
+        vec![],
+        committer(0),
+        committer(0),
+        "root\n",
+    ));
     let oid = grit
         .odb()
         .write(grit_lib::objects::ObjectKind::Commit, &commit_bytes)

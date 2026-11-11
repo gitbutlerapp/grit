@@ -139,6 +139,7 @@ impl fmt::Display for ConfigScope {
 
 /// Origin metadata for the winning config value of a key.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConfigValueOrigin {
     /// String value, or `"true"` for a bare boolean key. Only `None` when the key is missing
     /// (this struct is not used for missing keys — see [`ConfigSet::origin_of`]).
@@ -151,9 +152,35 @@ pub struct ConfigValueOrigin {
     pub line: Option<usize>,
 }
 
+impl ConfigValueOrigin {
+    /// Build origin metadata for a value.
+    ///
+    /// # Parameters
+    ///
+    /// - `value`: the value (`"true"` for a bare boolean key).
+    /// - `scope`: config layer that supplied it.
+    /// - `file`: source file when file-backed.
+    /// - `line`: one-based line number in `file`, when known.
+    #[must_use]
+    pub fn new(
+        value: Option<String>,
+        scope: ConfigScope,
+        file: Option<PathBuf>,
+        line: Option<usize>,
+    ) -> Self {
+        Self {
+            value,
+            scope,
+            file,
+            line,
+        }
+    }
+}
+
 /// A single configuration entry with its origin metadata.
 #[derive(Debug, Clone)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct ConfigEntry {
     /// Fully-qualified key in canonical form: `section.subsection.name`
     /// (section and name lowercased; subsection preserves case).

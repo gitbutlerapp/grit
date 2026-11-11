@@ -116,6 +116,21 @@ let label = match result {
 
 Sets closed by a Git format or by definition (`ObjectKind`, `HashAlgo`, `HeadState`, `ResetMode`, `TagMode`, …) stay exhaustive; `grit-lib/API.md` lists them.
 
+### Outcome, report and model structs are `#[non_exhaustive]`
+
+Structs the library returns for you to read (`*Outcome`, `*Report`, `*Stats`, `*Summary`, listing rows, status, diff, blame and log models, error payloads such as `LockHeldError`) are `#[non_exhaustive]`, so they can gain fields in a minor release. Read their public fields as before; a destructuring pattern ends in `..`. Where you also need to build one, use its constructor and assign optional fields afterwards: a custom object store returns [`Object::new`](rustdoc:grit_lib::objects::Object::new), [`ObjectInfo::new`](rustdoc:grit_lib::objects::ObjectInfo::new) and [`ObjectStream::new`](rustdoc:grit_lib::objects::odb::ObjectStream::new); [`CommitData::new`](rustdoc:grit_lib::objects::CommitData::new) and [`TagData::new`](rustdoc:grit_lib::objects::TagData::new) feed `serialize_commit` / `serialize_tag`; [`DiffEntry::new`](rustdoc:grit_lib::diff::DiffEntry::new) builds rename-detection input.
+
+```rust
+use grit_lib::objects::{serialize_commit, CommitData, ObjectId};
+
+let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")?;
+let mut commit = CommitData::new(tree, Vec::new(), "A <a@example.com> 0 +0000", "A <a@example.com> 0 +0000", "initial\n");
+commit.encoding = Some("ISO-8859-1".into());
+let bytes = serialize_commit(&commit);
+```
+
+Records fixed by a Git format (`TreeEntry`, `ReflogEntry`, `ObjectKindCounts`, `LeftRightCounts`, …) stay exhaustive.
+
 ### Custom object store via `RepositoryOptions`
 
 Injection moved into [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions): use [`with_object_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_object_store) and [`with_ref_store`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_ref_store) on open/discover/init, not ad hoc parameters on individual calls.
@@ -153,6 +168,11 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::apply::BlobApplyOptions::eq` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::apply::BlobApplyOptions::fmt` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::apply::BlobApplyOptions::reverse` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
+| `grit_lib::apply::FilePatch::new_mode_line` | `removed (patch-parser state, crate-internal in 0.6)` |  |
+| `grit_lib::apply::FilePatch::old_mode_line` | `removed (patch-parser state, crate-internal in 0.6)` |  |
+| `grit_lib::apply::FilePatch::saw_new_header` | `removed (patch-parser state, crate-internal in 0.6)` |  |
+| `grit_lib::apply::FilePatch::saw_old_header` | `removed (patch-parser state, crate-internal in 0.6)` |  |
+| `grit_lib::apply::FilePatch::ws_rule` | `removed (never set; always 0)` |  |
 | `grit_lib::apply::apply_patch_to_blob` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::blame::blame_file` | `grit_lib::diff::Diff::blame` |  |
 | `grit_lib::blame::resolve_blame_line_range` | `grit_lib::diff::Diff::resolve_blame_line_range` |  |
@@ -474,6 +494,8 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::porcelain::stage_tracked::stage_tracked_modifications_in_index_with_thresholds` | `grit_lib::index::IndexFile::stage_tracked_modifications_on` |  |
 | `grit_lib::porcelain::stage_tracked::stage_tracked_modifications_with_thresholds` | `grit_lib::index::IndexFile::stage_tracked_modifications` |  |
 | `grit_lib::porcelain::staging::stage_worktree_changes` | `grit_lib::index::IndexFile::stage_worktree_paths` |  |
+| `grit_lib::porcelain::status::StatusModel::index_sparse_on_disk` | `removed (never read; inspect the index for sparse-directory entries)` |  |
+| `grit_lib::porcelain::status::StatusModel::sparse_directory_prefixes` | `removed (never read; inspect the index for sparse-directory entries)` |  |
 | `grit_lib::porcelain::status::collect_untracked_and_ignored` | `grit_lib::status::Status::untracked` |  |
 | `grit_lib::porcelain::status::collect_untracked_and_ignored_with_cache` | `grit_lib::status::Status::untracked` |  |
 | `grit_lib::porcelain::status::collect_untracked_and_ignored_with_rules_and_cancel` | `grit_lib::status::Status::untracked_with_meta` |  |

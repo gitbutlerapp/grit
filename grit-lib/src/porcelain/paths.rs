@@ -62,6 +62,7 @@ impl RemoveOptions {
 /// Result of [`remove_paths`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct RemoveOutcome {
     /// Repository-relative paths removed from the index (and usually the work tree).
     pub removed: Vec<String>,
@@ -124,11 +125,28 @@ impl std::fmt::Display for RemoveBlockReason {
 
 /// A path [`remove_paths`] refused to remove, carried by [`crate::worktree::WorktreeError::RemoveBlocked`].
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlockedRemoval {
     /// Repository-relative path that was not removed.
     pub path: String,
     /// Why removing it would lose content.
     pub reason: RemoveBlockReason,
+}
+
+impl BlockedRemoval {
+    /// Build a refused-removal record.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: repository-relative path that was not removed.
+    /// - `reason`: why removing it would lose content.
+    #[must_use]
+    pub fn new(path: impl Into<String>, reason: RemoveBlockReason) -> Self {
+        Self {
+            path: path.into(),
+            reason,
+        }
+    }
 }
 
 impl std::fmt::Display for BlockedRemoval {
@@ -163,6 +181,7 @@ pub struct MoveOptions {
 /// Result of [`move_paths`] and [`move_path`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct MoveOutcome {
     /// Individual renames applied (or that would be applied when `dry_run`).
     pub moves: Vec<PathMove>,

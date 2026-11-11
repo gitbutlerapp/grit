@@ -80,6 +80,7 @@ pub struct LogWalkCursor {
 
 /// One page of commits plus an optional continuation cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LogWalkPage {
     /// Emitted commits, newest first.
     pub commits: Vec<ObjectId>,

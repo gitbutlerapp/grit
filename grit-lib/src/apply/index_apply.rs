@@ -22,6 +22,7 @@ pub struct IndexApplyOptions {
 
 /// Result of applying patches to the index.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct IndexApplyOutcome {
     /// New paths added to the index.
     pub added: Vec<String>,

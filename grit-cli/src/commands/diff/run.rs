@@ -468,7 +468,9 @@ fn run_patch_text(opts: DiffRunOptions, _ctx: super::DiffRunContext) -> Result<D
     let quiet = opts.quiet;
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
-    let DiffArguments { target, pathspec } = resolve_diff_target(&repo, &opts)?;
+    let DiffArguments {
+        target, pathspec, ..
+    } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);
@@ -517,7 +519,9 @@ pub fn run(opts: DiffRunOptions, ctx: super::DiffRunContext) -> Result<DiffOutco
     }
     let repo = context::discover()?;
     let config = repo.config().snapshot().context("could not load config")?;
-    let DiffArguments { target, pathspec } = resolve_diff_target(&repo, &opts)?;
+    let DiffArguments {
+        target, pathspec, ..
+    } = resolve_diff_target(&repo, &opts)?;
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     opts.format.apply_context(&mut diff_options);

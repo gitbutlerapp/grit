@@ -119,6 +119,7 @@ pub struct TreeSha256Options {
 
 /// Outcome of a successful tree-sha256 computation.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TreeSha256Report {
     /// Final tree-sha256 digest.
     pub digest: TreeSha256,
@@ -144,11 +145,28 @@ pub enum MissingSubmoduleReason {
 
 /// One submodule that blocked hashing.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct MissingSubmodule {
     /// Full path from the superproject root.
     pub path: String,
     /// What went wrong.
     pub reason: MissingSubmoduleReason,
+}
+
+impl MissingSubmodule {
+    /// Build a record of a submodule that blocked hashing.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: the submodule path.
+    /// - `reason`: why it could not be hashed.
+    #[must_use]
+    pub fn new(path: impl Into<String>, reason: MissingSubmoduleReason) -> Self {
+        Self {
+            path: path.into(),
+            reason,
+        }
+    }
 }
 
 /// Compute tree-sha256 for `repo` at `oid` (peels annotated tags to commits).
@@ -599,6 +617,7 @@ pub(crate) fn gitlink_in_commit_chain(chain: &[ObjectId], gitlink: ObjectId) -> 
 
 /// Tree-sha256 digest, counts, and timing from explicit tag creation (`CreateTagRequest::tree_sha256`).
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct TagTreeSha256Outcome {
     /// Headers written on the tag object.
     pub claim: TreeSha256Claim,
@@ -610,6 +629,7 @@ pub struct TagTreeSha256Outcome {
 
 /// Digest and excluded submodule paths recorded on an annotated tag.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TreeSha256Claim {
     /// Recorded tree-sha256 digest.
     pub digest: TreeSha256,
@@ -633,6 +653,17 @@ pub enum TreeSha256ClaimError {
 }
 
 impl TreeSha256Claim {
+    /// Build a tag's tree-sha256 claim.
+    ///
+    /// # Parameters
+    ///
+    /// - `digest`: the claimed digest.
+    /// - `excluded`: submodule paths the claim excludes.
+    #[must_use]
+    pub fn new(digest: TreeSha256, excluded: Vec<String>) -> Self {
+        Self { digest, excluded }
+    }
+
     /// Read a claim from post-`tagger` extra headers on `tag`.
     ///
     /// Returns `Ok(None)` when no `tree-sha256` header is present. Commit objects are not

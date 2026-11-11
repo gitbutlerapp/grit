@@ -465,15 +465,13 @@ fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
         .expect("tree");
     grit_test_support::refs::set_ref(&repo, "refs/tags/tree-tip", &tree).expect("tree ref");
 
-    let tag_bytes = serialize_tag(&TagData {
-        object: blob,
-        object_type: "blob".into(),
-        tag: "v1".into(),
-        tagger: Some("T <t@example.com> 1 +0000".into()),
-        extra_headers: Vec::new(),
-        message: "annotated\n".into(),
-        raw_message: None,
-    });
+    let tag_bytes = serialize_tag(&TagData::new(
+        blob,
+        "blob",
+        "v1",
+        Some("T <t@example.com> 1 +0000".into()),
+        "annotated\n",
+    ));
     let tag_oid = repo
         .odb()
         .write(ObjectKind::Tag, &tag_bytes)

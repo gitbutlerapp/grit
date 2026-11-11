@@ -124,7 +124,9 @@ fn assert_refused_by_foreign_lock<T: std::fmt::Debug>(
 
     let err = op().expect_err("operation must fail while index.lock is held");
     match &err {
-        Error::LockHeld(grit_lib::error::LockHeldError { path, holder: None }) => {
+        Error::LockHeld(grit_lib::error::LockHeldError {
+            path, holder: None, ..
+        }) => {
             assert_eq!(path, &lock_path)
         }
         other => panic!("expected Error::LockHeld, got {other:?}"),

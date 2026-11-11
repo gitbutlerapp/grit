@@ -200,15 +200,13 @@ pub(crate) fn build_history(repo: &Repository, work_tree: &Path) -> History {
         "reset: moving",
     );
 
-    let tag = serialize_tag(&TagData {
-        object: c1,
-        object_type: "commit".into(),
-        tag: "v1".into(),
-        tagger: Some("T <t@example.com> 1700000000 +0000".into()),
-        extra_headers: Vec::new(),
-        message: "v1\n".into(),
-        raw_message: None,
-    });
+    let tag = serialize_tag(&TagData::new(
+        c1,
+        "commit",
+        "v1",
+        Some("T <t@example.com> 1700000000 +0000".into()),
+        "v1\n",
+    ));
     let tag = repo.odb().write(ObjectKind::Tag, &tag).expect("tag");
     set_ref(repo, "refs/tags/v1", tag, Expected::Missing, "tag");
 

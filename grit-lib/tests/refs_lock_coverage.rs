@@ -60,11 +60,9 @@ fn write_ref_fails_when_lock_file_exists() {
     let lock_path = lock_path_for_ref(&ref_path);
     fs::write(&lock_path, b"held").expect("lock");
     let is_lock_held = |err: &Error| match err {
-        Error::LockHeld(grit_lib::error::LockHeldError { path, holder: None })
-            if **path == lock_path =>
-        {
-            true
-        }
+        Error::LockHeld(grit_lib::error::LockHeldError {
+            path, holder: None, ..
+        }) if **path == lock_path => true,
         Error::Ref(RefError::Store(RefStoreError::LockHeld { name })) => {
             name == "refs/heads/locked"
         }

@@ -1233,17 +1233,11 @@ fn case_merge_conflict_abort(fixture: &impl BackendFixture) {
     );
     assert_eq!(
         snap.conflict_details_before_abort,
-        vec![Conflict {
-            path: "shared.txt".into(),
-            kind: ConflictKind::BothAdded,
-        }]
+        vec![Conflict::new("shared.txt", ConflictKind::BothAdded)]
     );
     assert_eq!(
         snap.index_conflicts_before_abort,
-        vec![Conflict {
-            path: "shared.txt".into(),
-            kind: ConflictKind::BothAdded,
-        }]
+        vec![Conflict::new("shared.txt", ConflictKind::BothAdded)]
     );
     assert!(snap.shared_has_conflict_markers);
     assert!(snap.merge_conflicts_after_abort.is_empty());

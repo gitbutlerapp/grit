@@ -171,6 +171,7 @@ impl Default for RevWalkListOptions {
 /// into the matching [`RevListOptions`] fields. [`RevWalk::commits`] and [`RevWalk::walk`] do
 /// this for you.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RevWalkParsedSpecs {
     /// Tips and ranges to include.
     pub positive: Vec<String>,
@@ -547,6 +548,7 @@ pub fn rev_walk_list_supports_stream(walk: &RevWalkListOptions) -> bool {
 
 /// One commit from [`RevWalk::commits_stream`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RevWalkCommitStreamItem {
     /// Listed commit id.
     pub oid: ObjectId,
