@@ -389,7 +389,10 @@ impl Credential {
 /// request and [`approve`](CredentialProvider::approve) /
 /// [`reject`](CredentialProvider::reject) after, mirroring Git's
 /// `credential_fill` / `credential_approve` / `credential_reject`.
-pub trait CredentialProvider {
+///
+/// Providers are `Send + Sync` because HTTP clients share them across threads; keep
+/// mutable state behind a `Mutex` or atomics.
+pub trait CredentialProvider: Send + Sync {
     /// Fill in missing fields (typically username/password) for `input`,
     /// returning a more-complete [`Credential`]. Implementations that cannot
     /// supply a usable credential should return a typed [`Error`] rather than

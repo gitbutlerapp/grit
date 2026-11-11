@@ -377,7 +377,7 @@ mod tests {
     fn log(store: &dyn RefStore, name: &str) -> Vec<(ObjectId, ObjectId, String, String)> {
         let mut out = Vec::new();
         store
-            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |e| {
+            .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |e| {
                 out.push((e.old_oid, e.new_oid, e.identity.clone(), e.message.clone()));
                 ControlFlow::Continue(())
             })

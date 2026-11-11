@@ -525,7 +525,7 @@ impl Clone for FetchOptions {
             pack_spool_only: self.pack_spool_only,
             http_protocol_version: self.http_protocol_version,
             remote_progress: self.remote_progress,
-            filter: self.filter,
+            filter: self.filter.clone(),
             auto_filter: self.auto_filter,
             mark_received_pack_promisor: self.mark_received_pack_promisor,
             object_wants: self.object_wants.clone(),

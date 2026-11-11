@@ -3495,7 +3495,7 @@ pub(crate) fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Resu
             return Ok(false);
         }
         let mut new_tip = None;
-        match store.rewrite_reflog_str(RefNameRef::from_trusted(STASH_REF), &mut |mut entries| {
+        match store.rewrite_reflog(RefNameRef::from_trusted(STASH_REF), &mut |mut entries| {
             if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
                 return Err(crate::error::Error::Ref(RefError::Store(
                     crate::refs::store::RefStoreError::ReflogRewriteStale {

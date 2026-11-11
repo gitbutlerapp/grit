@@ -3668,7 +3668,7 @@ mod tests {
         );
         let mut messages = Vec::new();
         writer
-            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
+            .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |entry| {
                 messages.push(entry.message.clone());
                 ControlFlow::Continue(())
             })
@@ -4384,7 +4384,7 @@ mod tests {
     fn reflog_chain_intact(store: &FilesRefStore, name: &str) -> bool {
         let mut entries = Vec::new();
         store
-            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
+            .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |entry| {
                 entries.push(entry.clone());
                 ControlFlow::Continue(())
             })
@@ -4397,7 +4397,7 @@ mod tests {
     fn reflog_new_oids(store: &FilesRefStore, name: &str) -> Vec<ObjectId> {
         let mut oids = Vec::new();
         store
-            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
+            .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |entry| {
                 oids.push(entry.new_oid);
                 ControlFlow::Continue(())
             })

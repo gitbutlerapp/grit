@@ -12,7 +12,7 @@ use crate::rev_list::{expand_object_filter_for_protocol, ObjectFilter, ObjectFil
 ///
 /// Only `blob:none` and `blob:limit=<n>` are supported on the wire today; other
 /// [`ObjectFilter`] kinds remain server-side upload-pack policy only.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[cfg_attr(feature = "serde-models", serde(rename_all = "snake_case"))]
 #[non_exhaustive]
@@ -88,21 +88,6 @@ impl ObjectFilterSpec {
     /// Returns [`PartialCloneError::InvalidFilter`] when expansion fails.
     pub fn expand_for_protocol(&self) -> std::result::Result<String, PartialCloneError> {
         Ok(expand_object_filter_for_protocol(&self.to_wire_spec())?)
-    }
-
-    /// Parse `grit clone --blobs` values: `none` or a size with optional `k`/`m`/`g` suffix.
-    ///
-    /// Sizes map to `blob:limit=<n>` (same grammar as Git `--filter=blob:limit=…`).
-    ///
-    /// # Errors
-    ///
-    /// Returns [`PartialCloneError::InvalidFilter`] when `value` is not `none` or a valid limit.
-    pub fn from_blobs_cli(value: &str) -> std::result::Result<Self, PartialCloneError> {
-        let trimmed = value.trim();
-        if trimmed.eq_ignore_ascii_case("none") {
-            return Ok(Self::BlobNone);
-        }
-        Self::parse(&format!("blob:limit={trimmed}"))
     }
 
     /// Byte limit when this spec is [`Self::BlobLimit`]; `None` for [`Self::BlobNone`].
@@ -253,24 +238,6 @@ pub(crate) fn fetch_requires_upload_pack(
 mod tests {
     use super::*;
     use crate::environment::Environment;
-
-    #[test]
-    fn from_blobs_cli_rejects_overflowing_suffix() {
-        assert!(ObjectFilterSpec::from_blobs_cli("18446744073709551615g").is_err());
-    }
-
-    #[test]
-    fn from_blobs_cli_none_and_suffixes() {
-        assert_eq!(
-            ObjectFilterSpec::from_blobs_cli("none").expect("none"),
-            ObjectFilterSpec::BlobNone
-        );
-        assert_eq!(
-            ObjectFilterSpec::from_blobs_cli("1k").expect("1k"),
-            ObjectFilterSpec::BlobLimit(1024)
-        );
-        assert!(ObjectFilterSpec::from_blobs_cli("not-a-size").is_err());
-    }
 
     #[test]
     fn parse_blob_none_and_limit() {

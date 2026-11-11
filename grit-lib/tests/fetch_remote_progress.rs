@@ -6,11 +6,10 @@
 #![cfg(unix)]
 
 use grit_test_support::{git, rev_parse};
-use std::cell::RefCell;
 use std::io::{Read, Write};
 use std::path::Path;
 use std::process::Command;
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::ProgressSink;
@@ -51,14 +50,14 @@ eval "$cmd"
 
 struct TeeWriter {
     inner: *mut dyn Connection,
-    captured: Rc<RefCell<Vec<u8>>>,
+    captured: Arc<Mutex<Vec<u8>>>,
 }
 
 impl Write for TeeWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         // SAFETY: `inner` points at the `Box<dyn Connection>` owned by `TeeConn`.
         let conn: &mut dyn Connection = unsafe { &mut *self.inner };
-        self.captured.borrow_mut().extend_from_slice(buf);
+        self.captured.lock().unwrap().extend_from_slice(buf);
         conn.writer().write(buf)
     }
 
@@ -70,7 +69,7 @@ impl Write for TeeWriter {
 
 struct TeeConn {
     inner: Box<dyn Connection>,
-    request_bytes: Rc<RefCell<Vec<u8>>>,
+    request_bytes: Arc<Mutex<Vec<u8>>>,
     tee_writer_slot: Option<TeeWriter>,
 }
 
@@ -78,15 +77,20 @@ impl TeeConn {
     fn new(inner: Box<dyn Connection>) -> Self {
         Self {
             inner,
-            request_bytes: Rc::new(RefCell::new(Vec::new())),
+            request_bytes: Arc::new(Mutex::new(Vec::new())),
             tee_writer_slot: None,
         }
     }
 
-    fn request_bytes(&self) -> Rc<RefCell<Vec<u8>>> {
-        Rc::clone(&self.request_bytes)
+    fn request_bytes(&self) -> Arc<Mutex<Vec<u8>>> {
+        Arc::clone(&self.request_bytes)
     }
 }
+
+// SAFETY: the raw pointer targets the `Box<dyn Connection>` owned by the same
+// `TeeConn` (and `Connection: Send`), so the TeeWriter only ever moves to another
+// thread together with the connection it points into.
+unsafe impl Send for TeeWriter {}
 
 impl Connection for TeeConn {
     fn reader(&mut self) -> &mut dyn Read {
@@ -97,7 +101,7 @@ impl Connection for TeeConn {
         let ptr: *mut dyn Connection = self.inner.as_mut();
         self.tee_writer_slot = Some(TeeWriter {
             inner: ptr,
-            captured: Rc::clone(&self.request_bytes),
+            captured: Arc::clone(&self.request_bytes),
         });
         self.tee_writer_slot.as_mut().unwrap()
     }
@@ -212,7 +216,7 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
         String::from_utf8_lossy(&fsck.stderr)
     );
 
-    let req = req_capture.borrow().clone();
+    let req = req_capture.lock().unwrap().clone();
     (req, cap.0)
 }
 

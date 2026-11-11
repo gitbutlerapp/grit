@@ -426,7 +426,7 @@ mod tests {
     fn reflog(store: &dyn RefStore, name: &str) -> Vec<(ObjectId, ObjectId, String)> {
         let mut entries = Vec::new();
         store
-            .for_each_reflog_entry_str(RefNameRef::from_trusted(name), false, &mut |entry| {
+            .for_each_reflog_entry(RefNameRef::from_trusted(name), false, &mut |entry| {
                 entries.push((entry.old_oid, entry.new_oid, entry.message.clone()));
                 ControlFlow::Continue(())
             })
@@ -766,7 +766,7 @@ mod tests {
             identity: "T <t@example.com> 1700000000 +0000".into(),
             message: "kept".into(),
         };
-        view.replace_reflog_str(RefNameRef::from_trusted("HEAD"), vec![entry])
+        view.replace_reflog(RefNameRef::from_trusted("HEAD"), vec![entry])
             .expect("replace");
         assert_eq!(
             reflog(&view, "HEAD"),

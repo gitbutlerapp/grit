@@ -246,7 +246,7 @@ impl<'repo> RepositoryReflogs<'repo> {
             truncated: false,
         };
         let mut index = 0usize;
-        self.store().for_each_reflog_entry_str(
+        self.store().for_each_reflog_entry(
             RefNameRef::from_trusted(&canonical),
             true,
             &mut |entry| {
@@ -418,7 +418,7 @@ fn entry_matches_query(entry: &ReflogEntry, query: &ReflogQuery) -> bool {
 /// Whether `refname`'s reflog in `store` has at least one entry (reads only the newest one).
 fn reflog_has_entries(store: &dyn RefStore, refname: &str) -> Result<bool> {
     let mut found = false;
-    store.for_each_reflog_entry_str(RefNameRef::from_trusted(refname), true, &mut |_| {
+    store.for_each_reflog_entry(RefNameRef::from_trusted(refname), true, &mut |_| {
         found = true;
         ControlFlow::Break(())
     })?;

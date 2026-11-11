@@ -452,10 +452,10 @@ mod tests {
         finishes_promptly(|| {
             let store = MemoryRefStore::new();
             store
-                .replace_reflog_str(RefNameRef::from_trusted("HEAD"), sample_reflog(1))
+                .replace_reflog(RefNameRef::from_trusted("HEAD"), sample_reflog(1))
                 .expect("HEAD log");
             store
-                .replace_reflog_str(
+                .replace_reflog(
                     RefNameRef::from_trusted("refs/heads/main"),
                     sample_reflog(2),
                 )
@@ -466,7 +466,7 @@ mod tests {
                 .for_each_reflog_ref(&mut |name| {
                     assert!(store.reflog_exists(name).expect("reflog_exists"));
                     store
-                        .for_each_reflog_entry_str(
+                        .for_each_reflog_entry(
                             RefNameRef::from_trusted(name.as_str()),
                             false,
                             &mut |entry| {
@@ -500,7 +500,7 @@ mod tests {
                 .set_ref("refs/heads/b", RawRef::Direct(oid(2)))
                 .expect("b");
             store
-                .replace_reflog_str(RefNameRef::from_trusted("refs/heads/a"), sample_reflog(1))
+                .replace_reflog(RefNameRef::from_trusted("refs/heads/a"), sample_reflog(1))
                 .expect("log");
 
             let mut names = Vec::new();
@@ -526,20 +526,13 @@ mod tests {
 
             let mut entries = 0usize;
             store
-                .for_each_reflog_entry_str(
-                    RefNameRef::from_trusted("refs/heads/a"),
-                    true,
-                    &mut |_| {
-                        store
-                            .replace_reflog_str(
-                                RefNameRef::from_trusted("refs/heads/a"),
-                                Vec::new(),
-                            )
-                            .expect("replace_reflog from callback");
-                        entries += 1;
-                        ControlFlow::Continue(())
-                    },
-                )
+                .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/a"), true, &mut |_| {
+                    store
+                        .replace_reflog(RefNameRef::from_trusted("refs/heads/a"), Vec::new())
+                        .expect("replace_reflog from callback");
+                    entries += 1;
+                    ControlFlow::Continue(())
+                })
                 .expect("for_each_reflog_entry");
             assert_eq!(entries, 1);
 

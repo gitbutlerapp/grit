@@ -238,7 +238,7 @@ fn prepare_err(store: &dyn RefStore, txn: RefTransaction) -> RefStoreError {
 fn newest_reflog_entry(store: &dyn RefStore, name: &str) -> Option<ReflogEntry> {
     let mut last = None;
     store
-        .for_each_reflog_entry_str(RefNameRef::from_trusted(name), true, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted(name), true, &mut |e| {
             last = Some(e.clone());
             ControlFlow::Break(())
         })
@@ -1147,7 +1147,7 @@ pub fn empty_reflog_exists(store: Arc<dyn RefStore>) {
         .expect("exists"));
 
     store
-        .replace_reflog_str(RefNameRef::from_trusted("refs/heads/empty2"), Vec::new())
+        .replace_reflog(RefNameRef::from_trusted("refs/heads/empty2"), Vec::new())
         .expect("replace empty");
     assert!(store
         .reflog_exists(RefNameRef::from_trusted("refs/heads/empty2"))
@@ -1155,7 +1155,7 @@ pub fn empty_reflog_exists(store: Arc<dyn RefStore>) {
 
     let mut count = 0usize;
     store
-        .for_each_reflog_entry_str(
+        .for_each_reflog_entry(
             RefNameRef::from_trusted("refs/heads/empty2"),
             false,
             &mut |_| {
@@ -1362,12 +1362,12 @@ pub fn reflog_roundtrip(store: Arc<dyn RefStore>) {
         },
     ];
     store
-        .replace_reflog_str(RefNameRef::from_trusted("refs/heads/r"), entries.clone())
+        .replace_reflog(RefNameRef::from_trusted("refs/heads/r"), entries.clone())
         .expect("replace");
 
     let mut forward = Vec::new();
     store
-        .for_each_reflog_entry_str(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
             forward.push(e.clone());
             ControlFlow::Continue(())
         })
@@ -1376,7 +1376,7 @@ pub fn reflog_roundtrip(store: Arc<dyn RefStore>) {
 
     let mut reverse = Vec::new();
     store
-        .for_each_reflog_entry_str(RefNameRef::from_trusted("refs/heads/r"), true, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), true, &mut |e| {
             reverse.push(e.clone());
             ControlFlow::Continue(())
         })
@@ -1395,7 +1395,7 @@ pub fn reflog_roundtrip(store: Arc<dyn RefStore>) {
 
     let mut reflog_refs = Vec::new();
     store
-        .replace_reflog_str(
+        .replace_reflog(
             RefNameRef::from_trusted("refs/heads/rr"),
             vec![ReflogEntry {
                 old_oid: oid(1),
@@ -1423,20 +1423,20 @@ pub fn rewrite_reflog_roundtrip(store: Arc<dyn RefStore>) {
         message: format!("m{byte}"),
     };
     store
-        .replace_reflog_str(
+        .replace_reflog(
             RefNameRef::from_trusted("refs/heads/r"),
             vec![log(1), log(2), log(3)],
         )
         .expect("seed");
     store
-        .rewrite_reflog_str(RefNameRef::from_trusted("refs/heads/r"), &mut |entries| {
+        .rewrite_reflog(RefNameRef::from_trusted("refs/heads/r"), &mut |entries| {
             assert_eq!(entries.len(), 3);
             Ok(vec![entries[0].clone(), entries[2].clone()])
         })
         .expect("rewrite");
     let mut kept = Vec::new();
     store
-        .for_each_reflog_entry_str(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
             kept.push(e.clone());
             ControlFlow::Continue(())
         })
@@ -1464,7 +1464,7 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
         message: "keep-me".to_owned(),
     };
     store
-        .replace_reflog_str(
+        .replace_reflog(
             RefNameRef::from_trusted("refs/heads/r"),
             vec![droppable, keep],
         )
@@ -1496,7 +1496,7 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
     });
 
     store
-        .rewrite_reflog_str(RefNameRef::from_trusted("refs/heads/r"), &mut |entries| {
+        .rewrite_reflog(RefNameRef::from_trusted("refs/heads/r"), &mut |entries| {
             signal_tx.send(()).expect("signal");
             thread::sleep(std::time::Duration::from_millis(300));
             Ok(entries
@@ -1513,7 +1513,7 @@ pub fn rewrite_reflog_serializes_concurrent_append(store: Arc<dyn RefStore>) {
 
     let mut messages = Vec::new();
     store
-        .for_each_reflog_entry_str(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
+        .for_each_reflog_entry(RefNameRef::from_trusted("refs/heads/r"), false, &mut |e| {
             messages.push(e.message.clone());
             ControlFlow::Continue(())
         })
@@ -1556,10 +1556,10 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
         message: format!("m{byte}"),
     };
     store
-        .replace_reflog_str(RefNameRef::from_trusted("refs/heads/main"), vec![log(1)])
+        .replace_reflog(RefNameRef::from_trusted("refs/heads/main"), vec![log(1)])
         .expect("main log");
     store
-        .replace_reflog_str(RefNameRef::from_trusted("refs/heads/other"), vec![log(2)])
+        .replace_reflog(RefNameRef::from_trusted("refs/heads/other"), vec![log(2)])
         .expect("other log");
 
     let mut resolved = Vec::new();
@@ -1600,7 +1600,7 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
     store
         .for_each_reflog_ref(&mut |name| {
             store
-                .for_each_reflog_entry_str(
+                .for_each_reflog_entry(
                     RefNameRef::from_trusted(name.as_str()),
                     false,
                     &mut |entry| {
@@ -1627,7 +1627,7 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
                 first = false;
                 seed_direct(store, "refs/tags/from-callback", oid(3));
                 store
-                    .replace_reflog_str(
+                    .replace_reflog(
                         RefNameRef::from_trusted("refs/heads/main"),
                         vec![log(1), log(4)],
                     )
@@ -1645,12 +1645,12 @@ fn reentrant_callbacks_body(store: &dyn RefStore) {
 
     let mut reflog_len = 0usize;
     store
-        .for_each_reflog_entry_str(
+        .for_each_reflog_entry(
             RefNameRef::from_trusted("refs/heads/main"),
             true,
             &mut |_| {
                 store
-                    .replace_reflog_str(RefNameRef::from_trusted("refs/heads/main"), vec![log(5)])
+                    .replace_reflog(RefNameRef::from_trusted("refs/heads/main"), vec![log(5)])
                     .expect("replace_reflog during reflog walk");
                 reflog_len += 1;
                 ControlFlow::Continue(())

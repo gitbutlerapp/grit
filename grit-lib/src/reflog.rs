@@ -187,14 +187,10 @@ pub(crate) fn read_reflog(git_dir: &Path, refname: &str) -> Result<Vec<ReflogEnt
     {
         let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
         let mut entries = Vec::new();
-        store.for_each_reflog_entry_str(
-            RefNameRef::from_trusted(refname),
-            false,
-            &mut |entry| {
-                entries.push(entry.clone());
-                std::ops::ControlFlow::Continue(())
-            },
-        )?;
+        store.for_each_reflog_entry(RefNameRef::from_trusted(refname), false, &mut |entry| {
+            entries.push(entry.clone());
+            std::ops::ControlFlow::Continue(())
+        })?;
         return Ok(entries);
     }
     let path = reflog_path(git_dir, refname);
@@ -225,7 +221,7 @@ pub(crate) fn reflog_entry_count(git_dir: &Path, refname: &str) -> Result<usize>
     {
         let store = crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())?;
         let mut count = 0usize;
-        store.for_each_reflog_entry_str(RefNameRef::from_trusted(refname), false, &mut |_| {
+        store.for_each_reflog_entry(RefNameRef::from_trusted(refname), false, &mut |_| {
             count += 1;
             std::ops::ControlFlow::Continue(())
         })?;
@@ -532,7 +528,7 @@ pub(crate) fn delete_reflog_entries_on_store(
     indices: &[usize],
 ) -> Result<()> {
     let indices: Vec<usize> = indices.to_vec();
-    store.rewrite_reflog_str(RefNameRef::from_trusted(refname), &mut move |current| {
+    store.rewrite_reflog(RefNameRef::from_trusted(refname), &mut move |current| {
         Ok(filter_reflog_without_indices(current, &indices)
             .map(|(kept, _)| kept)
             .unwrap_or_default())
@@ -547,7 +543,7 @@ pub(crate) fn delete_reflog_entries_rechain_on_store(
     indices: &[usize],
 ) -> Result<()> {
     let indices: Vec<usize> = indices.to_vec();
-    store.rewrite_reflog_str(RefNameRef::from_trusted(refname), &mut move |current| {
+    store.rewrite_reflog(RefNameRef::from_trusted(refname), &mut move |current| {
         Ok(filter_reflog_without_indices(current, &indices)
             .map(|(kept, removed_oldest)| rechain_reflog_after_delete(kept, removed_oldest))
             .unwrap_or_default())
@@ -567,7 +563,7 @@ pub(crate) fn read_reflog_on_store(
         return files.read_reflog_entries(refname);
     }
     let mut entries = Vec::new();
-    store.for_each_reflog_entry_str(RefNameRef::from_trusted(refname), false, &mut |entry| {
+    store.for_each_reflog_entry(RefNameRef::from_trusted(refname), false, &mut |entry| {
         entries.push(entry.clone());
         std::ops::ControlFlow::Continue(())
     })?;
@@ -585,7 +581,7 @@ pub(crate) fn expire_reflog(
 ) -> Result<usize> {
     let store = crate::refs::store::open_ref_store(git_dir)?;
     let mut pruned = 0usize;
-    store.rewrite_reflog_str(RefNameRef::from_trusted(refname), &mut |current| {
+    store.rewrite_reflog(RefNameRef::from_trusted(refname), &mut |current| {
         if current.is_empty() {
             return Ok(current);
         }
@@ -724,7 +720,7 @@ pub(crate) fn reflog_oids_on_store(
 ) -> Result<HashSet<ObjectId>> {
     let mut out = HashSet::new();
     for name in reflog_refs_on_store(store)? {
-        store.for_each_reflog_entry_str(RefNameRef::from_trusted(&name), false, &mut |entry| {
+        store.for_each_reflog_entry(RefNameRef::from_trusted(&name), false, &mut |entry| {
             if !entry.old_oid.is_zero() {
                 out.insert(entry.old_oid);
             }
@@ -1613,7 +1609,7 @@ fn rewrite_reflog_from_snapshot(
         let snap = snapshot.to_vec();
         let drops = drop_flags.to_vec();
         let name = refname.to_owned();
-        match store.rewrite_reflog_str(RefNameRef::from_trusted(refname), &mut move |current| {
+        match store.rewrite_reflog(RefNameRef::from_trusted(refname), &mut move |current| {
             if current.len() < snap.len() || current[..snap.len()] != snap[..] {
                 return Err(Error::Ref(RefError::Store(
                     RefStoreError::ReflogRewriteStale { name: name.clone() },
@@ -2244,7 +2240,7 @@ mod rewrite_concurrency_tests {
     fn read_entries(store: &dyn RefStore, refname: &str) -> Vec<ReflogEntry> {
         let mut out = Vec::new();
         store
-            .for_each_reflog_entry_str(RefNameRef::from_trusted(refname), false, &mut |e| {
+            .for_each_reflog_entry(RefNameRef::from_trusted(refname), false, &mut |e| {
                 out.push(e.clone());
                 std::ops::ControlFlow::Continue(())
             })
@@ -2260,7 +2256,7 @@ mod rewrite_concurrency_tests {
         let o2 = oid(2);
         let o3 = oid(3);
         store
-            .replace_reflog_str(
+            .replace_reflog(
                 RefNameRef::from_trusted(refname),
                 vec![
                     ReflogEntry {
@@ -2309,7 +2305,7 @@ mod rewrite_concurrency_tests {
         let o2 = oid(2);
         let o3 = oid(3);
         store
-            .replace_reflog_str(
+            .replace_reflog(
                 RefNameRef::from_trusted(refname),
                 vec![
                     ReflogEntry {

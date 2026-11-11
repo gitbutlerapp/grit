@@ -649,7 +649,7 @@ impl CloneIntoOptions {
             initial_branch: self.initial_branch.clone(),
             thread_policy: self.thread_policy,
             depth: self.depth,
-            filter: self.filter,
+            filter: self.filter.clone(),
             branch: self.branch.clone(),
             single_branch: self.single_branch,
             tags: self.tags,
@@ -914,7 +914,7 @@ fn clone_after_claim(
         thread_policy: opts.thread_policy,
         remote_progress: progress.remote_sideband_progress(),
         fetch_depth: opts.depth.and_then(crate::transfer::FetchDepth::depth),
-        filter: opts.filter,
+        filter: opts.filter.clone(),
         auto_filter: opts.auto_filter && opts.filter.is_none(),
         link_source_objects: should_store_absolute_local_clone_url(&opts.url),
         ..Default::default()
@@ -955,7 +955,7 @@ fn clone_after_claim(
         )?;
     }
 
-    let used_filter = match opts.filter {
+    let used_filter = match opts.filter.clone() {
         Some(spec) => {
             PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)?;
             Some(spec)
@@ -965,7 +965,7 @@ fn clone_after_claim(
             fetch_outcome
                 .promisor
                 .as_ref()
-                .and_then(|h| h.resolved_filter)
+                .and_then(|h| h.resolved_filter.clone())
         }
         None => None,
     };

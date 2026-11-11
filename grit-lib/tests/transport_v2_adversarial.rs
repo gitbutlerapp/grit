@@ -27,12 +27,11 @@
 //! bind.
 
 use grit_test_support::{free_port, git, rev_parse};
-use std::cell::RefCell;
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::Path;
 use std::process::{Child, Command, Stdio};
-use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use grit_lib::objects::ObjectId;
@@ -50,7 +49,7 @@ use grit_lib::remote::transport::{
 /// framed, so we scan the captured stream for `PACK` rather than assume offset).
 struct TeeConn {
     inner: Box<dyn Connection>,
-    captured: Rc<RefCell<Vec<u8>>>,
+    captured: Arc<Mutex<Vec<u8>>>,
     // Holds the per-call tee reader alive so the `&mut dyn Read` we hand out
     // remains valid for the duration of the borrow.
     tee_reader_slot: Option<TeeReader>,
@@ -61,7 +60,7 @@ struct TeeConn {
 /// outstanding), and the test hands out only one reader at a time.
 struct TeeReader {
     inner: *mut dyn Connection,
-    captured: Rc<RefCell<Vec<u8>>>,
+    captured: Arc<Mutex<Vec<u8>>>,
 }
 
 impl Read for TeeReader {
@@ -72,7 +71,7 @@ impl Read for TeeReader {
         let conn: &mut dyn Connection = unsafe { &mut *self.inner };
         let n = conn.reader().read(buf)?;
         if n > 0 {
-            self.captured.borrow_mut().extend_from_slice(&buf[..n]);
+            self.captured.lock().unwrap().extend_from_slice(&buf[..n]);
         }
         Ok(n)
     }
@@ -82,21 +81,26 @@ impl TeeConn {
     fn new(inner: Box<dyn Connection>) -> Self {
         TeeConn {
             inner,
-            captured: Rc::new(RefCell::new(Vec::new())),
+            captured: Arc::new(Mutex::new(Vec::new())),
             tee_reader_slot: None,
         }
     }
-    fn captured(&self) -> Rc<RefCell<Vec<u8>>> {
-        Rc::clone(&self.captured)
+    fn captured(&self) -> Arc<Mutex<Vec<u8>>> {
+        Arc::clone(&self.captured)
     }
 }
+
+// SAFETY: the raw pointer targets the `Box<dyn Connection>` owned by the same
+// `TeeConn` (and `Connection: Send`), so the TeeReader only ever moves to another
+// thread together with the connection it points into.
+unsafe impl Send for TeeReader {}
 
 impl Connection for TeeConn {
     fn reader(&mut self) -> &mut dyn Read {
         let ptr: *mut dyn Connection = self.inner.as_mut();
         self.tee_reader_slot = Some(TeeReader {
             inner: ptr,
-            captured: Rc::clone(&self.captured),
+            captured: Arc::clone(&self.captured),
         });
         self.tee_reader_slot.as_mut().unwrap()
     }
@@ -546,7 +550,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
     fsck_clean(&local);
 
     // DEFINITIVE minimality proof: the PACK header object count the server sent.
-    let stream = captured.borrow();
+    let stream = captured.lock().unwrap();
     let packed = pack_object_count(&stream)
         .expect("a PACK header should be present on the wire for an incremental fetch");
     // A real thin-pack for one new commit packs only a handful of objects; the

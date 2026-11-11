@@ -145,7 +145,9 @@ impl ConnectOptions {
 /// [`Connection::writer`]; the advertisement accessors expose what the server
 /// announced on connect so the caller can resolve `want`s and pick capabilities
 /// without re-reading the stream.
-pub trait Connection {
+///
+/// Connections are `Send` so a fetch or push can run on a worker thread.
+pub trait Connection: Send {
     /// The readable half of the pkt-line stream (server -> client).
     fn reader(&mut self) -> &mut dyn Read;
 
@@ -267,7 +269,10 @@ pub(crate) fn send_client_flush(conn: &mut dyn Connection) -> Result<()> {
 ///
 /// Implementations legitimately perform socket / subprocess / HTTP I/O; the
 /// trait itself makes no such assumption, so embedders can supply their own.
-pub trait Transport {
+///
+/// Transports are `Send + Sync`, like [`HttpClient`](http::HttpClient), so one transport
+/// can be shared across threads that each open their own [`Connection`].
+pub trait Transport: Send + Sync {
     /// Connect to `url` for `service`, performing the handshake described by
     /// `opts`, and return a live [`Connection`] positioned just past the
     /// advertisement.
@@ -1674,6 +1679,22 @@ impl Transport for SshTransport {
 mod tests {
     use super::*;
     use std::process::Command;
+
+    fn assert_send<T: Send + ?Sized>() {}
+    fn assert_send_sync<T: Send + Sync + ?Sized>() {}
+
+    /// The remote-side extension traits carry `Send` (and `Sync`) supertraits, so trait
+    /// objects and the sessions holding them can move to worker threads.
+    #[test]
+    fn remote_extension_traits_are_thread_safe() {
+        assert_send::<dyn Connection>();
+        assert_send::<Box<dyn Connection>>();
+        assert_send_sync::<dyn Transport>();
+        assert_send_sync::<dyn crate::credentials::CredentialProvider>();
+        assert_send_sync::<dyn crate::serve::ReceiveHook>();
+        assert_send::<crate::transfer::TransferEndpoint<'static>>();
+        assert_send::<crate::serve::ReceivePack<'static>>();
+    }
 
     #[test]
     fn parse_git_url_defaults_and_ports() {

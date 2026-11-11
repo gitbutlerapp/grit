@@ -608,7 +608,10 @@ impl From<&RejectedObject> for RejectedObjectSerde {
 /// Push options from the client are passed in [`ReceiveHookContext`] to
 /// [`Self::pre_receive_ctx`] and [`Self::update_ctx`]; the default methods ignore
 /// them and call [`Self::pre_receive`] and [`Self::update`].
-pub trait ReceiveHook {
+///
+/// Hooks are `Send + Sync` so a server can share one hook across connection threads;
+/// keep mutable state behind a `Mutex` or atomics.
+pub trait ReceiveHook: Send + Sync {
     /// Inspect the whole push before any ref changes, like a `pre-receive` hook.
     ///
     /// Runs before the `pre-receive` script, while the pushed objects are still
@@ -735,7 +738,7 @@ impl ReceiveHook for () {}
 
 impl<F> ReceiveHook for F
 where
-    F: Fn(&RefCommand, &Odb) -> std::result::Result<(), RefUpdateRefusal>,
+    F: Fn(&RefCommand, &Odb) -> std::result::Result<(), RefUpdateRefusal> + Send + Sync,
 {
     fn update(&self, command: &RefCommand, odb: &Odb) -> std::result::Result<(), RefUpdateRefusal> {
         self(command, odb)

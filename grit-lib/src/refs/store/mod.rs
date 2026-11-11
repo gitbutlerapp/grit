@@ -126,14 +126,6 @@ pub trait RefStore: Send + Sync + Debug {
     /// A missing ref returns `Ok(None)` without allocating a new name string.
     fn read_raw(&self, name: &RefNameRef) -> Result<Option<RawRef>>;
 
-    /// [`Self::read_raw`] with a trusted UTF-8 name string (from the caller or storage).
-    ///
-    /// Default implementation delegates to [`Self::read_raw`]. Prefer
-    /// [`Self::read_raw`] when you already hold a [`RefName`] / [`RefNameRef`].
-    fn read_raw_str(&self, name: &RefNameRef) -> Result<Option<RawRef>> {
-        self.read_raw(name)
-    }
-
     /// Resolve `name` to an object id, following symbolic refs.
     ///
     /// Default implementation uses [`Self::read_raw`] and stops after
@@ -144,11 +136,6 @@ pub trait RefStore: Send + Sync + Debug {
     /// Returns [`RefStoreError::SymrefLoop`] when the chain is too deep and
     /// [`RefStoreError::NotFound`] when `name` or a symbolic target is missing.
     fn resolve(&self, name: &RefNameRef) -> Result<ObjectId> {
-        resolve_store(self, name)
-    }
-
-    /// [`Self::resolve`] for a trusted UTF-8 ref name string.
-    fn resolve_str(&self, name: &RefNameRef) -> Result<ObjectId> {
         resolve_store(self, name)
     }
 
@@ -277,11 +264,6 @@ pub trait RefStore: Send + Sync + Debug {
     /// Whether a reflog is present for `name`.
     fn reflog_exists(&self, name: &RefNameRef) -> Result<bool>;
 
-    /// [`Self::reflog_exists`] for a trusted UTF-8 ref name string.
-    fn reflog_exists_str(&self, name: &RefNameRef) -> Result<bool> {
-        self.reflog_exists(name)
-    }
-
     /// Iterate reflog entries for `name` (oldest first unless `reverse`).
     ///
     /// `f` may call back into the store; see [re-entrant callbacks](Self#re-entrant-callbacks).
@@ -292,39 +274,14 @@ pub trait RefStore: Send + Sync + Debug {
         f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
     ) -> Result<()>;
 
-    /// [`Self::for_each_reflog_entry`] for a trusted UTF-8 ref name string.
-    fn for_each_reflog_entry_str(
-        &self,
-        name: &RefNameRef,
-        reverse: bool,
-        f: &mut dyn FnMut(&ReflogEntry) -> ControlFlow<()>,
-    ) -> Result<()> {
-        self.for_each_reflog_entry(name, reverse, f)
-    }
-
     /// Create an empty reflog file/record for `name`.
     fn create_reflog(&self, name: &RefNameRef) -> Result<()>;
-
-    /// [`Self::create_reflog`] for a trusted UTF-8 ref name string.
-    fn create_reflog_str(&self, name: &RefNameRef) -> Result<()> {
-        self.create_reflog(name)
-    }
 
     /// Remove the reflog for `name`.
     fn delete_reflog(&self, name: &RefNameRef) -> Result<()>;
 
-    /// [`Self::delete_reflog`] for a trusted UTF-8 ref name string.
-    fn delete_reflog_str(&self, name: &RefNameRef) -> Result<()> {
-        self.delete_reflog(name)
-    }
-
     /// Replace the entire reflog (used by expire/delete-entries).
     fn replace_reflog(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()>;
-
-    /// [`Self::replace_reflog`] for a trusted UTF-8 ref name string.
-    fn replace_reflog_str(&self, name: &RefNameRef, entries: Vec<ReflogEntry>) -> Result<()> {
-        self.replace_reflog(name, entries)
-    }
 
     /// Read a reflog under the backend writer lock, transform it, and write it back atomically.
     ///
@@ -344,15 +301,6 @@ pub trait RefStore: Send + Sync + Debug {
         name: &RefNameRef,
         transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
     ) -> Result<()>;
-
-    /// [`Self::rewrite_reflog`] for a trusted UTF-8 ref name string.
-    fn rewrite_reflog_str(
-        &self,
-        name: &RefNameRef,
-        transform: &mut dyn FnMut(Vec<ReflogEntry>) -> Result<Vec<ReflogEntry>>,
-    ) -> Result<()> {
-        self.rewrite_reflog(name, transform)
-    }
 
     /// Invoke `f` for each ref name that has a reflog, in sorted order.
     ///

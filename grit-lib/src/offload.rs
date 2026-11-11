@@ -388,6 +388,7 @@ pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<
         })?;
     let filter = opts
         .filter
+        .clone()
         .or_else(|| stored_remote_filter(&config, remote))
         .ok_or_else(|| OffloadError::NoThreshold {
             remote: remote.to_owned(),
@@ -406,7 +407,7 @@ pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<
     };
 
     let main_bytes_before = local_object_bytes(odb)?;
-    let selection = select_candidates(repo, filter)?;
+    let selection = select_candidates(repo, &filter)?;
     let candidates: Vec<ObjectId> = selection.candidates.keys().copied().collect();
     if let Some(refusal) = kept_object_the_promisor_pack_names(odb, &selection.candidates)? {
         return Err(refusal.into());
@@ -421,7 +422,7 @@ pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<
     let mut report = OffloadReport {
         remote: remote.to_owned(),
         lop_git_dir: lop.git_dir().to_path_buf(),
-        filter,
+        filter: filter.clone(),
         dry_run: opts.dry_run,
         candidates: candidates.len(),
         candidate_bytes: selection.candidates.values().sum(),
@@ -613,7 +614,7 @@ struct Selection {
 /// A blob qualifies only when a tree naming it will be in the rewritten promisor
 /// pack (stored loose or in a pack without `.keep`): that is what makes it promised
 /// once it is gone. Nothing is fetched; unreadable objects are skipped.
-fn select_candidates(repo: &Repository, filter: ObjectFilterSpec) -> Result<Selection> {
+fn select_candidates(repo: &Repository, filter: &ObjectFilterSpec) -> Result<Selection> {
     let odb = repo.odb();
     let pack_dir = odb.objects_dir().join("pack");
     let (kept, rewritten): (Vec<_>, Vec<_>) = odb
@@ -793,7 +794,7 @@ fn kept_object_the_promisor_pack_names(
 }
 
 /// The size of `oid` when it is a blob stored locally that `filter` leaves out.
-fn selected_blob_size(odb: &Odb, filter: ObjectFilterSpec, oid: &ObjectId) -> Result<Option<u64>> {
+fn selected_blob_size(odb: &Odb, filter: &ObjectFilterSpec, oid: &ObjectId) -> Result<Option<u64>> {
     if !odb.try_exists_stored(oid)? {
         return Ok(None);
     }
@@ -807,7 +808,7 @@ fn selected_blob_size(odb: &Odb, filter: ObjectFilterSpec, oid: &ObjectId) -> Re
     }
     let selected = match filter {
         ObjectFilterSpec::BlobNone => true,
-        ObjectFilterSpec::BlobLimit(limit) => info.size >= limit,
+        ObjectFilterSpec::BlobLimit(limit) => info.size >= *limit,
     };
     Ok(selected.then_some(info.size))
 }

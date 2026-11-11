@@ -120,8 +120,18 @@ struct FileAlternatesCache {
     snapshot: Option<Arc<Vec<PathBuf>>>,
 }
 
-/// Options for [`Odb::write_with`].
+/// Options for [`Odb::write_with`] and [`WritableObjectStore::write`].
+///
+/// Every field defaults to `false`, which is a plain write. Start from
+/// [`WriteOptions::default`] and chain the `with_*` setters; the struct is
+/// `#[non_exhaustive]`, so it cannot be built with a struct literal outside `grit-lib`.
+///
+/// The flags are hints for the files-backed (loose) object store: how much existence
+/// probing to skip and whether to freshen mtimes. Backends other than the files store
+/// may ignore every one of them; a custom [`WritableObjectStore`] only has to store
+/// the object idempotently and return its id.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WriteOptions {
     /// When set, do not touch mtimes on existing objects (Git `WRITE_OBJECT_SILENT`).
     pub silent: bool,
@@ -149,6 +159,66 @@ pub struct WriteOptions {
     pub freshen_existing: bool,
 }
 
+impl WriteOptions {
+    /// Set [`Self::silent`]: do not touch mtimes on existing objects.
+    ///
+    /// # Parameters
+    ///
+    /// - `silent`: `true` to leave existing objects' mtimes alone.
+    #[must_use]
+    pub const fn with_silent(mut self, silent: bool) -> Self {
+        self.silent = silent;
+        self
+    }
+
+    /// Set [`Self::assume_loose_only_existence`]: probe only for a loose copy before writing.
+    ///
+    /// # Parameters
+    ///
+    /// - `assume_loose_only_existence`: `true` to skip the pack and alternate scan.
+    #[must_use]
+    pub const fn with_assume_loose_only_existence(
+        mut self,
+        assume_loose_only_existence: bool,
+    ) -> Self {
+        self.assume_loose_only_existence = assume_loose_only_existence;
+        self
+    }
+
+    /// Set [`Self::trust_new_loose`]: skip existence probes for objects known to be new.
+    ///
+    /// # Parameters
+    ///
+    /// - `trust_new_loose`: `true` to write whenever the loose path is absent.
+    #[must_use]
+    pub const fn with_trust_new_loose(mut self, trust_new_loose: bool) -> Self {
+        self.trust_new_loose = trust_new_loose;
+        self
+    }
+
+    /// Set [`Self::loose_prefix_dirs_ready`]: the loose fan-out directories already exist.
+    ///
+    /// # Parameters
+    ///
+    /// - `loose_prefix_dirs_ready`: `true` after [`Odb::ensure_all_loose_prefix_dirs`].
+    #[must_use]
+    pub const fn with_loose_prefix_dirs_ready(mut self, loose_prefix_dirs_ready: bool) -> Self {
+        self.loose_prefix_dirs_ready = loose_prefix_dirs_ready;
+        self
+    }
+
+    /// Set [`Self::freshen_existing`]: freshen a packed or alternate copy instead of writing.
+    ///
+    /// # Parameters
+    ///
+    /// - `freshen_existing`: `true` to freshen an existing non-loose copy and skip the write.
+    #[must_use]
+    pub const fn with_freshen_existing(mut self, freshen_existing: bool) -> Self {
+        self.freshen_existing = freshen_existing;
+        self
+    }
+}
+
 /// [`WriteOptions`] for parallel staging of new worktree blobs (bulk `git add`).
 ///
 /// Only a loose copy stops the write; use [`Odb::bulk_stage_write_options`] for staging
@@ -162,7 +232,7 @@ pub const BULK_NEW_LOOSE_WRITE: WriteOptions = WriteOptions {
 };
 
 /// Parallel restage of tracked modifications (objects may already be loose or packed).
-pub const BULK_TRACKED_RESTAGE_LOOSE_WRITE: WriteOptions = WriteOptions {
+pub(crate) const BULK_TRACKED_RESTAGE_LOOSE_WRITE: WriteOptions = WriteOptions {
     assume_loose_only_existence: true,
     trust_new_loose: false,
     silent: false,
@@ -2641,7 +2711,7 @@ impl Odb {
     /// again as a loose object. Call once per batch: the pack listing is read here, so
     /// workers probe already-loaded indexes.
     #[must_use]
-    pub fn bulk_stage_write_options(&self) -> WriteOptions {
+    pub(crate) fn bulk_stage_write_options(&self) -> WriteOptions {
         let stored_beyond_loose = !self.primary.is_custom()
             && (self.alternate_object_lookup_needed()
                 || self.with_pack_read_context(|| {

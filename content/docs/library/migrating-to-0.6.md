@@ -375,9 +375,14 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::objects::empty_object_id_hash_set` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::objects::empty_oid_byte_filter_map` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::objects::empty_oid_set` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
+| `grit_lib::objects::hash::ChecksumHasher::Sha1` | `removed (ChecksumHasher is an opaque struct in 0.6; build it with ChecksumHasher::new or HashAlgo::checksum_hasher)` |  |
+| `grit_lib::objects::hash::ChecksumHasher::Sha256` | `removed (ChecksumHasher is an opaque struct in 0.6; build it with ChecksumHasher::new or HashAlgo::checksum_hasher)` |  |
+| `grit_lib::objects::hash::ObjectHasher::Sha1` | `removed (ObjectHasher is an opaque struct in 0.6; build it with ObjectHasher::new or HashAlgo::hasher)` |  |
+| `grit_lib::objects::hash::ObjectHasher::Sha256` | `removed (ObjectHasher is an opaque struct in 0.6; build it with ObjectHasher::new or HashAlgo::hasher)` |  |
 | `grit_lib::objects::insert_header_before_signature` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::objects::iter_extra_headers` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::objects::next_header_block` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
+| `grit_lib::objects::odb::BULK_TRACKED_RESTAGE_LOOSE_WRITE` | `removed (crate-internal in 0.6: build WriteOptions with its with_* setters)` |  |
 | `grit_lib::objects::oid_hash_set_from` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::objects::pack::ReuseWriteStats` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::objects::pack::ReuseWriteStats::clone` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
@@ -537,6 +542,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::prelude::MidxError::clone` | `grit_lib::prelude::MidxError (unchanged; the snapshot lists this member under grit_lib::error::MidxError)` |  |
 | `grit_lib::prelude::MidxError::eq` | `grit_lib::prelude::MidxError (unchanged; the snapshot lists this member under grit_lib::error::MidxError)` |  |
 | `grit_lib::prelude::MidxError::fmt` | `grit_lib::prelude::MidxError (unchanged; the snapshot lists this member under grit_lib::error::MidxError)` |  |
+| `grit_lib::prelude::Odb::bulk_stage_write_options` | `removed (crate-internal in 0.6: staging-only policy; build WriteOptions with its with_* setters)` |  |
 | `grit_lib::refs::branch_tracking::apply_push_remote_tracking_updates` | `grit_lib::repo_handles::Branches::apply_push_remote_tracking_updates` |  |
 | `grit_lib::refs::branch_tracking::compare_with_target_optional` | `grit_lib::repo_handles::Branches::compare_with_target` |  |
 | `grit_lib::refs::branch_tracking::list_branches` | `grit_lib::repo_handles::Branches::list` |  |
@@ -552,6 +558,38 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::refs::reflog::MessageMatcher::fmt` | `grit_lib::refs::reflog::MessageMatcher (unchanged; the snapshot lists this member under grit_lib::repo_handles::MessageMatcher)` |  |
 | `grit_lib::refs::reflog::MessageMatcher::matches` | `grit_lib::refs::reflog::MessageMatcher (unchanged; the snapshot lists this member under grit_lib::repo_handles::MessageMatcher)` |  |
 | `grit_lib::refs::reflog::MessageMatcher::new` | `grit_lib::refs::reflog::MessageMatcher (unchanged; the snapshot lists this member under grit_lib::repo_handles::MessageMatcher)` |  |
+| `grit_lib::refs::store::FilesRefStore::create_reflog_str` | `grit_lib::refs::store::FilesRefStore::create_reflog` |  |
+| `grit_lib::refs::store::FilesRefStore::delete_reflog_str` | `grit_lib::refs::store::FilesRefStore::delete_reflog` |  |
+| `grit_lib::refs::store::FilesRefStore::for_each_reflog_entry_str` | `grit_lib::refs::store::FilesRefStore::for_each_reflog_entry` |  |
+| `grit_lib::refs::store::FilesRefStore::read_raw_str` | `grit_lib::refs::store::FilesRefStore::read_raw` |  |
+| `grit_lib::refs::store::FilesRefStore::reflog_exists_str` | `grit_lib::refs::store::FilesRefStore::reflog_exists` |  |
+| `grit_lib::refs::store::FilesRefStore::replace_reflog_str` | `grit_lib::refs::store::FilesRefStore::replace_reflog` |  |
+| `grit_lib::refs::store::FilesRefStore::resolve_str` | `grit_lib::refs::store::FilesRefStore::resolve` |  |
+| `grit_lib::refs::store::FilesRefStore::rewrite_reflog_str` | `grit_lib::refs::store::FilesRefStore::rewrite_reflog` |  |
+| `grit_lib::refs::store::MemoryRefStore::create_reflog_str` | `grit_lib::refs::store::MemoryRefStore::create_reflog` |  |
+| `grit_lib::refs::store::MemoryRefStore::delete_reflog_str` | `grit_lib::refs::store::MemoryRefStore::delete_reflog` |  |
+| `grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry_str` | `grit_lib::refs::store::MemoryRefStore::for_each_reflog_entry` |  |
+| `grit_lib::refs::store::MemoryRefStore::read_raw_str` | `grit_lib::refs::store::MemoryRefStore::read_raw` |  |
+| `grit_lib::refs::store::MemoryRefStore::reflog_exists_str` | `grit_lib::refs::store::MemoryRefStore::reflog_exists` |  |
+| `grit_lib::refs::store::MemoryRefStore::replace_reflog_str` | `grit_lib::refs::store::MemoryRefStore::replace_reflog` |  |
+| `grit_lib::refs::store::MemoryRefStore::resolve_str` | `grit_lib::refs::store::MemoryRefStore::resolve` |  |
+| `grit_lib::refs::store::MemoryRefStore::rewrite_reflog_str` | `grit_lib::refs::store::MemoryRefStore::rewrite_reflog` |  |
+| `grit_lib::refs::store::RefStore::create_reflog_str` | `grit_lib::refs::store::RefStore::create_reflog` |  |
+| `grit_lib::refs::store::RefStore::delete_reflog_str` | `grit_lib::refs::store::RefStore::delete_reflog` |  |
+| `grit_lib::refs::store::RefStore::for_each_reflog_entry_str` | `grit_lib::refs::store::RefStore::for_each_reflog_entry` |  |
+| `grit_lib::refs::store::RefStore::read_raw_str` | `grit_lib::refs::store::RefStore::read_raw` |  |
+| `grit_lib::refs::store::RefStore::reflog_exists_str` | `grit_lib::refs::store::RefStore::reflog_exists` |  |
+| `grit_lib::refs::store::RefStore::replace_reflog_str` | `grit_lib::refs::store::RefStore::replace_reflog` |  |
+| `grit_lib::refs::store::RefStore::resolve_str` | `grit_lib::refs::store::RefStore::resolve` |  |
+| `grit_lib::refs::store::RefStore::rewrite_reflog_str` | `grit_lib::refs::store::RefStore::rewrite_reflog` |  |
+| `grit_lib::refs::store::ReftableRefStore::create_reflog_str` | `grit_lib::refs::store::ReftableRefStore::create_reflog` |  |
+| `grit_lib::refs::store::ReftableRefStore::delete_reflog_str` | `grit_lib::refs::store::ReftableRefStore::delete_reflog` |  |
+| `grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry_str` | `grit_lib::refs::store::ReftableRefStore::for_each_reflog_entry` |  |
+| `grit_lib::refs::store::ReftableRefStore::read_raw_str` | `grit_lib::refs::store::ReftableRefStore::read_raw` |  |
+| `grit_lib::refs::store::ReftableRefStore::reflog_exists_str` | `grit_lib::refs::store::ReftableRefStore::reflog_exists` |  |
+| `grit_lib::refs::store::ReftableRefStore::replace_reflog_str` | `grit_lib::refs::store::ReftableRefStore::replace_reflog` |  |
+| `grit_lib::refs::store::ReftableRefStore::resolve_str` | `grit_lib::refs::store::ReftableRefStore::resolve` |  |
+| `grit_lib::refs::store::ReftableRefStore::rewrite_reflog_str` | `grit_lib::refs::store::ReftableRefStore::rewrite_reflog` |  |
 | `grit_lib::refs::store::backend::expected_matches` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::refs::store::backend::verify_create_casefold_against_existing` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::refs::store::backend::verify_create_casefold_conflicts` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
@@ -878,6 +916,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::remote::grit_server_space::fetch_space` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
 | `grit_lib::remote::grit_server_space::hosted_project` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
 | `grit_lib::remote::grit_server_space::integrate_branch` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
+| `grit_lib::remote::partial_clone::ObjectFilterSpec::from_blobs_cli` | `grit_lib::remote::partial_clone::ObjectFilterSpec::parse (pass blob:none or blob:limit=<size>; the --blobs grammar moved to grit-cli)` |  |
 | `grit_lib::remote::snapshot_checkout` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
 | `grit_lib::remote::snapshot_checkout::BranchInfo` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
 | `grit_lib::remote::snapshot_checkout::BranchInfo::clone` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |

@@ -60,9 +60,7 @@ pub mod odb {
     pub use crate::odb::builder::OdbBuilder;
     pub use crate::odb::store;
     pub use crate::odb::store::{ObjectStore, WritableObjectStore};
-    pub use crate::odb::{
-        ObjectStream, Odb, WriteOptions, BULK_NEW_LOOSE_WRITE, BULK_TRACKED_RESTAGE_LOOSE_WRITE,
-    };
+    pub use crate::odb::{ObjectStream, Odb, WriteOptions, BULK_NEW_LOOSE_WRITE};
 }
 
 pub mod pack {

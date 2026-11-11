@@ -10,7 +10,7 @@ use grit_lib::remote::clone::{
     cleanup_failed_clone, clone as clone_repo, clone_effective_single_branch, derive_clone_dir,
     dest_preexisted_empty, CloneCheckout, CloneError, CloneHead, CloneOptions, CloneTags,
 };
-use grit_lib::remote::partial_clone::ObjectFilterSpec;
+use grit_lib::remote::partial_clone::{ObjectFilterSpec, PartialCloneError};
 use grit_lib::remote::transport_path::redact_url_for_display;
 
 use crate::progress::summary::TransferSummary;
@@ -116,12 +116,26 @@ fn effective_tag_fetch_mode(opts: &CloneRunOptions) -> CloneTags {
 }
 
 /// A parsed `--blobs` value.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 enum BlobsArg {
     /// `none` or a size.
     Filter(ObjectFilterSpec),
     /// `auto`: take the filter from the accepted promisor remotes.
     Auto,
+}
+
+/// Parse a `--blobs` value: `none`, or a size with an optional `k`/`m`/`g` suffix.
+///
+/// Sizes become `blob:limit=<n>`, the same grammar as `--filter=blob:limit=…`.
+/// Shared by `grit clone --blobs` and `grit gc offload --blobs`.
+pub(crate) fn blobs_filter_spec(
+    value: &str,
+) -> std::result::Result<ObjectFilterSpec, PartialCloneError> {
+    let trimmed = value.trim();
+    if trimmed.eq_ignore_ascii_case("none") {
+        return Ok(ObjectFilterSpec::BlobNone);
+    }
+    ObjectFilterSpec::parse(&format!("blob:limit={trimmed}"))
 }
 
 fn parse_blobs_filter(raw: Option<&str>) -> Result<Option<BlobsArg>> {
@@ -131,7 +145,7 @@ fn parse_blobs_filter(raw: Option<&str>) -> Result<Option<BlobsArg>> {
     if raw.trim().eq_ignore_ascii_case("auto") {
         return Ok(Some(BlobsArg::Auto));
     }
-    ObjectFilterSpec::from_blobs_cli(raw)
+    blobs_filter_spec(raw)
         .map(|spec| Some(BlobsArg::Filter(spec)))
         .map_err(|e| {
             anyhow::Error::from(CloneUsageError).context(format!("invalid --blobs value: {e}"))
@@ -219,11 +233,11 @@ fn clone_into(
         .clone()
         .unwrap_or_else(|| grit_lib::remote::DEFAULT_REMOTE.to_owned());
     let tag_mode = effective_tag_fetch_mode(run);
+    let auto_filter = blobs == Some(BlobsArg::Auto);
     let filter = match blobs {
         Some(BlobsArg::Filter(spec)) => Some(spec),
         Some(BlobsArg::Auto) | None => None,
     };
-    let auto_filter = blobs == Some(BlobsArg::Auto);
     let clone_opts = CloneOptions {
         url: run.url.clone(),
         dest: path.to_path_buf(),
@@ -414,4 +428,27 @@ fn bundle_cache_dir() -> Option<PathBuf> {
                 .map(|home| PathBuf::from(home).join(".cache"))
         })?;
     Some(base.join("grit").join("bundles"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn blobs_filter_spec_rejects_overflowing_suffix() {
+        assert!(blobs_filter_spec("18446744073709551615g").is_err());
+    }
+
+    #[test]
+    fn blobs_filter_spec_none_and_suffixes() {
+        assert_eq!(
+            blobs_filter_spec("none").expect("none"),
+            ObjectFilterSpec::BlobNone
+        );
+        assert_eq!(
+            blobs_filter_spec("1k").expect("1k"),
+            ObjectFilterSpec::BlobLimit(1024)
+        );
+        assert!(blobs_filter_spec("not-a-size").is_err());
+    }
 }

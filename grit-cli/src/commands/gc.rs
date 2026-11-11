@@ -11,7 +11,6 @@ use grit_lib::maintenance::{
 };
 use grit_lib::objects::midx::MidxBitmapWriteOutcome;
 use grit_lib::progress::ProgressSink;
-use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use time::OffsetDateTime;
 
 use crate::context;
@@ -356,7 +355,7 @@ pub fn run_offload(
     let filter = args
         .blobs
         .as_deref()
-        .map(ObjectFilterSpec::from_blobs_cli)
+        .map(super::clone::blobs_filter_spec)
         .transpose()
         .map_err(|e| anyhow::anyhow!("invalid --blobs value: {e}"))?;
     let mut opts = OffloadOptions::new(args.remote, now.unix_timestamp());
@@ -395,7 +394,7 @@ pub fn run_drop_large_blobs(
         .map_err(crate::json_error::map_lib_error)?;
     let min_size = min_size
         .map(|size| {
-            ObjectFilterSpec::from_blobs_cli(size)
+            super::clone::blobs_filter_spec(size)
                 .ok()
                 .and_then(|f| f.blob_limit_bytes())
                 .ok_or_else(|| anyhow::anyhow!("invalid --min-size value: '{size}'"))

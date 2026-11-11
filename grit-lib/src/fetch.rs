@@ -1062,7 +1062,7 @@ fn v2_promisor_handshake(
         handshake.store_fields(local.git_dir(), local_cfg)?;
     }
     if auto_filter {
-        opts.filter = handshake.resolved_filter;
+        opts.filter = handshake.resolved_filter.clone();
     }
     net_trace!(
         opts.network_trace,

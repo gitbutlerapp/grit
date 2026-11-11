@@ -2715,7 +2715,7 @@ fn resolve_base(
 
 fn read_reflog_for_repo(repo: &Repository, refname: &str) -> Result<Vec<ReflogEntry>> {
     let mut entries = Vec::new();
-    repo.ref_store().for_each_reflog_entry_str(
+    repo.ref_store().for_each_reflog_entry(
         RefNameRef::from_trusted(refname),
         false,
         &mut |entry| {

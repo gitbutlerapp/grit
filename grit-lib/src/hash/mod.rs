@@ -116,44 +116,60 @@ const OBJECT_HEADER_BUF_LEN: usize = 6 + 1 + 20 + 1;
 /// Checksums use the same SHA-1 or SHA-256 digests as object ids but name file
 /// integrity, not [`ObjectId`] values. Prefer this type anywhere a trailer or
 /// non-object content hash is computed or verified.
+///
+/// The digest implementation is private, so a hash-crate upgrade is not a
+/// `grit-lib` API change. Build one with [`ChecksumHasher::new`] or
+/// [`HashAlgo::checksum_hasher`].
 #[derive(Debug, Clone)]
-pub enum ChecksumHasher {
-    /// SHA-1 (20-byte digests).
+pub struct ChecksumHasher {
+    inner: ChecksumState,
+}
+
+/// Private digest state behind [`ChecksumHasher`].
+#[derive(Debug, Clone)]
+enum ChecksumState {
     Sha1(Sha1),
-    /// SHA-256 (32-byte digests).
     Sha256(Sha256),
 }
 
 impl ChecksumHasher {
     /// Create a fresh checksum hasher for `algo`.
     #[must_use]
+    #[inline]
     pub fn new(algo: HashAlgo) -> Self {
-        algo.checksum_hasher()
+        let inner = match algo {
+            HashAlgo::Sha1 => ChecksumState::Sha1(Sha1::new()),
+            HashAlgo::Sha256 => ChecksumState::Sha256(Sha256::new()),
+        };
+        Self { inner }
     }
 
     /// The hash algorithm this hasher produces.
     #[must_use]
-    pub fn algo(self: &ChecksumHasher) -> HashAlgo {
-        match self {
-            Self::Sha1(_) => HashAlgo::Sha1,
-            Self::Sha256(_) => HashAlgo::Sha256,
+    #[inline]
+    pub fn algo(&self) -> HashAlgo {
+        match self.inner {
+            ChecksumState::Sha1(_) => HashAlgo::Sha1,
+            ChecksumState::Sha256(_) => HashAlgo::Sha256,
         }
     }
 
     /// Feed more bytes into the digest.
+    #[inline]
     pub fn update(&mut self, data: &[u8]) {
-        match self {
-            Self::Sha1(h) => h.update(data),
-            Self::Sha256(h) => h.update(data),
+        match &mut self.inner {
+            ChecksumState::Sha1(h) => h.update(data),
+            ChecksumState::Sha256(h) => h.update(data),
         }
     }
 
     /// Finish hashing and return the raw digest bytes.
     #[must_use]
+    #[inline]
     pub fn finalize(self) -> Vec<u8> {
-        match self {
-            Self::Sha1(h) => h.finalize().to_vec(),
-            Self::Sha256(h) => h.finalize().to_vec(),
+        match self.inner {
+            ChecksumState::Sha1(h) => h.finalize().to_vec(),
+            ChecksumState::Sha256(h) => h.finalize().to_vec(),
         }
     }
 
@@ -177,6 +193,7 @@ impl ChecksumHasher {
 }
 
 impl Write for ChecksumHasher {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.update(buf);
         Ok(buf.len())
@@ -188,35 +205,51 @@ impl Write for ChecksumHasher {
 }
 
 /// Incremental hasher for Git's supported object-id algorithms.
+///
+/// SHA-1 ids go through sha1dc collision detection; SHA-256 ids use a plain digest.
+/// The digest implementation is private, so a hash-crate upgrade is not a
+/// `grit-lib` API change. Build one with [`ObjectHasher::new`],
+/// [`ObjectHasher::for_object`] or [`HashAlgo::hasher`].
 #[derive(Debug, Clone)]
-pub enum ObjectHasher {
-    /// SHA-1 (20-byte digests) with sha1dc collision detection.
+pub struct ObjectHasher {
+    inner: ObjectHashState,
+}
+
+/// Private digest state behind [`ObjectHasher`].
+#[derive(Debug, Clone)]
+enum ObjectHashState {
     Sha1(Sha1dcHasher),
-    /// SHA-256 (32-byte digests).
     Sha256(Sha256),
 }
 
 impl ObjectHasher {
     /// Create a fresh hasher for `algo`.
     #[must_use]
+    #[inline]
     pub fn new(algo: HashAlgo) -> Self {
-        algo.hasher()
+        let inner = match algo {
+            HashAlgo::Sha1 => ObjectHashState::Sha1(Sha1dcHasher::new()),
+            HashAlgo::Sha256 => ObjectHashState::Sha256(Sha256::new()),
+        };
+        Self { inner }
     }
 
     /// The hash algorithm this hasher produces.
     #[must_use]
-    pub fn algo(self: &ObjectHasher) -> HashAlgo {
-        match self {
-            Self::Sha1(_) => HashAlgo::Sha1,
-            Self::Sha256(_) => HashAlgo::Sha256,
+    #[inline]
+    pub fn algo(&self) -> HashAlgo {
+        match self.inner {
+            ObjectHashState::Sha1(_) => HashAlgo::Sha1,
+            ObjectHashState::Sha256(_) => HashAlgo::Sha256,
         }
     }
 
     /// Feed more bytes into the digest.
+    #[inline]
     pub fn update(&mut self, data: &[u8]) {
-        match self {
-            Self::Sha1(h) => h.update(data),
-            Self::Sha256(h) => h.update(data),
+        match &mut self.inner {
+            ObjectHashState::Sha1(h) => h.update(data),
+            ObjectHashState::Sha256(h) => h.update(data),
         }
     }
 
@@ -237,13 +270,14 @@ impl ObjectHasher {
     /// # Errors
     ///
     /// Returns [`crate::error::ObjectError::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    #[inline]
     pub fn finalize(self) -> Result<ObjectId> {
-        match self {
-            Self::Sha1(h) => match h.finalize() {
+        match self.inner {
+            ObjectHashState::Sha1(h) => match h.finalize() {
                 Ok(digest) => Ok(object_id_from_sha1_digest(&digest)),
                 Err(collision) => Err(collision_to_error(collision)),
             },
-            Self::Sha256(h) => Ok(ObjectId::from_bytes(h.finalize().as_slice())
+            ObjectHashState::Sha256(h) => Ok(ObjectId::from_bytes(h.finalize().as_slice())
                 .unwrap_or_else(|_| unreachable!("SHA-256 digest is 32 bytes"))),
         }
     }
@@ -255,8 +289,8 @@ impl ObjectHasher {
     /// Returns [`crate::error::ObjectError::InvalidId`] when `out` is shorter than the digest
     /// length for this algorithm (a diagnostic string names the required size).
     pub fn finalize_into(self, out: &mut [u8]) -> Result<usize> {
-        match self {
-            Self::Sha1(h) => {
+        match self.inner {
+            ObjectHashState::Sha1(h) => {
                 let oid = match h.finalize() {
                     Ok(digest) => object_id_from_sha1_digest(&digest),
                     Err(collision) => return Err(collision_to_error(collision)),
@@ -274,7 +308,7 @@ impl ObjectHasher {
                 out[..bytes.len()].copy_from_slice(bytes);
                 Ok(bytes.len())
             }
-            Self::Sha256(h) => {
+            ObjectHashState::Sha256(h) => {
                 let digest = h.finalize();
                 let len = digest.len();
                 if out.len() < len {
@@ -293,6 +327,7 @@ impl ObjectHasher {
 }
 
 impl Write for ObjectHasher {
+    #[inline]
     fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
         self.update(buf);
         Ok(buf.len())
@@ -306,11 +341,9 @@ impl Write for ObjectHasher {
 impl HashAlgo {
     /// Return a fresh incremental checksum hasher for this algorithm.
     #[must_use]
+    #[inline]
     pub fn checksum_hasher(self) -> ChecksumHasher {
-        match self {
-            Self::Sha1 => ChecksumHasher::Sha1(Sha1::new()),
-            Self::Sha256 => ChecksumHasher::Sha256(Sha256::new()),
-        }
+        ChecksumHasher::new(self)
     }
 
     /// Hash a byte slice with no Git object header and return a file checksum.
@@ -323,11 +356,9 @@ impl HashAlgo {
 
     /// Return a fresh incremental hasher for this algorithm.
     #[must_use]
+    #[inline]
     pub fn hasher(self) -> ObjectHasher {
-        match self {
-            Self::Sha1 => ObjectHasher::Sha1(Sha1dcHasher::new()),
-            Self::Sha256 => ObjectHasher::Sha256(Sha256::new()),
-        }
+        ObjectHasher::new(self)
     }
 
     /// Hash a byte slice with no Git object header.
