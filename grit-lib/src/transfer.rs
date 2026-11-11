@@ -956,6 +956,7 @@ fn transfer_stats_for_local_operation(
 
 /// A single ref update requested by a push.
 #[derive(Clone, Debug, Default)]
+#[non_exhaustive]
 pub struct PushRefSpec {
     /// The source object to push (`None` for a deletion).
     pub src: Option<ObjectId>,
@@ -979,6 +980,64 @@ pub struct PushRefSpec {
     /// [`Self::src_ref`]: `HEAD` for a `HEAD:<dst>` push, where `src_ref` holds the
     /// branch `HEAD` points at. `None` uses `src_ref`.
     pub hook_src_ref: Option<String>,
+}
+
+impl PushRefSpec {
+    /// Sets [`src`](Self::src).
+    #[must_use]
+    pub fn with_src(mut self, src: Option<ObjectId>) -> Self {
+        self.src = src;
+        self
+    }
+
+    /// Sets [`src_ref`](Self::src_ref).
+    #[must_use]
+    pub fn with_src_ref(mut self, src_ref: Option<String>) -> Self {
+        self.src_ref = src_ref;
+        self
+    }
+
+    /// Sets [`dst`](Self::dst).
+    #[must_use]
+    pub fn with_dst(mut self, dst: String) -> Self {
+        self.dst = dst;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`delete`](Self::delete).
+    #[must_use]
+    pub fn with_delete(mut self, delete: bool) -> Self {
+        self.delete = delete;
+        self
+    }
+
+    /// Sets [`expected_old`](Self::expected_old).
+    #[must_use]
+    pub fn with_expected_old(mut self, expected_old: Option<ObjectId>) -> Self {
+        self.expected_old = expected_old;
+        self
+    }
+
+    /// Sets [`expect_absent`](Self::expect_absent).
+    #[must_use]
+    pub fn with_expect_absent(mut self, expect_absent: bool) -> Self {
+        self.expect_absent = expect_absent;
+        self
+    }
+
+    /// Sets [`hook_src_ref`](Self::hook_src_ref).
+    #[must_use]
+    pub fn with_hook_src_ref(mut self, hook_src_ref: Option<String>) -> Self {
+        self.hook_src_ref = hook_src_ref;
+        self
+    }
 }
 
 /// Local ref name carried on a push spec for status reporting.
@@ -1020,6 +1079,7 @@ pub(crate) fn resolve_push_delete_ref(
 
 /// Options controlling a push.
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct PushOptions {
     /// Apply all updates atomically (all-or-nothing), including remote hook rejections.
     ///
@@ -1076,6 +1136,74 @@ pub struct PushOptions {
     /// lower-level [`RepositoryRemotes::push_to`](crate::repo_handles::RepositoryRemotes::push_to)
     /// has no remote name to give the hook and never runs it.
     pub no_verify: bool,
+}
+
+impl PushOptions {
+    /// Sets [`atomic`](Self::atomic).
+    #[must_use]
+    pub fn with_atomic(mut self, atomic: bool) -> Self {
+        self.atomic = atomic;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets [`tracking_remote`](Self::tracking_remote).
+    #[must_use]
+    pub fn with_tracking_remote(mut self, tracking_remote: Option<String>) -> Self {
+        self.tracking_remote = tracking_remote;
+        self
+    }
+
+    /// Sets [`push_options`](Self::push_options).
+    #[must_use]
+    pub fn with_push_options(mut self, push_options: Vec<String>) -> Self {
+        self.push_options = push_options;
+        self
+    }
+
+    /// Sets [`diagnostics`](Self::diagnostics).
+    #[must_use]
+    pub fn with_diagnostics(
+        mut self,
+        diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    ) -> Self {
+        self.diagnostics = diagnostics;
+        self
+    }
+
+    /// Sets [`network_trace`](Self::network_trace).
+    #[must_use]
+    pub fn with_network_trace(mut self, network_trace: bool) -> Self {
+        self.network_trace = network_trace;
+        self
+    }
+
+    /// Sets [`remote_ref_tips`](Self::remote_ref_tips).
+    #[must_use]
+    pub fn with_remote_ref_tips(mut self, remote_ref_tips: Option<Vec<ObjectId>>) -> Self {
+        self.remote_ref_tips = remote_ref_tips;
+        self
+    }
+
+    /// Sets [`resumable_threshold`](Self::resumable_threshold).
+    #[must_use]
+    pub fn with_resumable_threshold(mut self, resumable_threshold: Option<u64>) -> Self {
+        self.resumable_threshold = resumable_threshold;
+        self
+    }
+
+    /// Sets [`no_verify`](Self::no_verify).
+    #[must_use]
+    pub fn with_no_verify(mut self, no_verify: bool) -> Self {
+        self.no_verify = no_verify;
+        self
+    }
 }
 
 /// The client-side `pre-push` hook for one push, run once every update has been decided.

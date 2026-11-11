@@ -290,12 +290,10 @@ fn push_updates_tracking_refs_in_the_injected_store() {
         .set_ref("refs/heads/main", RawRef::Direct(remotes.tip))
         .expect("branch");
 
-    let spec = PushRefSpec {
-        src: Some(remotes.tip),
-        src_ref: Some("refs/heads/main".into()),
-        dst: "refs/heads/main".into(),
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(remotes.tip))
+        .with_src_ref(Some("refs/heads/main".into()))
+        .with_dst("refs/heads/main".into());
     repo.remotes()
         .get("pub")
         .expect("remote")
@@ -422,12 +420,10 @@ fn files_backend_fetch_prune_and_push_round_trip_with_git() {
         &local,
         &["update-ref", "refs/heads/main", &remotes.tip.to_hex()],
     );
-    let spec = PushRefSpec {
-        src: Some(remotes.tip),
-        src_ref: Some("refs/heads/main".into()),
-        dst: "refs/heads/main".into(),
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(remotes.tip))
+        .with_src_ref(Some("refs/heads/main".into()))
+        .with_dst("refs/heads/main".into());
     repo.remotes()
         .get("pub")
         .expect("remote")

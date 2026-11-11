@@ -121,11 +121,9 @@ fn response_sections(resp: &[u8]) -> Vec<String> {
 fn serve_grit(bare: &Path, body: &[u8]) -> Vec<u8> {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        stateless_rpc: true,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_stateless_rpc(true);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(body.to_vec()), &mut out)
         .expect("upload_pack");
@@ -152,11 +150,9 @@ fn serve_git(bare: &Path, body: &[u8]) -> Vec<u8> {
 fn advertised_fetch_features(bare: &Path) -> String {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        advertise_refs: true,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_advertise_refs(true);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(Vec::new()), &mut out)
         .expect("advertise");
@@ -170,10 +166,7 @@ fn advertised_fetch_features(bare: &Path) -> String {
 fn serve_grit_err(bare: &Path, body: &[u8]) -> ServeError {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default().with_protocol(ProtocolVersion::V2);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(body.to_vec()), &mut out)
         .expect_err("request should be refused")
@@ -385,11 +378,9 @@ fn v2_fetch_capability_lists_only_v2_features() {
 fn v2_capability_lines(bare: &Path) -> Vec<String> {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        advertise_refs: true,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_advertise_refs(true);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(Vec::new()), &mut out)
         .expect("advertise");
@@ -492,11 +483,9 @@ fn object_info_is_not_advertised_without_transfer_advertise_object_info() {
     body.extend(b"0000");
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        stateless_rpc: true,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_stateless_rpc(true);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(body), &mut out)
         .expect("stateless v2");
@@ -522,11 +511,9 @@ fn v2_fetch_records_server_option_from_client() {
     body.extend(b"0000");
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        stateless_rpc: true,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_stateless_rpc(true);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(body), &mut out)
         .expect("fetch with server-option");
@@ -830,12 +817,9 @@ fn stateful_v2_session_returns_upload_outcome_for_fetch() {
     let body = fetch_request(&[&format!("want {}", tip.to_hex())]);
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        stateless_rpc: false,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_agent("grit-test".to_owned());
     let summary = UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(body), &mut out)
         .expect("stateful v2");
@@ -850,12 +834,9 @@ fn stateful_v2_session_returns_upload_outcome_for_fetch() {
     two_step.extend(fetch_request(&[&format!("want {}", tip.to_hex())]));
     let summary2 = UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V2,
-            stateless_rpc: false,
-            agent: "grit-test".to_owned(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V2)
+            .with_agent("grit-test".to_owned()),
     )
     .run(&mut Cursor::new(two_step), &mut Vec::new())
     .expect("stateful v2 two-step");

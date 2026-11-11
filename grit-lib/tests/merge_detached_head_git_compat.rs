@@ -125,10 +125,7 @@ fn no_ff_merge_commit_on_detached_head() {
         into_oid,
         topic,
         "topic",
-        &MergeOptions {
-            fast_forward: FastForwardPolicy::Never,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_fast_forward(FastForwardPolicy::Never),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

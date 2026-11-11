@@ -15,7 +15,7 @@ use grit_lib::merge::IntegrateBranchOutcome;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
-use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::restore::RestoreOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -117,15 +117,10 @@ fn stash_pop_conflict(root: &Path) -> Repository {
 }
 
 fn staged_only(pathspec: &str) -> RestoreOptions {
-    RestoreOptions {
-        pathspecs: vec![pathspec.into()],
-        pathspec_sources: vec![pathspec.into()],
-        source: RestoreSource::Index,
-        staged: true,
-        worktree: false,
-        stage: None,
-        remerge: None,
-    }
+    RestoreOptions::new(vec![pathspec.into()])
+        .with_pathspec_sources(vec![pathspec.into()])
+        .with_staged(true)
+        .with_worktree(false)
 }
 
 fn commit_req() -> CommitRequest {

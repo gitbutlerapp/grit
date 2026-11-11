@@ -36,10 +36,7 @@ fn init_repo(root: &Path) {
 }
 
 fn grit_untracked_paths(repo: &Repository) -> Vec<String> {
-    let opts = StatusOptions {
-        untracked: UntrackedMode::All,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default().with_untracked(UntrackedMode::All);
     let model = repo
         .status()
         .run(&opts, &mut NullProgress, &CancelToken::never())
@@ -48,10 +45,7 @@ fn grit_untracked_paths(repo: &Repository) -> Vec<String> {
 }
 
 fn grit_untracked_paths_normal(repo: &Repository) -> Vec<String> {
-    let opts = StatusOptions {
-        untracked: UntrackedMode::Normal,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default();
     let model = repo
         .status()
         .run(&opts, &mut NullProgress, &CancelToken::never())

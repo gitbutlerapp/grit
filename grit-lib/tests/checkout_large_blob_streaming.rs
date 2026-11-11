@@ -14,7 +14,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
-use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::restore::RestoreOptions;
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
@@ -234,15 +234,8 @@ fn assert_git_clean(fx: &Fixture, context: &str) {
 fn restore_from_index(repo: &Repository, paths: &[&str]) {
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: paths.iter().map(|p| (*p).to_owned()).collect(),
-                pathspec_sources: paths.iter().map(|p| (*p).to_owned()).collect(),
-                source: RestoreSource::Index,
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(paths.iter().map(|p| (*p).to_owned()).collect())
+                .with_pathspec_sources(paths.iter().map(|p| (*p).to_owned()).collect()),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -252,14 +245,10 @@ fn restore_from_index(repo: &Repository, paths: &[&str]) {
 fn switch_to(repo: &Repository, branch: &str, oid: ObjectId) {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: branch.into(),
-                    oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: branch.into(),
+                oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -334,15 +323,8 @@ fn corrupt_large_blob_never_leaves_a_partial_file() {
 
     fs::remove_file(fx.root.join("assets/big.dat")).expect("rm big");
     let err = repo.checkout().restore(
-        &RestoreOptions {
-            pathspecs: vec!["assets/big.dat".into()],
-            pathspec_sources: vec!["assets/big.dat".into()],
-            source: RestoreSource::Index,
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
+        &RestoreOptions::new(vec!["assets/big.dat".into()])
+            .with_pathspec_sources(vec!["assets/big.dat".into()]),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     );
@@ -399,15 +381,8 @@ fn large_binary_blob_under_autocrlf_streams_via_spool() {
     let repo = open(root);
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["big_zero.bin".into()],
-                pathspec_sources: vec!["big_zero.bin".into()],
-                source: RestoreSource::Index,
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["big_zero.bin".into()])
+                .with_pathspec_sources(vec!["big_zero.bin".into()]),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -441,15 +416,8 @@ fn large_lf_text_under_autocrlf_smudges_to_crlf() {
     let repo = open(root);
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["lines.txt".into()],
-                pathspec_sources: vec!["lines.txt".into()],
-                source: RestoreSource::Index,
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["lines.txt".into()])
+                .with_pathspec_sources(vec!["lines.txt".into()]),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -487,15 +455,8 @@ fn large_text_blob_under_autocrlf_is_converted_not_copied() {
     let repo = open(root);
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["big.txt".into()],
-                pathspec_sources: vec!["big.txt".into()],
-                source: RestoreSource::Index,
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["big.txt".into()])
+                .with_pathspec_sources(vec!["big.txt".into()]),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

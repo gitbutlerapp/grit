@@ -119,22 +119,16 @@ fn untracked_cache_traditional_and_matching_ignored_modes() {
     refresh_normal(&repo, &idx, &mut uc, UntrackedIgnoredMode::Matching);
     let _ = collect_untracked_from_cache(&uc);
 
-    let opts = StatusOptions {
-        untracked: UntrackedMode::Normal,
-        ignored: IgnoredMode::Traditional,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_ignored(IgnoredMode::Traditional)
+        .with_ahead_behind(false);
     let model = repo
         .status()
         .run(&opts, &mut NullProgress, &CancelToken::never())
         .expect("status traditional");
     assert!(model.ignored.iter().any(|p| p.contains("build")));
 
-    let opts = StatusOptions {
-        ignored: IgnoredMode::Matching,
-        ..opts
-    };
+    let opts = opts.with_ignored(IgnoredMode::Matching);
     let model = repo
         .status()
         .run(&opts, &mut NullProgress, &CancelToken::never())
@@ -520,11 +514,7 @@ fn untracked_cache_wide_tree_normal_status() {
     git(root, &["commit", "-qm", "c"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let opts = StatusOptions {
-        untracked: UntrackedMode::Normal,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default().with_ahead_behind(false);
     let model = repo
         .status()
         .run(&opts, &mut NullProgress, &CancelToken::never())
@@ -862,12 +852,9 @@ fn untracked_cache_deep_status_integration() {
     git(root, &["commit", "-qm", "c"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let opts = StatusOptions {
-        untracked: UntrackedMode::Normal,
-        ignored: IgnoredMode::Matching,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_ignored(IgnoredMode::Matching)
+        .with_ahead_behind(false);
     for _ in 0..2 {
         let model = repo
             .status()
@@ -924,12 +911,9 @@ fn status_ignored_modes_exercise_untracked_collect_paths() {
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     for ignored in [IgnoredMode::Traditional, IgnoredMode::Matching] {
-        let opts = StatusOptions {
-            untracked: UntrackedMode::Normal,
-            ignored,
-            ahead_behind: false,
-            ..StatusOptions::default()
-        };
+        let opts = StatusOptions::default()
+            .with_ignored(ignored)
+            .with_ahead_behind(false);
         let model = repo
             .status()
             .run(&opts, &mut NullProgress, &CancelToken::never())
@@ -938,12 +922,10 @@ fn status_ignored_modes_exercise_untracked_collect_paths() {
         assert!(!model.ignored.is_empty());
     }
 
-    let opts = StatusOptions {
-        untracked: UntrackedMode::All,
-        ignored: IgnoredMode::Matching,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_untracked(UntrackedMode::All)
+        .with_ignored(IgnoredMode::Matching)
+        .with_ahead_behind(false);
     let model = repo
         .status()
         .run(&opts, &mut NullProgress, &CancelToken::never())

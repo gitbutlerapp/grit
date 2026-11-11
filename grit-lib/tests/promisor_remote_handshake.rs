@@ -52,11 +52,9 @@ impl InProcessConn {
         let dir = server_git_dir.to_path_buf();
         let server = std::thread::spawn(move || {
             let repo = Repository::open(&dir, &RepositoryOptions::empty()).unwrap();
-            let mut opts = ServeOptions {
-                protocol: ProtocolVersion::V2,
-                agent: "grit-test".to_owned(),
-                ..ServeOptions::default()
-            };
+            let mut opts = ServeOptions::default()
+                .with_protocol(ProtocolVersion::V2)
+                .with_agent("grit-test".to_owned());
             let mut input = to_server_r;
             let mut output = to_client_w;
             UploadPack::new(&repo, &mut opts)

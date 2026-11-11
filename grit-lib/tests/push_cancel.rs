@@ -105,11 +105,9 @@ fn object_files(git_dir: &Path) -> BTreeSet<PathBuf> {
 }
 
 fn main_spec(tip: ObjectId) -> PushRefSpec {
-    PushRefSpec {
-        src: Some(tip),
-        dst: "refs/heads/main".to_owned(),
-        ..Default::default()
-    }
+    PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_dst("refs/heads/main".to_owned())
 }
 
 fn remote_main(git_dir: &Path) -> Option<ObjectId> {
@@ -329,10 +327,7 @@ impl InProcessServer {
             let _ = hold.recv();
         }
         let mut out = Vec::new();
-        let opts = ServeOptions {
-            stateless_rpc: true,
-            ..Default::default()
-        };
+        let opts = ServeOptions::default().with_stateless_rpc(true);
         ReceivePack::new(
             &self.repo()?,
             &opts,
@@ -348,11 +343,9 @@ impl HttpClient for InProcessServer {
         let mut out = Vec::new();
         pkt_line::write_line_to_vec(&mut out, "# service=git-receive-pack").map_err(Error::from)?;
         out.extend_from_slice(b"0000");
-        let opts = ServeOptions {
-            stateless_rpc: true,
-            advertise_refs: true,
-            ..Default::default()
-        };
+        let opts = ServeOptions::default()
+            .with_stateless_rpc(true)
+            .with_advertise_refs(true);
         ReceivePack::new(
             &self.repo()?,
             &opts,

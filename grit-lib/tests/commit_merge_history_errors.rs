@@ -131,10 +131,7 @@ fn merge_error_variants() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            fast_forward: FastForwardPolicy::Only,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_fast_forward(FastForwardPolicy::Only),
         &mut NullProgress,
         &CancelToken::never(),
     )

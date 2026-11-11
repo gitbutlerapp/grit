@@ -57,13 +57,11 @@ const ADVERTISE_LOP: &str = "[promisor]\n\tadvertise = true\n\
     [remote \"lop\"]\n\turl = file:///srv/lop\n\tpromisor = true\n";
 
 fn v2_opts(stateless_rpc: bool, advertise_refs: bool) -> ServeOptions {
-    ServeOptions {
-        protocol: ProtocolVersion::V2,
-        stateless_rpc,
-        advertise_refs,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    }
+    ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_stateless_rpc(stateless_rpc)
+        .with_advertise_refs(advertise_refs)
+        .with_agent("grit-test".to_owned())
 }
 
 /// The capability lines of a v2 advertisement.
@@ -139,10 +137,7 @@ fn v0_advertisement_never_carries_promisor_remote() {
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _, _) = bare_repo(tmp.path(), ADVERTISE_LOP);
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        advertise_refs: true,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default().with_advertise_refs(true);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(Vec::new()), &mut out)
         .unwrap();
@@ -263,10 +258,7 @@ fn allow_any_sha1_in_want_advertises_v0_capabilities() {
     let tmp = tempfile::tempdir().unwrap();
     let (repo, _, _) = bare_repo(tmp.path(), "[uploadpack]\n\tallowAnySHA1InWant = true\n");
     let mut out = Vec::new();
-    let mut opts = ServeOptions {
-        advertise_refs: true,
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default().with_advertise_refs(true);
     UploadPack::new(&repo, &mut opts)
         .run(&mut Cursor::new(Vec::new()), &mut out)
         .unwrap();

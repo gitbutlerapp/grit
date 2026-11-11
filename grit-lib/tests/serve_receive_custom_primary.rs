@@ -88,12 +88,10 @@ fn memory_serve_repo(root: &Path) -> (Repository, Arc<MemoryStore>, Arc<MemoryRe
 }
 
 fn serve_opts() -> ServeOptions {
-    ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    }
+    ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned())
 }
 
 fn object_files(objects: &Path) -> Vec<String> {
@@ -220,10 +218,7 @@ fn non_fast_forward_leaves_custom_store_unchanged() {
     let new_tip = source_repo(orphan.path(), 2);
     let rewrite = pack_for(orphan.path(), &[new_tip.to_hex()]);
     let body = push_body(&[(Some(old), Some(new_tip), "refs/heads/main")], &rewrite);
-    let policy = ReceivePolicy {
-        deny_non_fast_forwards: true,
-        ..ReceivePolicy::default()
-    };
+    let policy = ReceivePolicy::default().with_deny_non_fast_forwards(true);
     let outcome = ReceivePack::new(&repo, &serve_opts(), &policy)
         .run(&mut std::io::Cursor::new(body), &mut std::io::sink())
         .expect("receive_pack");

@@ -28,20 +28,15 @@ fn push_with_backslash_path_tracking_name_succeeds_without_tracking_ref() {
 
     let repo = Repository::discover(Some(&work), &RepositoryOptions::empty()).expect("open work");
     let remote = Remote::from_url(bare.to_str().expect("utf8")).expect("url");
-    let spec = PushRefSpec {
-        src: Some(tip),
-        src_ref: Some("refs/heads/main".to_owned()),
-        dst: "refs/heads/main".to_owned(),
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_src_ref(Some("refs/heads/main".to_owned()))
+        .with_dst("refs/heads/main".to_owned());
     let outcome = remote
         .push(
             &repo,
             &[spec],
-            PushOptions {
-                tracking_remote: Some(name.to_owned()),
-                ..PushOptions::default()
-            },
+            PushOptions::default().with_tracking_remote(Some(name.to_owned())),
             &mut NoProgress,
             &CancelToken::never(),
             None,

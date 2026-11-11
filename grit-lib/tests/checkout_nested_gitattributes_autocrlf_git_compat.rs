@@ -152,15 +152,11 @@ fn switch_honours_nested_binary_with_autocrlf() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "older".into(),
-                    oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "older"]).trim())
-                        .expect("older"),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "older".into(),
+                oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "older"]).trim())
+                    .expect("older"),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -169,14 +165,10 @@ fn switch_honours_nested_binary_with_autocrlf() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

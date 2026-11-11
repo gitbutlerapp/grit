@@ -120,14 +120,10 @@ fn switch_nested_gitattributes_crlf_clean_worktree_matches_git() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -200,14 +196,10 @@ fn switch_wholesale_deleted_gitattributes_does_not_apply_stale_eol() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -280,14 +272,10 @@ fn switch_preserves_untracked_in_wholesale_deleted_directory() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -358,14 +346,10 @@ fn switch_preserves_untracked_fifo_under_fast_wholesale_delete_scan() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -428,14 +412,10 @@ fn switch_preserves_ignored_file_in_wholesale_deleted_directory() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -496,14 +476,10 @@ fn switch_preserves_ignored_file_from_nested_tracked_gitignore() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -564,14 +540,10 @@ fn switch_preserves_ignored_file_from_deep_nested_tracked_gitignore() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -649,14 +621,10 @@ fn switch_preserves_populated_gitlink_under_wholesale_deleted_directory() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -775,14 +743,10 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
     let err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -829,14 +793,10 @@ fn switch_tree_diff_git_clean_after() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -888,14 +848,10 @@ fn switch_refuses_dirty_conflicting_path_and_leaves_file() {
     let err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "other".into(),
-                    oid: other_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "other".into(),
+                oid: other_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -970,14 +926,10 @@ fn switch_refuses_dirty_second_path_when_first_has_stat_drift_only_like_git() {
     let err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1102,14 +1054,10 @@ fn switch_refuses_racy_second_path_when_first_has_stat_drift_only_like_git() {
     let err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1218,14 +1166,10 @@ fn switch_refuses_dirty_file_deleted_on_target_like_git() {
     let err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1293,14 +1237,10 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1321,15 +1261,11 @@ fn switch_tree_diff_type_and_mode_round_trip_git_clean() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim())
-                        .expect("main oid"),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: ObjectId::from_hex(git(tmp.path(), &["rev-parse", "main"]).trim())
+                    .expect("main oid"),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1441,14 +1377,10 @@ fn switch_removes_gitlink_when_parent_directory_dropped() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1545,14 +1477,10 @@ fn switch_dirty_gitlink_on_changing_gitlink_matches_git() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1603,14 +1531,10 @@ fn switch_scoped_worktree_diff_limits_metadata_probes() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1700,14 +1624,10 @@ fn switch_tracked_deletes_fail_and_roll_back_when_wholesale_dir_removal_fails() 
     let err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1809,14 +1729,10 @@ fn issue_1160_unstaged_delete_with_staged_add_deleted_allows_switch() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1904,14 +1820,10 @@ fn issue_1160_dangling_symlink_with_staged_add_deleted_refuses_switch() {
     let grit_err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -1987,14 +1899,10 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -2013,14 +1921,10 @@ fn switch_bulk_add_mod_delete_leaves_git_clean() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -2173,14 +2077,10 @@ impl GitlinkAhead {
 fn grit_switch_detach(repo: &Repository, commit: ObjectId) {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit,
-                    reflog_to_label: "tip-b".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit,
+                reflog_to_label: "tip-b".into(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -2207,16 +2107,12 @@ fn switch_create_advances_index_gitlink_when_submodule_ahead() {
     let repo = fixture.repo();
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Create {
-                    branch: "x".into(),
-                    start_oid: fixture.rev("tip-b"),
-                    create_source_label: "tip-b".into(),
-                    track_upstream: None,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Create {
+                branch: "x".into(),
+                start_oid: fixture.rev("tip-b"),
+                create_source_label: "tip-b".into(),
+                track_upstream: None,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -2338,14 +2234,10 @@ fn switch_refuses_staged_gitlink_that_differs_from_target_like_git() {
     let err = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "tip-b".into(),
-                    oid: fixture.rev("tip-b"),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "tip-b".into(),
+                oid: fixture.rev("tip-b"),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -2416,14 +2308,10 @@ fn switch_tracked_symlink_to_dir_with_wholesale_deletes_matches_git() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "s".into(),
-                    oid: s_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "s".into(),
+                oid: s_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -2431,14 +2319,10 @@ fn switch_tracked_symlink_to_dir_with_wholesale_deletes_matches_git() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "m".into(),
-                    oid: m_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "m".into(),
+                oid: m_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -2499,14 +2383,10 @@ fn switch_wholesale_fast_path_still_blocks_genuine_untracked_at_added_path() {
     let err = grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "target".into(),
-                    oid: target_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "target".into(),
+                oid: target_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

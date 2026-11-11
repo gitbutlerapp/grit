@@ -7,7 +7,7 @@ use std::process::Command;
 use std::time::{Duration, Instant};
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::restore::RestoreOptions;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 
@@ -53,15 +53,8 @@ fn restore_with_grit(root: &Path) {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["big.bin".into()],
-                pathspec_sources: vec!["big.bin".into()],
-                source: RestoreSource::Index,
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["big.bin".into()])
+                .with_pathspec_sources(vec!["big.bin".into()]),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

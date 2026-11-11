@@ -51,11 +51,9 @@ fn grit_lists(repo: &Repository, mode: UntrackedMode) -> (Vec<Vec<u8>>, Vec<Vec<
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: mode,
-                ignored: IgnoredMode::Traditional,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default()
+                .with_untracked(mode)
+                .with_ignored(IgnoredMode::Traditional),
             &mut NullProgress,
             &CancelToken::never(),
         )

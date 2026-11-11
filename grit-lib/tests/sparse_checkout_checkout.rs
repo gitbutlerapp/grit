@@ -296,14 +296,10 @@ fn switch_detach_keeps_out_of_cone_paths_skip_worktree() {
     let repo = open(&pair.grit_dir);
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: rev(&pair.grit_dir, "HEAD~2"),
-                    reflog_to_label: "HEAD~2".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: rev(&pair.grit_dir, "HEAD~2"),
+                reflog_to_label: "HEAD~2".into(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -324,14 +320,10 @@ fn switch_branch_adds_out_of_cone_paths_as_skip_worktree() {
     let repo = open(&pair.grit_dir);
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "side".into(),
-                    oid: rev(&pair.grit_dir, "side"),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "side".into(),
+                oid: rev(&pair.grit_dir, "side"),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -435,15 +427,9 @@ fn restore_from_source_matches_git() {
     let repo = open(&pair.grit_dir);
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["a".into()],
-                pathspec_sources: vec!["a".into()],
-                source: RestoreSource::Tree(rev(&pair.grit_dir, "HEAD~2^{tree}")),
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["a".into()])
+                .with_pathspec_sources(vec!["a".into()])
+                .with_source(RestoreSource::Tree(rev(&pair.grit_dir, "HEAD~2^{tree}"))),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -493,11 +479,9 @@ fn grit_pull(dir: &Path, mode: PullMode) {
     fetch_opts.environment = env;
     pull(
         &repo,
-        &PullOptions {
-            mode: Some(mode),
-            fetch: fetch_opts,
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(mode))
+            .with_fetch(fetch_opts),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -542,14 +526,10 @@ fn sparse_index_survives_reset_hard_and_switch() {
     reset(&repo, rev(&pair.grit_dir, "HEAD~2"), ResetMode::Hard);
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "side".into(),
-                    oid: rev(&pair.grit_dir, "side"),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "side".into(),
+                oid: rev(&pair.grit_dir, "side"),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -587,14 +567,10 @@ fn switch_does_not_refuse_untracked_file_at_skipped_path() {
         let repo = open(&pair.grit_dir);
         repo.checkout()
             .switch(
-                &SwitchOptions {
-                    mode: SwitchMode::Existing {
-                        branch: "side".into(),
-                        oid: rev(&pair.grit_dir, "side"),
-                    },
-                    dry_run: false,
-                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-                },
+                &SwitchOptions::new(SwitchMode::Existing {
+                    branch: "side".into(),
+                    oid: rev(&pair.grit_dir, "side"),
+                }),
                 &mut grit_lib::progress::NullProgress,
                 &grit_lib::progress::CancelToken::never(),
             )
@@ -667,14 +643,10 @@ fn switch_with_wholesale_deleted_directories_keeps_new_skip_worktree_rows() {
     let repo = open(&pair.grit_dir);
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "wide".into(),
-                    oid: rev(&pair.grit_dir, "wide"),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "wide".into(),
+                oid: rev(&pair.grit_dir, "wide"),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -755,14 +727,11 @@ fn git_sparse_index_nested_transitions_and_dirty_head_reset() {
         open(&pair.grit_dir)
             .checkout()
             .switch(
-                &SwitchOptions {
-                    mode: SwitchMode::Detached {
-                        commit: rev(&pair.grit_dir, other),
-                        reflog_to_label: other.into(),
-                    },
-                    dry_run: false,
-                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-                },
+                &SwitchOptions::new(SwitchMode::Detached {
+                    commit: rev(&pair.grit_dir, other),
+                    reflog_to_label: other.into(),
+                })
+                .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
                 &mut grit_lib::progress::NullProgress,
                 &CancelToken::never(),
             )
@@ -806,14 +775,11 @@ fn sparse_index_switch_preserves_staged_and_unstaged_excluded_changes() {
     open(&pair.grit_dir)
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: rev(&pair.grit_dir, "HEAD~1"),
-                    reflog_to_label: "HEAD~1".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: rev(&pair.grit_dir, "HEAD~1"),
+                reflog_to_label: "HEAD~1".into(),
+            })
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -881,14 +847,11 @@ fn sparse_index_file_directory_and_gitlink_transitions_match_git() {
     open(&pair.grit_dir)
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: rev(&pair.grit_dir, "types"),
-                    reflog_to_label: "types".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: rev(&pair.grit_dir, "types"),
+                reflog_to_label: "types".into(),
+            })
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )

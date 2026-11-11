@@ -113,11 +113,9 @@ fn serial_and_parallel_status_preserve_mixed_raw_paths() {
         )
         .expect("open")
         .with_thread_policy(forced_parallel_policy());
-        let options = StatusOptions {
-            stat_parallel_threads: Some(threads),
-            untracked: UntrackedMode::All,
-            ..StatusOptions::default()
-        };
+        let options = StatusOptions::default()
+            .with_stat_parallel_threads(Some(threads))
+            .with_untracked(UntrackedMode::All);
         for _ in 0..2 {
             let model = repo
                 .status()

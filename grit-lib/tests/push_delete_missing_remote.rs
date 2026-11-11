@@ -39,11 +39,9 @@ fn delete_missing_remote_branch_errors_like_git() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
-        &[PushRefSpec {
-            dst: "refs/heads/no-such-branch".to_owned(),
-            delete: true,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_dst("refs/heads/no-such-branch".to_owned())
+            .with_delete(true)],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -95,11 +93,9 @@ fn delete_resolves_local_tag_when_remote_tag_gone() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
-        &[PushRefSpec {
-            dst: "refs/tags/v3.0.0".to_owned(),
-            delete: true,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_dst("refs/tags/v3.0.0".to_owned())
+            .with_delete(true)],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),

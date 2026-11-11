@@ -245,6 +245,7 @@ pub enum MergeCommitMode {
 
 /// Options for [`integrate_branch_with`].
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct MergeOptions {
     /// When to fast-forward versus creating a merge commit.
     pub fast_forward: FastForwardPolicy,
@@ -268,6 +269,74 @@ pub struct MergeOptions {
     /// (or the reverse) follow the rename; when unset, `merge.directoryRenames` decides
     /// ([`DirectoryRenameMode::from_repo`]).
     pub directory_renames: Option<DirectoryRenameMode>,
+}
+
+impl MergeOptions {
+    /// Sets [`fast_forward`](Self::fast_forward).
+    #[must_use]
+    pub fn with_fast_forward(mut self, fast_forward: FastForwardPolicy) -> Self {
+        self.fast_forward = fast_forward;
+        self
+    }
+
+    /// Sets [`commit`](Self::commit).
+    #[must_use]
+    pub fn with_commit(mut self, commit: MergeCommitMode) -> Self {
+        self.commit = commit;
+        self
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`favor`](Self::favor).
+    #[must_use]
+    pub fn with_favor(mut self, favor: MergeFavor) -> Self {
+        self.favor = favor;
+        self
+    }
+
+    /// Sets [`conflict_style`](Self::conflict_style).
+    #[must_use]
+    pub fn with_conflict_style(mut self, conflict_style: Option<ConflictStyle>) -> Self {
+        self.conflict_style = conflict_style;
+        self
+    }
+
+    /// Sets [`allow_unrelated`](Self::allow_unrelated).
+    #[must_use]
+    pub fn with_allow_unrelated(mut self, allow_unrelated: bool) -> Self {
+        self.allow_unrelated = allow_unrelated;
+        self
+    }
+
+    /// Sets [`hooks`](Self::hooks).
+    #[must_use]
+    pub fn with_hooks(mut self, hooks: PostOperationHooks) -> Self {
+        self.hooks = hooks;
+        self
+    }
+
+    /// Sets [`verify`](Self::verify).
+    #[must_use]
+    pub fn with_verify(mut self, verify: HookPolicy) -> Self {
+        self.verify = verify;
+        self
+    }
+
+    /// Sets [`directory_renames`](Self::directory_renames).
+    #[must_use]
+    pub fn with_directory_renames(
+        mut self,
+        directory_renames: Option<DirectoryRenameMode>,
+    ) -> Self {
+        self.directory_renames = directory_renames;
+        self
+    }
 }
 
 /// Resolve conflict marker style: explicit option, then `merge.conflictStyle`, then `merge`.

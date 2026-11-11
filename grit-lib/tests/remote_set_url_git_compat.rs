@@ -282,13 +282,10 @@ fn push_after_set_url_uses_new_pushurl() {
         .remotes()
         .push(
             &remote,
-            &[grit_lib::remote::transfer::PushRefSpec {
-                src: Some(main_oid),
-                src_ref: Some("refs/heads/main".to_owned()),
-                dst: "refs/heads/main".to_owned(),
-                force: false,
-                ..Default::default()
-            }],
+            &[grit_lib::remote::transfer::PushRefSpec::default()
+                .with_src(Some(main_oid))
+                .with_src_ref(Some("refs/heads/main".to_owned()))
+                .with_dst("refs/heads/main".to_owned())],
             grit_lib::remote::transfer::PushOptions::default(),
             &mut grit_lib::remote::fetch::NoProgress,
             &grit_lib::progress::CancelToken::never(),

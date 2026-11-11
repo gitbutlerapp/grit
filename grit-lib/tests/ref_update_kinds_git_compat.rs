@@ -171,10 +171,10 @@ fn push_outcome_summaries_match_the_remote_refs() {
     commit(&local, "b.txt", "b\n");
     let local_git = local.join(".git");
     let tip = rev_parse(&local, "HEAD");
-    let spec = |src| PushRefSpec {
-        src: Some(src),
-        dst: "refs/heads/main".to_owned(),
-        ..Default::default()
+    let spec = |src| {
+        PushRefSpec::default()
+            .with_src(Some(src))
+            .with_dst("refs/heads/main".to_owned())
     };
     let push = |src| {
         grit_lib::repo::Repository::open(

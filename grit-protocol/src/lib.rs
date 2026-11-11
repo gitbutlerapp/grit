@@ -329,17 +329,16 @@ pub(crate) fn run_upload_pack_with_session(
     )
     .unwrap_or_default();
     let hidden_refs = grit_lib::refs::hide_refs::hide_ref_patterns_uploadpack(&config);
-    let mut opts = ServeOptions {
-        protocol: protocol_version_from_header(protocol_version),
-        stateless_rpc,
-        advertise_refs,
-        agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
-        hidden_refs,
-        bundle_list: extensions.bundle_list.clone(),
-        push_bundle: None,
-        lazy_fetch: ServeOptions::lazy_fetch_from_environment(repo.environment()),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(protocol_version_from_header(protocol_version))
+        .with_stateless_rpc(stateless_rpc)
+        .with_advertise_refs(advertise_refs)
+        .with_agent(format!("grit/{}", env!("CARGO_PKG_VERSION")))
+        .with_hidden_refs(hidden_refs)
+        .with_bundle_list(extensions.bundle_list.clone())
+        .with_lazy_fetch(ServeOptions::lazy_fetch_from_environment(
+            repo.environment(),
+        ));
     // The promisor fetcher in `repository_options` is used only when this request may
     // fetch missing promised objects; otherwise the served repository fetches nothing.
     opts.attach_promisor_fetcher(&repo, repository_options.promisor_fetcher.clone());
@@ -415,16 +414,13 @@ pub(crate) fn run_receive_pack_with_session(
     )
     .unwrap_or_default();
     let hidden_refs = grit_lib::refs::hide_refs::hide_ref_patterns_receive(&config);
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc,
-        advertise_refs,
-        agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
-        hidden_refs,
-        bundle_list: None,
-        push_bundle: extensions.push_bundle.clone(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(stateless_rpc)
+        .with_advertise_refs(advertise_refs)
+        .with_agent(format!("grit/{}", env!("CARGO_PKG_VERSION")))
+        .with_hidden_refs(hidden_refs)
+        .with_push_bundle(extensions.push_bundle.clone());
     let policy = ReceivePolicy::from_config(&config);
     let guard = PushGuard::for_repository(&repo);
     let hook = GuardedHook {

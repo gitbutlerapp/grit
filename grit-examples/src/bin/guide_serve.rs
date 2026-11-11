@@ -65,11 +65,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protocol = std::env::var("GIT_PROTOCOL")
         .map(|v| ProtocolVersion::from_git_protocol(&v))
         .unwrap_or_default();
-    let mut opts = ServeOptions {
-        protocol,
-        agent: "guide-serve/1".to_owned(),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(protocol)
+        .with_agent("guide-serve/1".to_owned());
 
     let mut input = std::io::stdin().lock();
     let mut output = BufWriter::new(std::io::stdout().lock());

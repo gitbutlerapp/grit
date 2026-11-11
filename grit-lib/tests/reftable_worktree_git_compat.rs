@@ -83,11 +83,7 @@ fn switch(path: &Path, mode: SwitchMode) {
     open(path)
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(mode).with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &CancelToken::never(),
         )

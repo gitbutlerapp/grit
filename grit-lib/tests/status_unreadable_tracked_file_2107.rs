@@ -109,10 +109,7 @@ mod unix {
 
     fn assert_only_locked_path_modified(fx: &Fixture, repo: &Repository, threads: usize) {
         let before = fx.locked_index_entry();
-        let opts = StatusOptions {
-            stat_parallel_threads: Some(threads),
-            ..StatusOptions::default()
-        };
+        let opts = StatusOptions::default().with_stat_parallel_threads(Some(threads));
         let model = repo
             .status()
             .run(&opts, &mut NullProgress, &CancelToken::never())
@@ -199,14 +196,11 @@ mod unix {
         let err = repo
             .checkout()
             .switch(
-                &SwitchOptions {
-                    mode: SwitchMode::Existing {
-                        branch: "other".into(),
-                        oid: fx.other_oid,
-                    },
-                    dry_run: false,
-                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-                },
+                &SwitchOptions::new(SwitchMode::Existing {
+                    branch: "other".into(),
+                    oid: fx.other_oid,
+                })
+                .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
                 &mut NullProgress,
                 &CancelToken::never(),
             )

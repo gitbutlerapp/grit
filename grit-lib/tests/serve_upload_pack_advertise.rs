@@ -38,14 +38,10 @@ fn upload_pack_v0_and_v2_advertise_refs_only() -> grit_lib::remote::serve::Resul
     .map_err(ServeError::Io)?;
 
     for protocol in [ProtocolVersion::V0, ProtocolVersion::V2] {
-        let mut opts = ServeOptions {
-            protocol,
-            stateless_rpc: false,
-            advertise_refs: true,
-            agent: "grit-coverage".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        };
+        let mut opts = ServeOptions::default()
+            .with_protocol(protocol)
+            .with_advertise_refs(true)
+            .with_agent("grit-coverage".to_owned());
         let mut out = Vec::new();
         UploadPack::new(&repo, &mut opts).run(&mut Cursor::new(b""), &mut out)?;
         assert!(!out.is_empty());
@@ -88,13 +84,9 @@ fn v0_advertised_ref_names(out: &[u8]) -> Vec<String> {
 }
 
 fn grit_v0_advertisement(repo: &Repository) -> Vec<u8> {
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: false,
-        advertise_refs: true,
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_advertise_refs(true);
     let mut out = Vec::new();
     UploadPack::new(repo, &mut opts)
         .run(&mut Cursor::new(b""), &mut out)
@@ -301,14 +293,9 @@ fn injected_ref_store_v2_ls_refs_advertises_head_symref() -> grit_lib::remote::s
     input.extend_from_slice(&pkt_line("ref-prefix refs/"));
     input.extend_from_slice(b"0000");
 
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V2,
-        stateless_rpc: false,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_agent("grit-test".to_owned());
     let mut out = Vec::new();
     UploadPack::new(&repo, &mut opts).run(&mut Cursor::new(input.as_slice()), &mut out)?;
     let body = String::from_utf8_lossy(&out);

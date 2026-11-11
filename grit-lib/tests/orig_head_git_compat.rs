@@ -108,10 +108,7 @@ fn merge(
 }
 
 fn merge_options() -> MergeOptions {
-    MergeOptions {
-        message: Some("merge topic".into()),
-        ..MergeOptions::default()
-    }
+    MergeOptions::default().with_message(Some("merge topic".into()))
 }
 
 /// `ORIG_HEAD` is the pre-operation `HEAD` for both grit and git, `git fsck` is clean, and
@@ -239,10 +236,7 @@ fn fast_forward_squash_and_up_to_date_merges_record_orig_head() {
     assert_orig_head_undoes(dir, behind);
 
     git(dir, &["reset", "-q", "--hard", &main.to_hex()]);
-    let squash = MergeOptions {
-        commit: MergeCommitMode::Squash,
-        ..merge_options()
-    };
+    let squash = merge_options().with_commit(MergeCommitMode::Squash);
     let outcome = merge(&repo, main, topic, &squash).expect("squash");
     assert!(
         matches!(outcome, IntegrateBranchOutcome::Squashed),
@@ -262,10 +256,7 @@ fn refused_ff_only_merge_still_records_orig_head_like_git() {
     let (tmp, main, topic) = issue_repo();
     let dir = tmp.path();
     set_stale_orig_head(dir);
-    let only = MergeOptions {
-        fast_forward: FastForwardPolicy::Only,
-        ..merge_options()
-    };
+    let only = merge_options().with_fast_forward(FastForwardPolicy::Only);
     let err = merge(&open(dir), main, topic, &only).expect_err("not a fast-forward");
     assert!(
         matches!(

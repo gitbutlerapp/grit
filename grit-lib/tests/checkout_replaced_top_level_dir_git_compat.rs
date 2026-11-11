@@ -22,14 +22,11 @@ fn switch_existing(
 ) -> grit_lib::porcelain::switch::SwitchOutcome {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: branch.to_owned(),
-                    oid,
-                },
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: branch.to_owned(),
+                oid,
+            })
+            .with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -265,14 +262,11 @@ fn switch_detach_replaced_src_tree_matches_git_after_issue_2336_shape() {
     grit_repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: new_commit,
-                    reflog_to_label: "new".to_owned(),
-                },
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: new_commit,
+                reflog_to_label: "new".to_owned(),
+            })
+            .with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &CancelToken::never(),
         )

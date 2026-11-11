@@ -114,12 +114,9 @@ fn nested_ignores_and_negation_match_serial() {
     fs::create_dir_all(root.join("build/out")).expect("mkdir");
     fs::write(root.join("build/out/x.txt"), b"x\n").expect("write");
 
-    let opts = StatusOptions {
-        untracked: UntrackedMode::Normal,
-        ignored: IgnoredMode::Traditional,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_ignored(IgnoredMode::Traditional)
+        .with_ahead_behind(false);
     let baseline = baseline_index_bytes(&repo);
     let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
@@ -139,12 +136,7 @@ fn untracked_directory_markers_match_serial() {
     fs::create_dir_all(root.join("new/pkg")).expect("mkdir");
     fs::write(root.join("new/pkg/file.txt"), b"f\n").expect("write");
 
-    let opts = StatusOptions {
-        untracked: UntrackedMode::Normal,
-        ignored: IgnoredMode::No,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default().with_ahead_behind(false);
     let baseline = baseline_index_bytes(&repo);
     let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
@@ -197,11 +189,9 @@ fn racy_timestamp_refresh_matches_serial_and_git() {
     .expect("open");
     filetime::set_file_mtime(root.join("tracked.txt"), filetime::FileTime::now()).expect("touch");
 
-    let opts = StatusOptions {
-        untracked: UntrackedMode::No,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_untracked(UntrackedMode::No)
+        .with_ahead_behind(false);
     let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, serial_index, parallel_index) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
@@ -230,11 +220,9 @@ fn skip_worktree_sparse_entry_status_matches_serial() {
     fs::write(root.join("skipped.txt"), b"changed\n").expect("rewrite skipped");
     fs::write(root.join("present.txt"), b"changed\n").expect("rewrite present");
 
-    let opts = StatusOptions {
-        untracked: UntrackedMode::No,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_untracked(UntrackedMode::No)
+        .with_ahead_behind(false);
     let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, serial_index, parallel_index) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
@@ -267,10 +255,7 @@ fn gitlink_submodule_untracked_scan_matches_serial() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let opts = StatusOptions {
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default().with_ahead_behind(false);
     let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
@@ -294,10 +279,7 @@ fn untracked_cache_enabled_matches_serial() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let opts = StatusOptions {
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default().with_ahead_behind(false);
     let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
@@ -355,11 +337,9 @@ fn large_index_stat_refresh_parallel_matches_serial() {
         filetime::set_file_mtime(root.join(rel), filetime::FileTime::now()).expect("touch");
     }
 
-    let opts = StatusOptions {
-        untracked: UntrackedMode::No,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_untracked(UntrackedMode::No)
+        .with_ahead_behind(false);
     let baseline = fs::read(repo.index().path()).expect("index");
     let (serial, parallel, serial_index, parallel_index) = run_status_pair(&repo, &opts, &baseline);
     assert_models_equal(&serial, &parallel);
@@ -449,12 +429,10 @@ fn single_top_level_directory_split_walk_matches_serial_and_git() {
         (UntrackedMode::Normal, "normal"),
         (UntrackedMode::All, "all"),
     ] {
-        let opts = StatusOptions {
-            untracked,
-            ignored: IgnoredMode::Traditional,
-            ahead_behind: false,
-            ..StatusOptions::default()
-        };
+        let opts = StatusOptions::default()
+            .with_untracked(untracked)
+            .with_ignored(IgnoredMode::Traditional)
+            .with_ahead_behind(false);
         let (serial, parallel, _, _) = run_status_pair(&repo, &opts, &baseline);
         assert_models_equal(&serial, &parallel);
 

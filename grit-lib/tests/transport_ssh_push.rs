@@ -93,16 +93,10 @@ eval "exec $cmd" 2>/dev/null
 }
 
 fn spec_update(src: ObjectId, dst: &str, force: bool) -> PushRefSpec {
-    PushRefSpec {
-        src: Some(src),
-        src_ref: None,
-        dst: dst.to_owned(),
-        force,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    }
+    PushRefSpec::default()
+        .with_src(Some(src))
+        .with_dst(dst.to_owned())
+        .with_force(force)
 }
 
 #[test]

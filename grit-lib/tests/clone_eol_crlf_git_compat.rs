@@ -58,12 +58,10 @@ fn init_eol_crlf_source(dir: &std::path::Path) {
 }
 
 fn grit_clone_and_checkout(source: &std::path::Path, dest: &std::path::Path) {
-    let opts = CloneOptions {
-        url: source.to_string_lossy().into_owned(),
-        dest: dest.to_path_buf(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(source.to_string_lossy(), dest.to_path_buf())
-    };
+    let opts = CloneOptions::new(source.to_string_lossy(), dest.to_path_buf())
+        .with_url(source.to_string_lossy().into_owned())
+        .with_dest(dest.to_path_buf())
+        .with_environment(Environment::empty());
     let outcome =
         clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
     let commit = outcome

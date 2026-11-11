@@ -42,10 +42,8 @@ fn no_checkout(source: &Path, with_grit: bool) -> tempfile::TempDir {
     let dest = tempfile::tempdir().expect("destination");
     if with_grit {
         clone_repo(
-            CloneOptions {
-                checkout: false,
-                ..CloneOptions::new(source.to_string_lossy(), dest.path().to_owned())
-            },
+            CloneOptions::new(source.to_string_lossy(), dest.path().to_owned())
+                .with_checkout(false),
             &mut NoProgress,
             &CancelToken::never(),
             None,
@@ -90,11 +88,9 @@ fn switch(
     dry_run: bool,
 ) -> grit_lib::error::Result<SwitchOutcome> {
     repo.checkout().switch(
-        &SwitchOptions {
-            mode,
-            dry_run,
-            hooks: PostOperationHooks::Skip,
-        },
+        &SwitchOptions::new(mode)
+            .with_dry_run(dry_run)
+            .with_hooks(PostOperationHooks::Skip),
         &mut NullProgress,
         &CancelToken::never(),
     )
@@ -386,11 +382,7 @@ fn initial_switch_hook_receives_actual_previous_head() {
         reflog_to_label: "HEAD~1".into(),
     };
     let before = bytes(dest.path());
-    let mut opts = SwitchOptions {
-        mode,
-        dry_run: true,
-        hooks: PostOperationHooks::Run,
-    };
+    let mut opts = SwitchOptions::new(mode).with_dry_run(true);
     repo.checkout()
         .switch(&opts, &mut NullProgress, &CancelToken::never())
         .unwrap();

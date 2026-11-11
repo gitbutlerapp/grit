@@ -60,15 +60,10 @@ fn merge_conflict_repo(dir: &tempfile::TempDir) {
 }
 
 fn conflict_opts(side: Option<ConflictSide>, remerge: Option<ConflictStyle>) -> RestoreOptions {
-    RestoreOptions {
-        pathspecs: vec!["f.txt".into()],
-        pathspec_sources: vec!["f.txt".into()],
-        source: RestoreSource::Index,
-        staged: false,
-        worktree: true,
-        stage: side,
-        remerge,
-    }
+    RestoreOptions::new(vec!["f.txt".into()])
+        .with_pathspec_sources(vec!["f.txt".into()])
+        .with_stage(side)
+        .with_remerge(remerge)
 }
 
 fn worktree_bytes(dir: &tempfile::TempDir) -> Vec<u8> {
@@ -127,15 +122,10 @@ fn conflict_opts_path(
     side: Option<ConflictSide>,
     remerge: Option<ConflictStyle>,
 ) -> RestoreOptions {
-    RestoreOptions {
-        pathspecs: vec![path.into()],
-        pathspec_sources: vec![path.into()],
-        source: RestoreSource::Index,
-        staged: false,
-        worktree: true,
-        stage: side,
-        remerge,
-    }
+    RestoreOptions::new(vec![path.into()])
+        .with_pathspec_sources(vec![path.into()])
+        .with_stage(side)
+        .with_remerge(remerge)
 }
 
 fn git_restore(dir: &tempfile::TempDir, args: &[&str]) {
@@ -315,15 +305,11 @@ fn restore_ours_with_staged_rejected() {
     let err = repo
         .checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["f.txt".into()],
-                pathspec_sources: vec!["f.txt".into()],
-                source: RestoreSource::Index,
-                staged: true,
-                worktree: false,
-                stage: Some(ConflictSide::Ours),
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["f.txt".into()])
+                .with_pathspec_sources(vec!["f.txt".into()])
+                .with_staged(true)
+                .with_worktree(false)
+                .with_stage(Some(ConflictSide::Ours)),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -445,11 +431,9 @@ fn restore_excluding_unmerged_path_still_restores_others() {
     git_cmd(dir.path(), &["add", "other.txt"]);
     merge_conflict_repo(&dir);
     fs::write(dir.path().join("other.txt"), "edited\n").unwrap();
-    let opts = RestoreOptions {
-        pathspecs: vec![".".into(), ":!f.txt".into()],
-        pathspec_sources: vec![".".into(), ":!f.txt".into()],
-        ..plain_restore_opts(".")
-    };
+    let opts = plain_restore_opts(".")
+        .with_pathspecs(vec![".".into(), ":!f.txt".into()])
+        .with_pathspec_sources(vec![".".into(), ":!f.txt".into()]);
     repo.checkout()
         .restore(
             &opts,
@@ -464,11 +448,9 @@ fn restore_excluding_unmerged_path_still_restores_others() {
 /// Grit refuses instead, because its auto-staging commit would record the markers.
 #[test]
 fn restore_staged_unmerged_path_is_refused() {
-    let staged_opts = RestoreOptions {
-        staged: true,
-        worktree: false,
-        ..plain_restore_opts("f.txt")
-    };
+    let staged_opts = plain_restore_opts("f.txt")
+        .with_staged(true)
+        .with_worktree(false);
 
     let (dir, repo) = init_repo();
     merge_conflict_repo(&dir);
@@ -499,11 +481,9 @@ fn restore_staged_unmerged_path_is_refused() {
 
 #[test]
 fn restore_staged_and_worktree_on_unmerged_path_matches_git() {
-    let both_opts = RestoreOptions {
-        staged: true,
-        worktree: true,
-        ..plain_restore_opts("f.txt")
-    };
+    let both_opts = plain_restore_opts("f.txt")
+        .with_staged(true)
+        .with_worktree(true);
 
     let (dir_git, _repo_git) = init_repo();
     merge_conflict_repo(&dir_git);
@@ -534,10 +514,7 @@ fn restore_unmerged_path_from_tree_source_is_allowed() {
     merge_conflict_repo(&dir);
     let head_tree = git_cmd(dir.path(), &["rev-parse", "HEAD^{tree}"]);
     let tree = grit_lib::objects::ObjectId::from_hex(head_tree.trim()).expect("tree oid");
-    let opts = RestoreOptions {
-        source: RestoreSource::Tree(tree),
-        ..plain_restore_opts("f.txt")
-    };
+    let opts = plain_restore_opts("f.txt").with_source(RestoreSource::Tree(tree));
     repo.checkout()
         .restore(
             &opts,

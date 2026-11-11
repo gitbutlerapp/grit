@@ -131,12 +131,10 @@ fn receive_pack_reports_reference_already_exists_for_casefold_collision() {
     let mut report = Vec::new();
     let outcome = ReceivePack::new(
         &repo,
-        &ServeOptions {
-            protocol: ProtocolVersion::V0,
-            stateless_rpc: true,
-            agent: "grit-test".to_owned(),
-            ..ServeOptions::default()
-        },
+        &ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-test".to_owned()),
         &ReceivePolicy::default(),
     )
     .with_hook(&())

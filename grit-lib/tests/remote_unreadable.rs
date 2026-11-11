@@ -277,11 +277,9 @@ fn push_to_missing_local_path_is_remote_unreadable() {
     let repo = init_repo(&tmp.path().join("work"));
     let missing = tmp.path().join("missing.git");
     let remote = Remote::from_url(missing.to_str().expect("utf8")).expect("url");
-    let spec = PushRefSpec {
-        dst: "refs/heads/main".to_owned(),
-        delete: true,
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_dst("refs/heads/main".to_owned())
+        .with_delete(true);
     let err = remote
         .push(
             &repo,
@@ -654,11 +652,9 @@ fn linked_worktree_checkout_is_a_readable_local_remote() {
         &RepositoryOptions::empty().with_work_tree(&dest),
     )
     .expect("open clone");
-    let spec = PushRefSpec {
-        src: Some(new_tip),
-        dst: "refs/heads/pushed".to_owned(),
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(new_tip))
+        .with_dst("refs/heads/pushed".to_owned());
     remote
         .push(
             &repo,
@@ -741,11 +737,9 @@ fn git_daemon_without_advertisement_is_no_handshake() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let repo = init_repo(&tmp.path().join("work"));
     let remote = Remote::from_url(&url).expect("url");
-    let spec = PushRefSpec {
-        dst: "refs/heads/main".to_owned(),
-        delete: true,
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_dst("refs/heads/main".to_owned())
+        .with_delete(true);
     let err = remote
         .push(
             &repo,

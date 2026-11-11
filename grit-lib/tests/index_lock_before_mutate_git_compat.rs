@@ -378,14 +378,11 @@ fn switch_with_held_index_lock_changes_nothing() {
         if dirty {
             fs::write(root.join("u.txt"), "untracked\n").expect("write");
         }
-        let opts = SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "other".into(),
-                oid: rev(root, "other"),
-            },
-            dry_run: false,
-            hooks: PostOperationHooks::Skip,
-        };
+        let opts = SwitchOptions::new(SwitchMode::Existing {
+            branch: "other".into(),
+            oid: rev(root, "other"),
+        })
+        .with_hooks(PostOperationHooks::Skip);
 
         assert_refused_by_foreign_lock(root, || {
             repo.checkout()
@@ -420,19 +417,14 @@ fn restore_with_held_index_lock_changes_nothing() {
             git(root, &["add", "a.txt"]);
         }
         let head_tree = rev(root, "HEAD^{tree}");
-        let opts = RestoreOptions {
-            pathspecs: vec!["a.txt".into()],
-            pathspec_sources: vec!["a.txt".into()],
-            source: if staged {
+        let opts = RestoreOptions::new(vec!["a.txt".into()])
+            .with_pathspec_sources(vec!["a.txt".into()])
+            .with_source(if staged {
                 RestoreSource::Tree(head_tree)
             } else {
                 RestoreSource::Index
-            },
-            staged,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        };
+            })
+            .with_staged(staged);
 
         assert_refused_by_foreign_lock(root, || {
             repo.checkout()

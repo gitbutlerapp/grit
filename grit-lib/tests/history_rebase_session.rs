@@ -2220,11 +2220,7 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
         let err = grit
             .checkout()
             .switch(
-                &SwitchOptions {
-                    mode,
-                    dry_run,
-                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-                },
+                &SwitchOptions::new(mode).with_dry_run(dry_run),
                 &mut grit_lib::progress::NullProgress,
                 &grit_lib::progress::CancelToken::never(),
             )
@@ -2283,11 +2279,7 @@ fn switch_refuses_during_merge_conflict() {
     let err = grit
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(mode),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

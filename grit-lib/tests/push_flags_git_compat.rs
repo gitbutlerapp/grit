@@ -110,10 +110,7 @@ fn push_set_upstream_writes_same_config_as_git() {
         .push_to(
             grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
             &plan.specs,
-            &PushOptions {
-                tracking_remote: Some("origin".into()),
-                ..Default::default()
-            },
+            &PushOptions::default().with_tracking_remote(Some("origin".into())),
             &mut grit_lib::remote::fetch::NoProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -160,23 +157,15 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
         .trim()
         .to_owned();
     fn spec(src: &str, dst: &str) -> PushRefSpec {
-        PushRefSpec {
-            src: Some(ObjectId::from_hex(src).unwrap()),
-            src_ref: None,
-            dst: dst.to_owned(),
-            force: false,
-            delete: false,
-            ..Default::default()
-        }
+        PushRefSpec::default()
+            .with_src(Some(ObjectId::from_hex(src).unwrap()))
+            .with_dst(dst.to_owned())
     }
 
     let good = spec(&side_oid, "refs/heads/atomic-ok");
     let bad = spec(&side_oid, "refs/heads/main");
 
-    let atomic = PushOptions {
-        atomic: true,
-        ..Default::default()
-    };
+    let atomic = PushOptions::default().with_atomic(true);
     grit_lib::repo::Repository::open(
         local.join(".git").as_path(),
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -350,10 +339,7 @@ fn follow_tags_custom_dst_matches_git() {
         .push_to(
             grit_lib::remote::transfer::TransferEndpoint::Local(&bare_grit),
             &branch_specs,
-            &PushOptions {
-                tracking_remote: Some("grit".into()),
-                ..Default::default()
-            },
+            &PushOptions::default().with_tracking_remote(Some("grit".into())),
             &mut grit_lib::remote::fetch::NoProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -441,12 +427,10 @@ fn push_local_push_options_follow_advertise_push_options() {
 
         let main_oid = git_cmd(&["rev-parse", "HEAD"]).in_dir(&local).exec().stdout;
         let main_oid = ObjectId::from_hex(main_oid.trim()).unwrap();
-        let spec = PushRefSpec {
-            src: Some(main_oid),
-            src_ref: Some("refs/heads/main".into()),
-            dst: "refs/heads/main".into(),
-            ..Default::default()
-        };
+        let spec = PushRefSpec::default()
+            .with_src(Some(main_oid))
+            .with_src_ref(Some("refs/heads/main".into()))
+            .with_dst("refs/heads/main".into());
         let result = grit_lib::repo::Repository::open(
             local.join(".git").as_path(),
             &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -456,10 +440,7 @@ fn push_local_push_options_follow_advertise_push_options() {
         .push_to(
             grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
             &[spec],
-            &PushOptions {
-                push_options: vec!["ci.skip".into()],
-                ..Default::default()
-            },
+            &PushOptions::default().with_push_options(vec!["ci.skip".into()]),
             &mut grit_lib::remote::fetch::NoProgress,
             &grit_lib::progress::CancelToken::never(),
         );

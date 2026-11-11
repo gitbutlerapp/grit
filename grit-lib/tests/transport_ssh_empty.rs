@@ -236,11 +236,9 @@ fn push_to_empty_bare_over_ssh_without_hung_up_stderr() {
         )
         .expect("receive-pack connect");
 
-    let spec = PushRefSpec {
-        src: Some(tip),
-        dst: "refs/heads/x".to_owned(),
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_dst("refs/heads/x".to_owned());
     let outcome = grit_lib::repo::Repository::open(
         &local.join(".git"),
         &grit_lib::config::environment::RepositoryOptions::empty(),

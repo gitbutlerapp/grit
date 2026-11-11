@@ -315,18 +315,16 @@ fn refresh_checkout(
         );
     }
     let info = client.update(&marker.id)?;
-    let options = PullOptions {
-        mode: cli_mode(args),
-        autostash: args.autostash,
-        check: args.check,
-        fetch: {
+    let options = PullOptions::default()
+        .with_mode(cli_mode(args))
+        .with_autostash(args.autostash)
+        .with_check(args.check)
+        .with_fetch({
             let mut fetch = FetchOptions::new();
             fetch.thread_policy = repo.thread_policy();
             fetch.environment = context::environment();
             fetch
-        },
-        ..Default::default()
-    };
+        });
     let refreshed = repo
         .snapshot_checkouts()
         .refresh(

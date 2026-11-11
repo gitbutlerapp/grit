@@ -78,16 +78,9 @@ fn push_local_full_lifecycle() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c2),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(c2))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -139,16 +132,9 @@ fn push_local_full_lifecycle() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c2_prime),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(c2_prime))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -167,16 +153,10 @@ fn push_local_full_lifecycle() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c2_prime),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: true,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(c2_prime))
+            .with_dst("refs/heads/main".to_owned())
+            .with_force(true)],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -189,16 +169,9 @@ fn push_local_full_lifecycle() {
     fsck_clean(remote_git);
 
     // --- (d) delete the ref. ---
-    let delete_main = [PushRefSpec {
-        src: None,
-        src_ref: None,
-        dst: "refs/heads/main".to_owned(),
-        force: false,
-        delete: true,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    }];
+    let delete_main = [PushRefSpec::default()
+        .with_dst("refs/heads/main".to_owned())
+        .with_delete(true)];
     // The remote's HEAD names main, and Git refuses to delete the current
     // branch (bare or not) while receive.denyDeleteCurrent is unset.
     let outcome = grit_lib::repo::Repository::open(
@@ -257,17 +230,12 @@ fn push_local_full_lifecycle() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c2_prime),
-            src_ref: None,
-            dst: "refs/heads/cas".to_owned(),
-            force: true,
-            delete: false,
+        &[PushRefSpec::default()
+            .with_src(Some(c2_prime))
+            .with_dst("refs/heads/cas".to_owned())
+            .with_force(true)
             // Expect c2 but remote is actually c1 -> stale.
-            expected_old: Some(c2),
-            expect_absent: false,
-            ..Default::default()
-        }],
+            .with_expected_old(Some(c2))],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -286,16 +254,11 @@ fn push_local_full_lifecycle() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c2_prime),
-            src_ref: None,
-            dst: "refs/heads/cas".to_owned(),
-            force: true,
-            delete: false,
-            expected_old: Some(c1),
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(c2_prime))
+            .with_dst("refs/heads/cas".to_owned())
+            .with_force(true)
+            .with_expected_old(Some(c1))],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -339,16 +302,9 @@ fn push_local_atomic_rejects_all_on_any_failure() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c1),
-            src_ref: None,
-            dst: "refs/heads/locked".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(c1))
+            .with_dst("refs/heads/locked".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -366,32 +322,15 @@ fn push_local_atomic_rejects_all_on_any_failure() {
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
         &[
-            PushRefSpec {
-                src: Some(c2),
-                src_ref: None,
-                dst: "refs/heads/fresh".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            },
-            PushRefSpec {
-                src: Some(c2),
-                src_ref: None,
-                dst: "refs/heads/locked".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: Some(c2), // wrong: remote is c1
-                expect_absent: false,
-                ..Default::default()
-            },
+            PushRefSpec::default()
+                .with_src(Some(c2))
+                .with_dst("refs/heads/fresh".to_owned()),
+            PushRefSpec::default()
+                .with_src(Some(c2))
+                .with_dst("refs/heads/locked".to_owned())
+                .with_expected_old(Some(c2)),
         ],
-        &PushOptions {
-            atomic: true,
-            dry_run: false,
-            ..PushOptions::default()
-        },
+        &PushOptions::default().with_atomic(true),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -447,26 +386,12 @@ fn push_local_non_atomic_df_applies_first_ref_only() {
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
         &[
-            PushRefSpec {
-                src: Some(tip),
-                src_ref: None,
-                dst: "refs/heads/parent".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            },
-            PushRefSpec {
-                src: Some(tip),
-                src_ref: None,
-                dst: "refs/heads/parent/child".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            },
+            PushRefSpec::default()
+                .with_src(Some(tip))
+                .with_dst("refs/heads/parent".to_owned()),
+            PushRefSpec::default()
+                .with_src(Some(tip))
+                .with_dst("refs/heads/parent/child".to_owned()),
         ],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
@@ -518,31 +443,14 @@ fn push_local_atomic_store_batch_df_marks_atomic_push_failed() {
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
         &[
-            PushRefSpec {
-                src: Some(tip),
-                src_ref: None,
-                dst: "refs/heads/parent".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            },
-            PushRefSpec {
-                src: Some(tip),
-                src_ref: None,
-                dst: "refs/heads/parent/child".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            },
+            PushRefSpec::default()
+                .with_src(Some(tip))
+                .with_dst("refs/heads/parent".to_owned()),
+            PushRefSpec::default()
+                .with_src(Some(tip))
+                .with_dst("refs/heads/parent/child".to_owned()),
         ],
-        &PushOptions {
-            atomic: true,
-            ..PushOptions::default()
-        },
+        &PushOptions::default().with_atomic(true),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -598,20 +506,10 @@ fn push_local_updates_remote_tracking_ref_when_configured() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c1),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
-        &PushOptions {
-            tracking_remote: Some("origin".to_owned()),
-            ..PushOptions::default()
-        },
+        &[PushRefSpec::default()
+            .with_src(Some(c1))
+            .with_dst("refs/heads/main".to_owned())],
+        &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -659,20 +557,10 @@ fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c2),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
-        &PushOptions {
-            tracking_remote: Some("origin".to_owned()),
-            ..PushOptions::default()
-        },
+        &[PushRefSpec::default()
+            .with_src(Some(c2))
+            .with_dst("refs/heads/main".to_owned())],
+        &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -694,20 +582,10 @@ fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c2),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
-        &PushOptions {
-            tracking_remote: Some("origin".to_owned()),
-            ..PushOptions::default()
-        },
+        &[PushRefSpec::default()
+            .with_src(Some(c2))
+            .with_dst("refs/heads/main".to_owned())],
+        &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -761,20 +639,10 @@ fn push_local_honors_custom_fetch_refspec_for_tracking() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(c1),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
-        &PushOptions {
-            tracking_remote: Some("origin".to_owned()),
-            ..PushOptions::default()
-        },
+        &[PushRefSpec::default()
+            .with_src(Some(c1))
+            .with_dst("refs/heads/main".to_owned())],
+        &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -813,16 +681,9 @@ fn push_local_missing_remote_is_error() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&missing),
-        &[PushRefSpec {
-            src: Some(c1),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(c1))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -873,16 +734,9 @@ fn push_local_does_not_use_decoy_repo_when_parent_relative_target_missing() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
-        &[PushRefSpec {
-            src: Some(c1),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(c1))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -955,16 +809,9 @@ fn linked_worktree_resolves_relative_remote_from_worktree_root() {
         .remotes()
         .push_to(
             grit_lib::remote::transfer::TransferEndpoint::Local(&resolved),
-            &[PushRefSpec {
-                src: Some(head),
-                src_ref: None,
-                dst: "refs/heads/main".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            }],
+            &[PushRefSpec::default()
+                .with_src(Some(head))
+                .with_dst("refs/heads/main".to_owned())],
             &PushOptions::default(),
             &mut grit_lib::remote::fetch::NoProgress,
             &grit_lib::progress::CancelToken::never(),
@@ -1016,16 +863,9 @@ fn push_local_into_empty_repo_links_local_pack() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(tip),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(tip))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -1104,16 +944,9 @@ fn push_local_shallow_to_empty_remote_with_shallow_update() {
     git(&dest, &["config", "receive.shallowUpdate", "true"]);
     let dest_git = dest.as_path();
 
-    let spec = PushRefSpec {
-        src: Some(tip),
-        src_ref: None,
-        dst: "refs/heads/main".to_owned(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_dst("refs/heads/main".to_owned());
     let outcome = grit_lib::repo::Repository::open(
         &shallow_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -1161,16 +994,9 @@ fn push_local_shallow_to_empty_remote_refused_without_shallow_update() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(dest_git),
-        &[PushRefSpec {
-            src: Some(tip),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(tip))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -1207,16 +1033,9 @@ fn push_local_shallow_to_remote_with_full_history_needs_no_shallow_file() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(origin_git),
-        &[PushRefSpec {
-            src: Some(tip),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(tip))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -1284,16 +1103,9 @@ fn push_local_installs_single_pack_without_loose_objects() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(tip),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(tip))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -1367,11 +1179,9 @@ fn push_local_concurrent_creates_of_same_branch_never_lose_an_update() {
                         .remotes()
                         .push_to(
                             grit_lib::remote::transfer::TransferEndpoint::Local(remote),
-                            &[PushRefSpec {
-                                src: Some(*head),
-                                dst: "refs/heads/shared".to_owned(),
-                                ..Default::default()
-                            }],
+                            &[PushRefSpec::default()
+                                .with_src(Some(*head))
+                                .with_dst("refs/heads/shared".to_owned())],
                             &PushOptions::default(),
                             &mut grit_lib::remote::fetch::NoProgress,
                             &grit_lib::progress::CancelToken::never(),
@@ -1470,16 +1280,9 @@ fn push_local_rebuilds_pack_when_store_has_unreachable_objects() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
-        &[PushRefSpec {
-            src: Some(tip),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(tip))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),

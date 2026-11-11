@@ -134,10 +134,7 @@ use grit_lib::remote::serve::ReceivePolicy;
 
 let mut fsck = ObjectFsckPolicy::default();
 fsck.set_level("missingEmail", FsckMsgLevel::Warn);
-let policy = ReceivePolicy {
-    fsck_objects: Some(fsck),
-    ..ReceivePolicy::default()
-};
+let policy = ReceivePolicy::default().with_fsck_objects(Some(fsck));
 assert!(policy.fsck_objects.is_some());
 ```
 
@@ -172,13 +169,13 @@ On the client, a v2 fetch reads the advertisement and runs [`PromisorHandshake::
 ```rust
 use grit_lib::remote::clone::{clone, CloneOptions};
 
-let mut opts = CloneOptions::new("https://git.example.com/project.git", "project".into());
-opts.auto_filter = true;
-opts.config = vec![
-    ("remote.lop.url".into(), "https://lop.example.com/project.git".into()),
-    ("remote.lop.promisor".into(), "true".into()),
-    ("promisor.acceptFromServer".into(), "knownUrl".into()),
-];
+let opts = CloneOptions::new("https://git.example.com/project.git", "project".into())
+    .with_auto_filter(true)
+    .with_config(vec![
+        ("remote.lop.url".into(), "https://lop.example.com/project.git".into()),
+        ("remote.lop.promisor".into(), "true".into()),
+        ("promisor.acceptFromServer".into(), "knownUrl".into()),
+    ]);
 let outcome = clone(opts, &mut progress, &cancel, None)?;
 for remote in outcome.promisor.iter().flat_map(|h| h.decision.accepted()) {
     println!("accepted {}", remote.name);

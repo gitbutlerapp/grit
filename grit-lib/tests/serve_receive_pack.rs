@@ -87,12 +87,10 @@ fn open(path: &Path) -> Repository {
 }
 
 fn serve_opts() -> ServeOptions {
-    ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    }
+    ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned())
 }
 
 fn serve(
@@ -324,11 +322,9 @@ fn policy_refusals_are_typed() {
     let first = rev_parse(&src, "HEAD~1");
     let bare = tmp.path().join("bare.git");
     let repo = bare_repo(&bare);
-    let policy = ReceivePolicy {
-        deny_non_fast_forwards: true,
-        deny_deletes: true,
-        ..ReceivePolicy::default()
-    };
+    let policy = ReceivePolicy::default()
+        .with_deny_non_fast_forwards(true)
+        .with_deny_deletes(true);
 
     let pack = pack_for(&src, &[second.to_hex()]);
     let body = push_body(

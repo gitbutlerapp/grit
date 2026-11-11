@@ -266,11 +266,7 @@ fn the_main_git_dir_on_the_same_store_still_commits_onto_main() {
 fn switch(repo: &Repository, mode: SwitchMode) {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(mode).with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &CancelToken::never(),
         )

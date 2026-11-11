@@ -114,12 +114,10 @@ fn clone_fetches_tags_on_unreachable_commits() {
 
     let grit_dest = tempfile::tempdir().expect("grit clone");
     clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(
-                upstream.path().to_string_lossy(),
-                grit_dest.path().to_path_buf(),
-            )
-        },
+        CloneOptions::new(
+            upstream.path().to_string_lossy(),
+            grit_dest.path().to_path_buf(),
+        ),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -153,9 +151,7 @@ fn clone_file_url_fetches_unreachable_tags() {
         upstream.path().canonicalize().expect("canonical").display()
     );
     clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(url, grit_dest.path().to_path_buf())
-        },
+        CloneOptions::new(url, grit_dest.path().to_path_buf()),
         &mut NoProgress,
         &CancelToken::never(),
         None,

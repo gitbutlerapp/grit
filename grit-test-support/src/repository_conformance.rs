@@ -166,11 +166,7 @@ fn head_oid(repo: &Repository, branch: &str) -> ObjectId {
 fn switch(repo: &Repository, mode: SwitchMode) {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: Default::default(),
-            },
+            &SwitchOptions::new(mode),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -979,16 +975,9 @@ fn run_snapshot_on_repo(
     repo.remotes()
         .push(
             &origin,
-            &[PushRefSpec {
-                src: Some(pushed_main_tip),
-                src_ref: None,
-                dst: "refs/heads/main".into(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            }],
+            &[PushRefSpec::default()
+                .with_src(Some(pushed_main_tip))
+                .with_dst("refs/heads/main".into())],
             PushOptions::default(),
             &mut progress,
             &CancelToken::never(),

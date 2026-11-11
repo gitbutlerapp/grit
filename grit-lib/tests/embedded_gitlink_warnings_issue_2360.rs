@@ -7,7 +7,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::MODE_GITLINK;
 use grit_lib::porcelain::add::{StageMode, StageOptions};
-use grit_lib::porcelain::status::{IgnoredMode, StatusOptions, UntrackedMode};
+use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -49,11 +49,7 @@ fn status_lists_embedded_repository_before_staging() {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::Normal,
-                ignored: IgnoredMode::No,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default(),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -129,11 +125,7 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::Normal,
-                ignored: IgnoredMode::No,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default(),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -189,11 +181,7 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::Normal,
-                ignored: IgnoredMode::No,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default(),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -240,11 +228,7 @@ fn real_directory_with_gitdir_symlink_still_counts_as_embedded() {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::Normal,
-                ignored: IgnoredMode::No,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default(),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

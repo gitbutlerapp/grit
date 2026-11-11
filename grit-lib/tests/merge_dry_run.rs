@@ -1,6 +1,6 @@
 //! In-memory merge dry-run planning (`plan_branch_merge`).
 
-use grit_lib::merge::{FastForwardPolicy, MergeCommitMode, MergeDryRunPlan, MergeOptions};
+use grit_lib::merge::{FastForwardPolicy, MergeDryRunPlan, MergeOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::plan_branch_merge;
 use grit_test_support::{git, git_dir_state_digest, git_fsck};
@@ -159,11 +159,7 @@ fn plan_branch_merge_writes_nothing() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            fast_forward: FastForwardPolicy::Never,
-            commit: MergeCommitMode::Commit,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_fast_forward(FastForwardPolicy::Never),
     )
     .expect("plan");
     assert_eq!(before, git_dir_state_digest(&git_dir));

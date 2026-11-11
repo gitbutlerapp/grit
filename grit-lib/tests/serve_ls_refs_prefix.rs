@@ -97,14 +97,11 @@ fn ls_refs_request(args: &[&str]) -> Vec<u8> {
 }
 
 fn serve_opts(protocol: ProtocolVersion, stateless_rpc: bool, hidden: &[&str]) -> ServeOptions {
-    ServeOptions {
-        protocol,
-        stateless_rpc,
-        advertise_refs: !stateless_rpc,
-        agent: String::new(),
-        hidden_refs: hidden.iter().map(|h| (*h).to_owned()).collect(),
-        ..ServeOptions::default()
-    }
+    ServeOptions::default()
+        .with_protocol(protocol)
+        .with_stateless_rpc(stateless_rpc)
+        .with_advertise_refs(!stateless_rpc)
+        .with_hidden_refs(hidden.iter().map(|h| (*h).to_owned()).collect())
 }
 
 fn grit_ls_refs(repo: &Repository, args: &[&str], hidden: &[&str]) -> Vec<u8> {

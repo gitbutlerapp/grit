@@ -175,16 +175,9 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
     remote
         .push(
             &repo,
-            &[PushRefSpec {
-                src: Some(main_tip),
-                src_ref: None,
-                dst: "refs/heads/main".to_owned(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            }],
+            &[PushRefSpec::default()
+                .with_src(Some(main_tip))
+                .with_dst("refs/heads/main".to_owned())],
             PushOptions::default(),
             &mut grit_lib::remote::fetch::NoProgress,
             &CancelToken::never(),

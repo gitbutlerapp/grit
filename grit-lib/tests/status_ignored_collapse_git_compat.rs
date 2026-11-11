@@ -60,12 +60,10 @@ fn grit_untracked_and_ignored(
     repo: &Repository,
     untracked: UntrackedMode,
 ) -> (Vec<String>, Vec<String>) {
-    let opts = StatusOptions {
-        untracked,
-        ignored: IgnoredMode::Traditional,
-        ahead_behind: false,
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_untracked(untracked)
+        .with_ignored(IgnoredMode::Traditional)
+        .with_ahead_behind(false);
     let model = repo
         .status()
         .run(&opts, &mut NullProgress, &CancelToken::never())

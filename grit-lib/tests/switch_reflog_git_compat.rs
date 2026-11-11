@@ -169,18 +169,15 @@ fn run_repro_sequence(repo: &Repository) {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: repo
-                    .branches()
+            &SwitchOptions::new(
+                repo.branches()
                     .resolve_create_for_switch(
                         "topic",
                         None,
                         grit_lib::porcelain::branch::TrackMode::Auto,
                     )
                     .unwrap(),
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            ),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -189,14 +186,10 @@ fn run_repro_sequence(repo: &Repository) {
     let main_oid = repo.references().resolve("refs/heads/main").unwrap();
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -205,14 +198,10 @@ fn run_repro_sequence(repo: &Repository) {
     let detach = repo.checkout().resolve_revision_spec("HEAD~1").unwrap();
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: detach,
-                    reflog_to_label: "HEAD~1".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: detach,
+                reflog_to_label: "HEAD~1".into(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -220,14 +209,10 @@ fn run_repro_sequence(repo: &Repository) {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -259,14 +244,10 @@ fn detach_at_annotated_tag_matches_git() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit,
-                    reflog_to_label: "v1".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit,
+                reflog_to_label: "v1".into(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -379,18 +360,15 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: repo
-                    .branches()
+            &SwitchOptions::new(
+                repo.branches()
                     .resolve_create_for_switch(
                         "topic",
                         None,
                         grit_lib::porcelain::branch::TrackMode::Auto,
                     )
                     .unwrap(),
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            ),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -398,14 +376,10 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
     let main_oid = repo.references().resolve("refs/heads/main").unwrap();
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -422,11 +396,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: mode_minus,
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(mode_minus),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -434,14 +404,10 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -483,18 +449,15 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: repo
-                    .branches()
+            &SwitchOptions::new(
+                repo.branches()
                     .resolve_create_for_switch(
                         "topic",
                         None,
                         grit_lib::porcelain::branch::TrackMode::Auto,
                     )
                     .expect("x"),
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            ),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -522,14 +485,10 @@ fn same_branch_switch_appends_head_checkout_reflog() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: main_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -568,11 +527,7 @@ fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(mode),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -640,14 +595,10 @@ fn unborn_symbolic_head_switch_writes_zero_to_tip_checkout_reflog() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "feature".into(),
-                    oid: tip,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "feature".into(),
+                oid: tip,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

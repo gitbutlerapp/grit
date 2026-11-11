@@ -82,11 +82,9 @@ fn grit_clone_local_git_sha256_repo() {
 
     let dest = parent.path().join("grit-clone");
     let outcome = clone(
-        CloneOptions {
-            url: source.to_string_lossy().into_owned(),
-            dest: dest.clone(),
-            ..CloneOptions::new(source.to_string_lossy().into_owned(), dest.clone())
-        },
+        CloneOptions::new(source.to_string_lossy().into_owned(), dest.clone())
+            .with_url(source.to_string_lossy().into_owned())
+            .with_dest(dest.clone()),
         &mut NoProgress,
         &CancelToken::never(),
         None,

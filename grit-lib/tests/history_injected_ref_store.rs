@@ -279,14 +279,10 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
     let switch = |branch: &str, oid| {
         repo.checkout()
             .switch(
-                &SwitchOptions {
-                    mode: SwitchMode::Existing {
-                        branch: branch.into(),
-                        oid,
-                    },
-                    dry_run: false,
-                    hooks: Default::default(),
-                },
+                &SwitchOptions::new(SwitchMode::Existing {
+                    branch: branch.into(),
+                    oid,
+                }),
                 &mut NullProgress,
                 &CancelToken::never(),
             )

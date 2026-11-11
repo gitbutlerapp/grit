@@ -75,6 +75,7 @@ pub enum SwitchMode {
 
 /// Inputs for [`switch_repository`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct SwitchOptions {
     /// Resolved target branch, create, or detach mode.
     pub mode: SwitchMode,
@@ -83,6 +84,44 @@ pub struct SwitchOptions {
     pub dry_run: bool,
     /// Whether to run `post-checkout` after a real switch.
     pub hooks: PostOperationHooks,
+}
+
+impl SwitchOptions {
+    /// Options that switch to `mode`, writing refs, the index and the worktree and running
+    /// `post-checkout` ([`PostOperationHooks::Run`]).
+    ///
+    /// # Parameters
+    ///
+    /// - `mode`: the resolved target branch, branch to create, or commit to detach at.
+    #[must_use]
+    pub fn new(mode: SwitchMode) -> Self {
+        Self {
+            mode,
+            dry_run: false,
+            hooks: PostOperationHooks::Run,
+        }
+    }
+
+    /// Sets [`mode`](Self::mode).
+    #[must_use]
+    pub fn with_mode(mut self, mode: SwitchMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets [`hooks`](Self::hooks).
+    #[must_use]
+    pub fn with_hooks(mut self, hooks: PostOperationHooks) -> Self {
+        self.hooks = hooks;
+        self
+    }
 }
 
 /// Result of [`switch_repository`].

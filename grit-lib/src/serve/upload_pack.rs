@@ -176,10 +176,7 @@ impl UploadSession {
 /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-/// let mut options = ServeOptions {
-///     advertise_refs: true,
-///     ..ServeOptions::default()
-/// };
+/// let mut options = ServeOptions::default().with_advertise_refs(true);
 /// let mut advertisement = Vec::new();
 /// UploadPack::new(&repo, &mut options).run(&mut std::io::empty(), &mut advertisement)?;
 /// assert!(!advertisement.is_empty());

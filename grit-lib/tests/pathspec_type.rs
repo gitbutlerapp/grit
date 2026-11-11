@@ -181,12 +181,10 @@ fn status_literal_pathspec_matches_git_for_bracket_filename() {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                pathspec: pathspec.clone(),
-                untracked: UntrackedMode::No,
-                write_index: false,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default()
+                .with_pathspec(pathspec.clone())
+                .with_untracked(UntrackedMode::No)
+                .with_write_index(false),
             &mut NullProgress,
             &CancelToken::never(),
         )

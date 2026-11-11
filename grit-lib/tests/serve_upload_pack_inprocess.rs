@@ -21,14 +21,11 @@ fn test_serve_opts(
     advertise_refs: bool,
     stateless_rpc: bool,
 ) -> ServeOptions {
-    ServeOptions {
-        protocol,
-        advertise_refs,
-        stateless_rpc,
-        agent: "grit-cov".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    }
+    ServeOptions::default()
+        .with_protocol(protocol)
+        .with_advertise_refs(advertise_refs)
+        .with_stateless_rpc(stateless_rpc)
+        .with_agent("grit-cov".to_owned())
 }
 
 fn seed_bare_main(repo: &Repository) -> ObjectId {
@@ -296,14 +293,10 @@ fn upload_pack_stateless_v0_want_reachable_non_tip() {
     let mut pack_out = Vec::new();
     UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-cov".to_owned()),
     )
     .run(
         &mut Cursor::new(v0_stateless_fetch_body(middle)),
@@ -358,14 +351,9 @@ fn upload_pack_stateful_v0_rejects_non_advertised_ancestor_want() {
 
     let err = UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: false,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_agent("grit-cov".to_owned()),
     )
     .run(&mut Cursor::new(body), &mut Vec::new())
     .expect_err("stateful session should reject ancestor not in advertisement");
@@ -514,14 +502,10 @@ fn upload_pack_stateless_v2_want_reachable_non_tip() {
     let mut v2_fetch = Vec::new();
     UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V2,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V2)
+            .with_stateless_rpc(true)
+            .with_agent("grit-cov".to_owned()),
     )
     .run(&mut Cursor::new(fetch_body), &mut v2_fetch)
     .expect("v2 stateless fetch for ancestor");
@@ -550,14 +534,10 @@ fn upload_pack_stateless_allow_tip_sha1_in_want_accepts_reachable_ancestor() {
 
     UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-cov".to_owned()),
     )
     .run(
         &mut Cursor::new(v0_stateless_fetch_body(middle)),
@@ -581,14 +561,10 @@ fn upload_pack_stateless_v0_want_current_annotated_tag_object() {
     let mut pack_out = Vec::new();
     UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-cov".to_owned()),
     )
     .run(
         &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),
@@ -616,14 +592,10 @@ fn upload_pack_stateless_v0_want_advertised_tip_skips_reachability_walk() {
 
     UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-cov".to_owned()),
     )
     .run(
         &mut Cursor::new(v0_stateless_fetch_body(tip)),
@@ -1109,14 +1081,10 @@ fn upload_pack_stateless_v0_want_moved_annotated_blob_tag() {
     let mut pack_out = Vec::new();
     UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-cov".to_owned()),
     )
     .run(
         &mut Cursor::new(v0_stateless_fetch_body(tag_obj)),

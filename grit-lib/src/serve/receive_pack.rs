@@ -168,6 +168,7 @@ impl DenyCurrentBranch {
 
 /// Which pushed objects and ref updates the server refuses.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReceivePolicy {
     /// Refuse branch (`refs/heads/*`) updates that would discard commits
     /// (`receive.denyNonFastForwards`). Other refs are not checked.
@@ -270,6 +271,48 @@ impl ReceivePolicy {
             fsck_objects: fsck.then(|| ObjectFsckPolicy::from_config(config, "receive.fsck")),
             shallow_update: flag("receive.shallowUpdate"),
         }
+    }
+
+    /// Sets [`deny_non_fast_forwards`](Self::deny_non_fast_forwards).
+    #[must_use]
+    pub fn with_deny_non_fast_forwards(mut self, deny_non_fast_forwards: bool) -> Self {
+        self.deny_non_fast_forwards = deny_non_fast_forwards;
+        self
+    }
+
+    /// Sets [`deny_deletes`](Self::deny_deletes).
+    #[must_use]
+    pub fn with_deny_deletes(mut self, deny_deletes: bool) -> Self {
+        self.deny_deletes = deny_deletes;
+        self
+    }
+
+    /// Sets [`deny_current_branch`](Self::deny_current_branch).
+    #[must_use]
+    pub fn with_deny_current_branch(mut self, deny_current_branch: DenyCurrentBranch) -> Self {
+        self.deny_current_branch = deny_current_branch;
+        self
+    }
+
+    /// Sets [`deny_delete_current`](Self::deny_delete_current).
+    #[must_use]
+    pub fn with_deny_delete_current(mut self, deny_delete_current: bool) -> Self {
+        self.deny_delete_current = deny_delete_current;
+        self
+    }
+
+    /// Sets [`fsck_objects`](Self::fsck_objects).
+    #[must_use]
+    pub fn with_fsck_objects(mut self, fsck_objects: Option<ObjectFsckPolicy>) -> Self {
+        self.fsck_objects = fsck_objects;
+        self
+    }
+
+    /// Sets [`shallow_update`](Self::shallow_update).
+    #[must_use]
+    pub fn with_shallow_update(mut self, shallow_update: bool) -> Self {
+        self.shallow_update = shallow_update;
+        self
     }
 }
 

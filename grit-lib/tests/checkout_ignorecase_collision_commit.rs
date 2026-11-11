@@ -735,14 +735,10 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
         .repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "collide".into(),
-                    oid: collide_tip,
-                },
-                dry_run: false,
-                hooks: Default::default(),
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "collide".into(),
+                oid: collide_tip,
+            }),
             &mut NullProgress,
             &CancelToken::never(),
         )

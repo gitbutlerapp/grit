@@ -1,7 +1,6 @@
 //! `grit switch` — move to another branch, remote branch, or detached commit.
 
 use anyhow::{bail, Result};
-use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::porcelain::branch::{upstream_tracking_display, TrackMode};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
@@ -71,11 +70,7 @@ pub fn run(
     let outcome = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run,
-                hooks: PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(mode).with_dry_run(dry_run),
             &mut NullProgress,
             &cancel,
         )

@@ -102,11 +102,9 @@ fn resolved_clone_tags(opts: &CloneRunOptions) -> Option<CloneTags> {
 
 fn effective_tag_fetch_mode(opts: &CloneRunOptions) -> CloneTags {
     resolved_clone_tags(opts).unwrap_or_else(|| {
-        let clone_opts = CloneOptions {
-            depth: opts.depth.or_else(|| opts.shallow.then_some(1)),
-            single_branch: opts.single_branch,
-            ..CloneOptions::new(String::new(), std::path::PathBuf::new())
-        };
+        let clone_opts = CloneOptions::new(String::new(), std::path::PathBuf::new())
+            .with_depth(opts.depth.or_else(|| opts.shallow.then_some(1)))
+            .with_single_branch(opts.single_branch);
         if clone_effective_single_branch(&clone_opts) {
             CloneTags::Following
         } else {
@@ -238,33 +236,30 @@ fn clone_into(
         Some(BlobsArg::Filter(spec)) => Some(spec),
         Some(BlobsArg::Auto) | None => None,
     };
-    let clone_opts = CloneOptions {
-        url: run.url.clone(),
-        dest: path.to_path_buf(),
-        environment: crate::context::environment(),
-        remote_name: remote_name.clone(),
-        initial_branch: "main".to_owned(),
-        thread_policy: crate::context::thread_policy_for_repo(),
-        depth: run.depth,
-        branch: run.branch.clone(),
-        filter,
-        auto_filter,
-        config: run
-            .config
-            .iter()
-            .map(|c| (c.key().to_owned(), c.value().unwrap_or("true").to_owned()))
-            .collect(),
-        single_branch: run.single_branch,
-        tags: resolved_clone_tags(run),
-        promisor_fetcher: Some(std::sync::Arc::new(
+    let clone_opts = CloneOptions::new(run.url.clone(), path.to_path_buf())
+        .with_environment(crate::context::environment())
+        .with_remote_name(remote_name.clone())
+        .with_thread_policy(crate::context::thread_policy_for_repo())
+        .with_depth(run.depth)
+        .with_branch(run.branch.clone())
+        .with_filter(filter)
+        .with_auto_filter(auto_filter)
+        .with_config(
+            run.config
+                .iter()
+                .map(|c| (c.key().to_owned(), c.value().unwrap_or("true").to_owned()))
+                .collect(),
+        )
+        .with_single_branch(run.single_branch)
+        .with_tags(resolved_clone_tags(run))
+        .with_promisor_fetcher(Some(std::sync::Arc::new(
             grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(
                 factory.clone(),
             )),
-        )),
-        bare: run.bare,
-        checkout: !run.no_checkout,
-        bundle_cache: bundle_cache_dir(),
-    };
+        )))
+        .with_bare(run.bare)
+        .with_checkout(!run.no_checkout)
+        .with_bundle_cache(bundle_cache_dir());
     let single_branch = clone_effective_single_branch(&clone_opts);
     let outcome = clone_repo(clone_opts, &mut *term_progress, cancel, Some(&factory))?;
     let mut bundle_failure = None;

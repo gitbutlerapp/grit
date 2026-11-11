@@ -51,15 +51,11 @@ fn restore_opts(
     worktree: bool,
     source: RestoreSource,
 ) -> RestoreOptions {
-    RestoreOptions {
-        pathspecs: pathspecs.iter().map(|s| (*s).to_string()).collect(),
-        pathspec_sources: pathspecs.iter().map(|s| (*s).to_string()).collect(),
-        source,
-        staged,
-        worktree,
-        stage: None,
-        remerge: None,
-    }
+    RestoreOptions::new(pathspecs.iter().map(|s| (*s).to_string()).collect())
+        .with_pathspec_sources(pathspecs.iter().map(|s| (*s).to_string()).collect())
+        .with_source(source)
+        .with_staged(staged)
+        .with_worktree(worktree)
 }
 
 #[test]
@@ -157,18 +153,13 @@ fn restore_source_head_parent() {
         .unwrap();
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["c.txt".into()],
-                pathspec_sources: vec!["c.txt".into()],
-                source: RestoreSource::Tree({
+            &RestoreOptions::new(vec!["c.txt".into()])
+                .with_pathspec_sources(vec!["c.txt".into()])
+                .with_source(RestoreSource::Tree({
                     let obj = repo.odb().read(&tree).unwrap();
                     grit_lib::objects::parse_commit(&obj.data).unwrap().tree
-                }),
-                staged: false,
-                worktree: false,
-                stage: None,
-                remerge: None,
-            },
+                }))
+                .with_worktree(false),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -201,15 +192,10 @@ fn restore_source_worktree_only_leaves_index_at_head() {
     };
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["file".into()],
-                pathspec_sources: vec!["file".into()],
-                source: RestoreSource::Tree(parent_tree),
-                staged: false,
-                worktree: false,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["file".into()])
+                .with_pathspec_sources(vec!["file".into()])
+                .with_source(RestoreSource::Tree(parent_tree))
+                .with_worktree(false),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -250,15 +236,9 @@ fn restore_deletion_skips_directory_collision() {
     };
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["victim".into()],
-                pathspec_sources: vec!["victim".into()],
-                source: RestoreSource::Tree(head_tree_oid),
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["victim".into()])
+                .with_pathspec_sources(vec!["victim".into()])
+                .with_source(RestoreSource::Tree(head_tree_oid)),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -323,15 +303,10 @@ fn restore_removes_path_missing_in_source() {
 
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["gone.txt".into()],
-                pathspec_sources: vec!["gone.txt".into()],
-                source: RestoreSource::Tree(head_tree_oid),
-                staged: false,
-                worktree: false,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["gone.txt".into()])
+                .with_pathspec_sources(vec!["gone.txt".into()])
+                .with_source(RestoreSource::Tree(head_tree_oid))
+                .with_worktree(false),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -511,15 +486,9 @@ fn restore_pathspec_exclude_skips_excluded_paths() {
 
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec![".".into(), ":!skip".into()],
-                pathspec_sources: vec![".".into(), ":!skip".into()],
-                source: RestoreSource::Index,
-                staged: false,
-                worktree: false,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec![".".into(), ":!skip".into()])
+                .with_pathspec_sources(vec![".".into(), ":!skip".into()])
+                .with_worktree(false),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -829,15 +798,11 @@ fn restore_staged_mixed_paths_from_source_tree_matches_git() {
     setup_mixed_staged_restore_fixture(dir.path());
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec!["keep.txt".into(), "sub".into(), "big-only.txt".into()],
-                pathspec_sources: vec!["keep.txt".into(), "sub".into(), "big-only.txt".into()],
-                source: RestoreSource::Tree(main_tree),
-                staged: true,
-                worktree: false,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec!["keep.txt".into(), "sub".into(), "big-only.txt".into()])
+                .with_pathspec_sources(vec!["keep.txt".into(), "sub".into(), "big-only.txt".into()])
+                .with_source(RestoreSource::Tree(main_tree))
+                .with_staged(true)
+                .with_worktree(false),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

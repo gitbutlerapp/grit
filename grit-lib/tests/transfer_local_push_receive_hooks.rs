@@ -316,10 +316,7 @@ fn push_options_reach_receive_hooks_when_advertised() {
             &repo,
             &dest,
             &["main"],
-            PushOptions {
-                push_options: vec!["ci=1".to_owned()],
-                ..PushOptions::default()
-            },
+            PushOptions::default().with_push_options(vec!["ci=1".to_owned()]),
         )
         .unwrap_or_else(|e| panic!("push to {dest}: {e}"));
         assert_eq!(outcome.results[0].status, PushRefStatus::Ok, "{dest}");
@@ -343,19 +340,13 @@ fn push_options_fail_before_writing_when_not_advertised() {
         }
         fx.hook("pre-receive", LOGGING_RECEIVE_HOOK);
         let repo = fx.open();
-        let opts = PushOptions {
-            push_options: vec!["ci=1".to_owned()],
-            ..PushOptions::default()
-        };
+        let opts = PushOptions::default().with_push_options(vec!["ci=1".to_owned()]);
         for dry_run in [false, true] {
             let err = grit_push(
                 &repo,
                 "origin",
                 &["main"],
-                PushOptions {
-                    dry_run,
-                    ..opts.clone()
-                },
+                opts.clone().with_dry_run(dry_run),
             )
             .expect_err("push options need receive.advertisePushOptions");
             assert!(
@@ -452,10 +443,7 @@ fn atomic_push_declined_by_update_hook_writes_nothing() {
         &repo,
         "origin",
         &["main", "feature"],
-        PushOptions {
-            atomic: true,
-            ..PushOptions::default()
-        },
+        PushOptions::default().with_atomic(true),
     )
     .expect("push");
     let statuses: Vec<_> = outcome
@@ -489,10 +477,7 @@ fn atomic_push_declined_by_pre_receive_rejects_every_ref() {
         &repo,
         "origin",
         &["main", "feature"],
-        PushOptions {
-            atomic: true,
-            ..PushOptions::default()
-        },
+        PushOptions::default().with_atomic(true),
     )
     .expect("push");
     assert!(outcome.results.iter().all(|r| {
@@ -515,11 +500,9 @@ fn dry_run_runs_no_receive_hook() {
         &repo,
         "origin",
         &["main"],
-        PushOptions {
-            dry_run: true,
-            push_options: vec!["ci=1".to_owned()],
-            ..PushOptions::default()
-        },
+        PushOptions::default()
+            .with_dry_run(true)
+            .with_push_options(vec!["ci=1".to_owned()]),
     )
     .expect("dry run");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
@@ -547,12 +530,10 @@ fn push_local_runs_receive_hooks() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
-        &[PushRefSpec {
-            src: Some(head),
-            src_ref: Some("refs/heads/main".to_owned()),
-            dst: "refs/heads/main".to_owned(),
-            ..PushRefSpec::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(head))
+            .with_src_ref(Some("refs/heads/main".to_owned()))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &CancelToken::never(),

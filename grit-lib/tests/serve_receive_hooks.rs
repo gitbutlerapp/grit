@@ -72,14 +72,10 @@ fn push_body(old: Option<ObjectId>, new: ObjectId, refname: &str, pack: &[u8]) -
 }
 
 fn serve_push(repo: &Repository, body: &[u8]) -> (ReceiveOutcome, Vec<u8>) {
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let policy = ReceivePolicy::default();
     let mut output = Vec::new();
     let outcome = ReceivePack::new(repo, &opts, &policy)
@@ -213,14 +209,10 @@ fn in_process_pre_receive_can_reject_push_options_before_refs_move() {
     body.extend_from_slice(b"0000");
     body.extend_from_slice(&pack);
 
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let policy = ReceivePolicy::default();
     let mut output = Vec::new();
     let outcome = ReceivePack::new(&repo, &opts, &policy)
@@ -273,14 +265,10 @@ fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
     let pack = pack_for_commit(&source, oid);
     let body = push_body(None, oid, "refs/heads/main", &pack);
 
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let cancel = CancelToken::new();
     let repo_for_thread =
         open_bare_with_runner(&bare, grit_lib::command_runner::system_command_runner());
@@ -349,14 +337,10 @@ fn receive_cancel_before_apply_leaves_ref_unmoved() {
     let pack = pack_for_commit(&source, oid);
     let body = push_body(None, oid, "refs/heads/main", &pack);
 
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let cancel = CancelToken::new();
     cancel.cancel();
     let err = ReceivePack::new(&repo, &opts, &ReceivePolicy::default())
@@ -1024,14 +1008,10 @@ fn receive_pack_finishes_when_push_client_keeps_stream_open() {
     let server_thread = thread::spawn(move || {
         let mut server = server;
         let repo = open_bare_with_runner(&bare_for_server, RecordingRunner::always_success());
-        let opts = ServeOptions {
-            protocol: ProtocolVersion::V0,
-            stateless_rpc: true,
-            advertise_refs: false,
-            agent: "grit-test".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        };
+        let opts = ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-test".to_owned());
         let policy = ReceivePolicy::default();
         let mut output = Vec::new();
         let started = Instant::now();

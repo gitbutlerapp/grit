@@ -59,6 +59,7 @@ pub enum RestoreSource {
 
 /// Options for [`restore_paths`], translated from the `grit restore` CLI.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RestoreOptions {
     /// Resolved pathspec patterns (may differ from user input after cwd-relative resolution).
     pub pathspecs: Vec<String>,
@@ -74,6 +75,78 @@ pub struct RestoreOptions {
     pub stage: Option<ConflictSide>,
     /// Rebuild conflict markers in the worktree from unmerged index stages (`--merge`).
     pub remerge: Option<ConflictStyle>,
+}
+
+impl RestoreOptions {
+    /// Options that restore the working tree from the index for `pathspecs`, as plain
+    /// `git restore <pathspec>…` does: [`RestoreSource::Index`], not staged, worktree on, no
+    /// conflict-side checkout or re-merge, and errors reported against `pathspecs` themselves
+    /// (empty [`Self::pathspec_sources`]).
+    ///
+    /// # Parameters
+    ///
+    /// - `pathspecs`: resolved pathspec patterns to restore.
+    #[must_use]
+    pub fn new(pathspecs: Vec<String>) -> Self {
+        Self {
+            pathspecs,
+            pathspec_sources: Vec::new(),
+            source: RestoreSource::Index,
+            staged: false,
+            worktree: true,
+            stage: None,
+            remerge: None,
+        }
+    }
+
+    /// Sets [`pathspecs`](Self::pathspecs).
+    #[must_use]
+    pub fn with_pathspecs(mut self, pathspecs: Vec<String>) -> Self {
+        self.pathspecs = pathspecs;
+        self
+    }
+
+    /// Sets [`pathspec_sources`](Self::pathspec_sources).
+    #[must_use]
+    pub fn with_pathspec_sources(mut self, pathspec_sources: Vec<String>) -> Self {
+        self.pathspec_sources = pathspec_sources;
+        self
+    }
+
+    /// Sets [`source`](Self::source).
+    #[must_use]
+    pub fn with_source(mut self, source: RestoreSource) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Sets [`staged`](Self::staged).
+    #[must_use]
+    pub fn with_staged(mut self, staged: bool) -> Self {
+        self.staged = staged;
+        self
+    }
+
+    /// Sets [`worktree`](Self::worktree).
+    #[must_use]
+    pub fn with_worktree(mut self, worktree: bool) -> Self {
+        self.worktree = worktree;
+        self
+    }
+
+    /// Sets [`stage`](Self::stage).
+    #[must_use]
+    pub fn with_stage(mut self, stage: Option<ConflictSide>) -> Self {
+        self.stage = stage;
+        self
+    }
+
+    /// Sets [`remerge`](Self::remerge).
+    #[must_use]
+    pub fn with_remerge(mut self, remerge: Option<ConflictStyle>) -> Self {
+        self.remerge = remerge;
+        self
+    }
 }
 
 /// Outcome of a restore operation: paths written and paths removed in each target.

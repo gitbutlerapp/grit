@@ -447,16 +447,9 @@ fn remote_push_local_file_url_matches_git() {
     git(Some(&local), &["commit", "-q", "-m", "push commit"]);
     let tip = repo.references().resolve("refs/heads/main").unwrap();
 
-    let push_spec = PushRefSpec {
-        src: Some(tip),
-        src_ref: None,
-        dst: "refs/heads/pushed".to_owned(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    };
+    let push_spec = PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_dst("refs/heads/pushed".to_owned());
     remote
         .push(
             &repo,

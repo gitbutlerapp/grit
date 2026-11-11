@@ -69,10 +69,7 @@ fn status_write_index_false_leaves_index_bytes_and_mtime() {
     let model = grit_repo
         .status()
         .run(
-            &StatusOptions {
-                write_index: false,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default().with_write_index(false),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -276,10 +273,7 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     let model = grit
         .status()
         .run(
-            &StatusOptions {
-                write_index: false,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default().with_write_index(false),
             &mut NullProgress,
             &CancelToken::never(),
         )

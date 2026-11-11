@@ -134,12 +134,10 @@ fn range_bundle_fetch_without_refspec_errors_before_ingest() {
     ));
 
     let dest = tempfile::tempdir().expect("dest");
-    let opts = CloneOptions {
-        url: full_bundle.to_str().unwrap().to_owned(),
-        dest: dest.path().to_path_buf(),
-        environment: grit_lib::config::environment::Environment::empty(),
-        ..CloneOptions::new(full_bundle.to_str().unwrap(), dest.path().to_path_buf())
-    };
+    let opts = CloneOptions::new(full_bundle.to_str().unwrap(), dest.path().to_path_buf())
+        .with_url(full_bundle.to_str().unwrap().to_owned())
+        .with_dest(dest.path().to_path_buf())
+        .with_environment(grit_lib::config::environment::Environment::empty());
     clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone full bundle");
 
     let git_dir = dest.path().join(".git");
@@ -229,12 +227,10 @@ fn range_bundle_fetch_with_explicit_refspec_updates_tracking_ref() {
     ));
 
     let dest = tempfile::tempdir().expect("dest");
-    let opts = CloneOptions {
-        url: full_bundle.to_str().unwrap().to_owned(),
-        dest: dest.path().to_path_buf(),
-        environment: grit_lib::config::environment::Environment::empty(),
-        ..CloneOptions::new(full_bundle.to_str().unwrap(), dest.path().to_path_buf())
-    };
+    let opts = CloneOptions::new(full_bundle.to_str().unwrap(), dest.path().to_path_buf())
+        .with_url(full_bundle.to_str().unwrap().to_owned())
+        .with_dest(dest.path().to_path_buf())
+        .with_environment(grit_lib::config::environment::Environment::empty());
     clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone full bundle");
 
     let remote = Remote::from_url(incr_bundle.to_str().unwrap()).expect("bundle url");
@@ -413,15 +409,13 @@ fn clone_from_bundle_matches_git_default_branch_when_head_not_first() {
         .to_owned();
 
     let grit_dest = tempfile::tempdir().expect("grit dest");
-    let opts = CloneOptions {
-        url: bundle_path.to_str().unwrap().to_owned(),
-        dest: grit_dest.path().to_path_buf(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(
-            bundle_path.to_str().unwrap(),
-            grit_dest.path().to_path_buf(),
-        )
-    };
+    let opts = CloneOptions::new(
+        bundle_path.to_str().unwrap(),
+        grit_dest.path().to_path_buf(),
+    )
+    .with_url(bundle_path.to_str().unwrap().to_owned())
+    .with_dest(grit_dest.path().to_path_buf())
+    .with_environment(Environment::empty());
     let outcome = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None)
         .expect("grit clone from bundle");
 
@@ -445,12 +439,10 @@ fn clone_from_bundle_reports_transfer_stats() {
     ));
 
     let dest = tempfile::tempdir().expect("dest");
-    let opts = CloneOptions {
-        url: bundle_path.to_str().unwrap().to_owned(),
-        dest: dest.path().to_path_buf(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
-    };
+    let opts = CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
+        .with_url(bundle_path.to_str().unwrap().to_owned())
+        .with_dest(dest.path().to_path_buf())
+        .with_environment(Environment::empty());
     let outcome =
         clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone from bundle");
 
@@ -501,12 +493,10 @@ fn clone_from_bundle_passes_git_fsck() {
     ));
 
     let dest = tempfile::tempdir().expect("dest");
-    let opts = CloneOptions {
-        url: bundle_path.to_str().unwrap().to_owned(),
-        dest: dest.path().to_path_buf(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
-    };
+    let opts = CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
+        .with_url(bundle_path.to_str().unwrap().to_owned())
+        .with_dest(dest.path().to_path_buf())
+        .with_environment(Environment::empty());
     clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone from bundle");
 
     assert!(git_in(dest.path(), &["fsck"]));
@@ -585,12 +575,10 @@ fn bundle_clone_reports_progress() {
     ));
 
     let dest = tempfile::tempdir().expect("dest");
-    let opts = CloneOptions {
-        url: bundle_path.to_str().unwrap().to_owned(),
-        dest: dest.path().to_path_buf(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
-    };
+    let opts = CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
+        .with_url(bundle_path.to_str().unwrap().to_owned())
+        .with_dest(dest.path().to_path_buf())
+        .with_environment(Environment::empty());
     let mut rec = PhaseRecorder::default();
     clone_repo(opts, &mut rec, &CancelToken::never(), None).expect("clone from bundle");
 

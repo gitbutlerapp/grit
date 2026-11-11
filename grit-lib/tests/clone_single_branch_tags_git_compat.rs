@@ -209,12 +209,10 @@ fn git_clone_with(case: CloneCase, url: &str, dest: &Path) {
 }
 
 fn grit_clone_with(case: CloneCase, url: String, dest: PathBuf) {
-    let opts = CloneOptions {
-        depth: case.depth,
-        branch: case.branch.map(str::to_owned),
-        single_branch: case.single_branch,
-        ..CloneOptions::new(url, dest)
-    };
+    let opts = CloneOptions::new(url, dest)
+        .with_depth(case.depth)
+        .with_branch(case.branch.map(str::to_owned))
+        .with_single_branch(case.single_branch);
     clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
 }
 
@@ -295,10 +293,7 @@ fn clone_no_tags_sets_tagopt_and_fetches_no_tags() {
     assert!(status.success());
 
     clone_repo(
-        CloneOptions {
-            tags: Some(CloneTags::None),
-            ..CloneOptions::new(url, grit_dest.clone())
-        },
+        CloneOptions::new(url, grit_dest.clone()).with_tags(Some(CloneTags::None)),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -336,10 +331,7 @@ fn clone_origin_name_used_for_tracking_refs() {
 
     let dest = tmp.path().join("upstream-clone");
     clone_repo(
-        CloneOptions {
-            remote_name: "upstream".to_owned(),
-            ..CloneOptions::new(url, dest.clone())
-        },
+        CloneOptions::new(url, dest.clone()).with_remote_name("upstream".to_owned()),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -379,10 +371,8 @@ fn clone_invalid_remote_on_nonempty_destination_preserves_files() {
     std::fs::write(dest.join("keep.txt"), b"stay").unwrap();
 
     let err = clone_repo(
-        CloneOptions {
-            remote_name: "bad name".to_owned(),
-            ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
-        },
+        CloneOptions::new(bare.to_string_lossy(), dest.clone())
+            .with_remote_name("bad name".to_owned()),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -470,10 +460,8 @@ fn clone_rejects_invalid_remote_name() {
     build_two_branch_bare(&bare);
 
     let err = clone_repo(
-        CloneOptions {
-            remote_name: "bad name".to_owned(),
-            ..CloneOptions::new(bare.to_string_lossy(), tmp.path().join("dest"))
-        },
+        CloneOptions::new(bare.to_string_lossy(), tmp.path().join("dest"))
+            .with_remote_name("bad name".to_owned()),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -510,12 +498,10 @@ fn assert_single_branch_tag_parity(url: &str, branch: &str, bare: bool) {
     assert!(status.success());
 
     clone_repo(
-        CloneOptions {
-            branch: Some(branch.to_owned()),
-            single_branch: Some(true),
-            bare,
-            ..CloneOptions::new(url.to_owned(), grit_dest.clone())
-        },
+        CloneOptions::new(url.to_owned(), grit_dest.clone())
+            .with_branch(Some(branch.to_owned()))
+            .with_single_branch(Some(true))
+            .with_bare(bare),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -583,11 +569,9 @@ fn clone_depth_no_single_branch_fetches_all_tags() {
     assert!(status.success());
 
     clone_repo(
-        CloneOptions {
-            depth: Some(1),
-            single_branch: Some(false),
-            ..CloneOptions::new(url, grit_dest.clone())
-        },
+        CloneOptions::new(url, grit_dest.clone())
+            .with_depth(Some(1))
+            .with_single_branch(Some(false)),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -602,16 +586,11 @@ fn clone_effective_single_branch_matches_git_defaults() {
     let full = CloneOptions::new("x", PathBuf::from("d"));
     assert!(!clone_effective_single_branch(&full));
 
-    let shallow = CloneOptions {
-        depth: Some(1),
-        ..CloneOptions::new("x", PathBuf::from("d"))
-    };
+    let shallow = CloneOptions::new("x", PathBuf::from("d")).with_depth(Some(1));
     assert!(clone_effective_single_branch(&shallow));
 
-    let shallow_all = CloneOptions {
-        depth: Some(1),
-        single_branch: Some(false),
-        ..CloneOptions::new("x", PathBuf::from("d"))
-    };
+    let shallow_all = CloneOptions::new("x", PathBuf::from("d"))
+        .with_depth(Some(1))
+        .with_single_branch(Some(false));
     assert!(!clone_effective_single_branch(&shallow_all));
 }

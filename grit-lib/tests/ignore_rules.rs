@@ -834,7 +834,7 @@ fn negated_directory_reincludes_dir_matched_by_plain_pattern() {
 #[test]
 fn negated_directory_reincluded_files_are_listed_and_staged_like_git() {
     use grit_lib::porcelain::add::{StageMode, StageOptions};
-    use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
+    use grit_lib::porcelain::status::StatusOptions;
     use grit_lib::progress::NullProgress;
 
     let (home, root) = ignore_layout(
@@ -858,10 +858,7 @@ fn negated_directory_reincluded_files_are_listed_and_staged_like_git() {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::Normal,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default(),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -982,10 +979,7 @@ fn assert_status_untracked_matches_git(home: &Path, root: &Path) {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::All,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default().with_untracked(UntrackedMode::All),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1159,10 +1153,7 @@ fn ignorecase_case_renamed_tracked_paths_are_not_ignored_like_git() {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                ignored: IgnoredMode::Traditional,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default().with_ignored(IgnoredMode::Traditional),
             &mut NullProgress,
             &CancelToken::never(),
         )

@@ -283,11 +283,9 @@ fn file_over_link_is_a_typechange_when_symlinks_are_enabled() {
 
 fn unstaged_status(root: &Path, threads: usize) -> Vec<(String, DiffStatus, String, String)> {
     let repo = open(root);
-    let options = StatusOptions {
-        untracked: UntrackedMode::No,
-        stat_parallel_threads: Some(threads),
-        ..StatusOptions::default()
-    };
+    let options = StatusOptions::default()
+        .with_untracked(UntrackedMode::No)
+        .with_stat_parallel_threads(Some(threads));
     let model = repo
         .status()
         .run(&options, &mut NullProgress, &CancelToken::never())

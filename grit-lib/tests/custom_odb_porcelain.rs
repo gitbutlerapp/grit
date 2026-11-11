@@ -120,11 +120,7 @@ fn head_oid(repo: &Repository, branch: &str) -> ObjectId {
 fn switch(repo: &Repository, mode: SwitchMode) {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: Default::default(),
-            },
+            &SwitchOptions::new(mode),
             &mut NullProgress,
             &CancelToken::never(),
         )

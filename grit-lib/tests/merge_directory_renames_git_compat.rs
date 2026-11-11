@@ -465,10 +465,7 @@ fn dry_run_plan_follows_the_explicit_directory_rename_option() {
     let fx = fixture(Scenario::Basic);
     let plan = |config: &str, mode: Option<DirectoryRenameMode>| {
         fx.set_config(Some(config));
-        let options = MergeOptions {
-            directory_renames: mode,
-            ..MergeOptions::default()
-        };
+        let options = MergeOptions::default().with_directory_renames(mode);
         plan_branch_merge(&fx.repo(), fx.ours, fx.theirs, "theirs", &options).expect("plan")
     };
     let merge_commit = MergeDryRunPlan::MergeCommit {

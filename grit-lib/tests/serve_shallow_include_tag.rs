@@ -140,14 +140,10 @@ fn grit_fetch(bare: &Path, body: &[u8]) -> Vec<u8> {
     let mut out = Vec::new();
     UploadPack::new(
         &repo,
-        &mut ServeOptions {
-            protocol: ProtocolVersion::V2,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-test".to_owned(),
-            hidden_refs: Vec::new(),
-            ..ServeOptions::default()
-        },
+        &mut ServeOptions::default()
+            .with_protocol(ProtocolVersion::V2)
+            .with_stateless_rpc(true)
+            .with_agent("grit-test".to_owned()),
     )
     .run(&mut Cursor::new(body.to_vec()), &mut out)
     .expect("grit upload-pack");

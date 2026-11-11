@@ -476,10 +476,7 @@ fn git_daemon_shallow_depth_two_keeps_parent_tag() {
     let url = format!("git://127.0.0.1:{port}/repo.git");
     let dest = tmp.path().join("clone");
     clone_repo(
-        CloneOptions {
-            depth: Some(2),
-            ..CloneOptions::new(url, dest.clone())
-        },
+        CloneOptions::new(url, dest.clone()).with_depth(Some(2)),
         &mut NoProgress,
         &CancelToken::never(),
         None,

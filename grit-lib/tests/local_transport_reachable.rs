@@ -137,11 +137,9 @@ fn file_url_push_sends_only_objects_reachable_from_pushed_ref() {
         .expect("url")
         .push(
             &repo,
-            &[PushRefSpec {
-                src: Some(main),
-                dst: "refs/heads/main".to_owned(),
-                ..Default::default()
-            }],
+            &[PushRefSpec::default()
+                .with_src(Some(main))
+                .with_dst("refs/heads/main".to_owned())],
             PushOptions::default(),
             &mut NoProgress,
             &CancelToken::never(),

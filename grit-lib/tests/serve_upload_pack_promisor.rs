@@ -155,12 +155,10 @@ fn want(oid: ObjectId) -> String {
 }
 
 fn v2(stateless_rpc: bool) -> ServeOptions {
-    ServeOptions {
-        protocol: ProtocolVersion::V2,
-        stateless_rpc,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    }
+    ServeOptions::default()
+        .with_protocol(ProtocolVersion::V2)
+        .with_stateless_rpc(stateless_rpc)
+        .with_agent("grit-test".to_owned())
 }
 
 /// What a v2 fetch response held: its section lines, the pack (when one came) and
@@ -489,12 +487,10 @@ fn v0_client_is_told_on_the_error_band() {
     let mut request = pkt(&format!("want {} side-band-64k ofs-delta\n", fx.tip));
     request.extend(b"0000");
     request.extend(pkt("done\n"));
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let (out, result) = serve(&repo, request, &mut opts);
     assert!(matches!(
         result,
@@ -516,12 +512,10 @@ fn v0_want_of_a_promised_blob_gets_an_err_line() {
     let mut request = pkt(&format!("want {} side-band-64k ofs-delta\n", fx.big));
     request.extend(b"0000");
     request.extend(pkt("done\n"));
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let (out, result) = serve(&repo, request, &mut opts);
     assert!(matches!(
         result,
@@ -706,12 +700,10 @@ fn push_edit(fx: &Offloaded, extra: Option<(&str, ObjectId)>) -> (ObjectId, Rece
     ));
     body.extend_from_slice(b"0000");
     body.extend_from_slice(&pack);
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let repo = fx.open(None);
     let mut out = Vec::new();
     let outcome = ReceivePack::new(&repo, &opts, &ReceivePolicy::default())

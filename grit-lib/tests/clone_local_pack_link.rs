@@ -133,9 +133,7 @@ fn clone_local_repacked_source_links_pack_and_reports_index_stats() {
 
     let dest = tmp.path().join("dest");
     let outcome = clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
-        },
+        CloneOptions::new(remote.to_string_lossy(), dest.clone()),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -202,9 +200,7 @@ fn clone_local_repacked_plus_unreachable_loose_still_links_pack() {
 
     let dest = tmp.path().join("dest");
     let outcome = clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
-        },
+        CloneOptions::new(remote.to_string_lossy(), dest.clone()),
         &mut NoProgress,
         &CancelToken::never(),
         None,

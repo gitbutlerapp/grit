@@ -652,11 +652,9 @@ fn grit_status_does_not_mark_fsmonitor_valid_on_mode_change() {
         &RepositoryOptions::empty().with_work_tree(repo_root),
     )
     .expect("open grit repo");
-    let opts = StatusOptions {
-        untracked: UntrackedMode::No,
-        stat_parallel_threads: Some(4),
-        ..StatusOptions::default()
-    };
+    let opts = StatusOptions::default()
+        .with_untracked(UntrackedMode::No)
+        .with_stat_parallel_threads(Some(4));
     let mut progress = grit_lib::progress::NullProgress;
     for _ in 0..2 {
         &grit_repo

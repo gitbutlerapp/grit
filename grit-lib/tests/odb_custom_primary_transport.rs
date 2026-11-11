@@ -445,16 +445,10 @@ fn push_from_custom_primary_round_trips_with_git() {
     assert!(store.contains(&tip).expect("contains"));
 
     let remote = Remote::from_url(bare.path().to_str().expect("utf8")).expect("remote");
-    let spec = PushRefSpec {
-        src: Some(tip),
-        src_ref: Some("refs/heads/main".into()),
-        dst: "refs/heads/main".into(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        hook_src_ref: None,
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_src_ref(Some("refs/heads/main".into()))
+        .with_dst("refs/heads/main".into());
     repo.remotes()
         .push(
             &remote,
@@ -645,16 +639,9 @@ fn files_primary_fetch_and_push_still_round_trip_with_git() {
 
     let bare = bare_git_repo();
     let dest = Remote::from_url(bare.path().to_str().expect("utf8")).expect("remote");
-    let spec = PushRefSpec {
-        src: Some(tip),
-        src_ref: None,
-        dst: "refs/heads/main".into(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        hook_src_ref: None,
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_dst("refs/heads/main".into());
     repo.remotes()
         .push(
             &dest,

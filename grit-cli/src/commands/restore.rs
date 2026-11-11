@@ -129,15 +129,13 @@ pub fn run(
         pathspec_sources
     };
 
-    let opts = RestoreOptions {
-        pathspecs,
-        pathspec_sources,
-        source: restore_source,
-        staged,
-        worktree,
-        stage: conflict_side,
-        remerge,
-    };
+    let opts = RestoreOptions::new(pathspecs)
+        .with_pathspec_sources(pathspec_sources)
+        .with_source(restore_source)
+        .with_staged(staged)
+        .with_worktree(worktree)
+        .with_stage(conflict_side)
+        .with_remerge(remerge);
 
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let cancel = crate::interrupt::process_cancel_token();

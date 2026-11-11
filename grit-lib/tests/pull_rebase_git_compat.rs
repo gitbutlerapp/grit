@@ -88,11 +88,9 @@ fn pull_rebase_grit(repo: &Repository) -> grit_lib::porcelain::pull::PullOutcome
     let mut progress = NullProgress;
     pull(
         repo,
-        &PullOptions {
-            mode: Some(PullMode::Rebase),
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(PullMode::Rebase))
+            .with_fetch(fetch_opts(&Environment::empty())),
         &mut progress,
         &CancelToken::never(),
         None,
@@ -548,12 +546,10 @@ fn pull_rebase_conflict_keeps_autostash_on_stash_ref() {
     let repo = open(&grit_dir);
     let outcome = pull(
         &repo,
-        &PullOptions {
-            mode: Some(PullMode::Rebase),
-            autostash: true,
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(PullMode::Rebase))
+            .with_autostash(true)
+            .with_fetch(fetch_opts(&Environment::empty())),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -587,11 +583,9 @@ fn pull_rebase_conflict_with_local_changes_refuses_and_keeps_them() {
     let mut progress = NullProgress;
     let err = pull(
         &repo,
-        &PullOptions {
-            mode: Some(PullMode::Rebase),
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(PullMode::Rebase))
+            .with_fetch(fetch_opts(&Environment::empty())),
         &mut progress,
         &CancelToken::never(),
         None,
@@ -627,12 +621,10 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
     let repo = open(&grit_dir);
     let outcome = pull(
         &repo,
-        &PullOptions {
-            mode: Some(PullMode::Rebase),
-            check: true,
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(PullMode::Rebase))
+            .with_check(true)
+            .with_fetch(fetch_opts(&Environment::empty())),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -652,12 +644,10 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
     commit(&grit_dir, "other.txt", "o\n", "unrelated local");
     let clean = pull(
         &open(&grit_dir),
-        &PullOptions {
-            mode: Some(PullMode::Rebase),
-            check: true,
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(PullMode::Rebase))
+            .with_check(true)
+            .with_fetch(fetch_opts(&Environment::empty())),
         &mut NoProgress,
         &CancelToken::never(),
         None,

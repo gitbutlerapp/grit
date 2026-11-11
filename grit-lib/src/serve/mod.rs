@@ -239,6 +239,7 @@ impl ProtocolVersion {
 
 /// How a serving session is framed on the wire.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ServeOptions {
     /// Protocol version the client asked for.
     pub protocol: ProtocolVersion,
@@ -364,6 +365,79 @@ impl ServeOptions {
         let attached = fetcher.is_some();
         repo.caches().set_promisor_fetcher(fetcher);
         attached
+    }
+
+    /// Sets [`protocol`](Self::protocol).
+    #[must_use]
+    pub fn with_protocol(mut self, protocol: ProtocolVersion) -> Self {
+        self.protocol = protocol;
+        self
+    }
+
+    /// Sets [`stateless_rpc`](Self::stateless_rpc).
+    #[must_use]
+    pub fn with_stateless_rpc(mut self, stateless_rpc: bool) -> Self {
+        self.stateless_rpc = stateless_rpc;
+        self
+    }
+
+    /// Sets [`advertise_refs`](Self::advertise_refs).
+    #[must_use]
+    pub fn with_advertise_refs(mut self, advertise_refs: bool) -> Self {
+        self.advertise_refs = advertise_refs;
+        self
+    }
+
+    /// Sets [`agent`](Self::agent).
+    #[must_use]
+    pub fn with_agent(mut self, agent: String) -> Self {
+        self.agent = agent;
+        self
+    }
+
+    /// Sets [`hidden_refs`](Self::hidden_refs).
+    #[must_use]
+    pub fn with_hidden_refs(mut self, hidden_refs: Vec<String>) -> Self {
+        self.hidden_refs = hidden_refs;
+        self
+    }
+
+    /// Sets [`server_options`](Self::server_options).
+    #[must_use]
+    pub fn with_server_options(mut self, server_options: Vec<String>) -> Self {
+        self.server_options = server_options;
+        self
+    }
+
+    /// Sets [`bundle_list`](Self::bundle_list).
+    #[must_use]
+    pub fn with_bundle_list(mut self, bundle_list: Option<crate::bundle_uri::BundleList>) -> Self {
+        self.bundle_list = bundle_list;
+        self
+    }
+
+    /// Sets [`push_bundle`](Self::push_bundle).
+    #[must_use]
+    pub fn with_push_bundle(mut self, push_bundle: Option<String>) -> Self {
+        self.push_bundle = push_bundle;
+        self
+    }
+
+    /// Sets [`accepted_promisor_remotes`](Self::accepted_promisor_remotes).
+    #[must_use]
+    pub fn with_accepted_promisor_remotes(
+        mut self,
+        accepted_promisor_remotes: Vec<String>,
+    ) -> Self {
+        self.accepted_promisor_remotes = accepted_promisor_remotes;
+        self
+    }
+
+    /// Sets [`lazy_fetch`](Self::lazy_fetch).
+    #[must_use]
+    pub fn with_lazy_fetch(mut self, lazy_fetch: Option<bool>) -> Self {
+        self.lazy_fetch = lazy_fetch;
+        self
     }
 }
 

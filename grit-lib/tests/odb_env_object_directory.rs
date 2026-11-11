@@ -552,13 +552,11 @@ fn commit_and_push_from_quarantine(root: &Path, url: &str) -> ObjectId {
         .remotes()
         .push(
             &remote,
-            &[PushRefSpec {
-                src: Some(outcome.oid),
-                src_ref: Some("refs/heads/main".to_owned()),
-                dst: "refs/heads/main".to_owned(),
-                force: true,
-                ..Default::default()
-            }],
+            &[PushRefSpec::default()
+                .with_src(Some(outcome.oid))
+                .with_src_ref(Some("refs/heads/main".to_owned()))
+                .with_dst("refs/heads/main".to_owned())
+                .with_force(true)],
             PushOptions::default(),
             &mut NoProgress,
             &CancelToken::never(),

@@ -80,13 +80,10 @@ fn serve_push(repo_dir: &Path, body: &[u8]) -> (ReceiveOutcome, String) {
     let mut env = Environment::empty();
     env.cwd = repo_dir.to_path_buf();
     let repo = Repository::open(repo_dir, &RepositoryOptions::with_environment(env)).unwrap();
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let policy = ReceivePolicy::from_config(&repo.config().snapshot().unwrap());
     let mut output = Vec::new();
     let outcome = ReceivePack::new(&repo, &opts, &policy)

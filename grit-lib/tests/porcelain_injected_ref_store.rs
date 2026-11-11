@@ -99,14 +99,10 @@ fn switch_to(repo: &Repository, branch: &str) {
         .expect("branch tip");
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: branch.into(),
-                    oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: branch.into(),
+                oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -319,14 +315,10 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: main_tip,
-                    reflog_to_label: "HEAD~1".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: main_tip,
+                reflog_to_label: "HEAD~1".into(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -655,14 +647,10 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
     let outcome = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "topic".into(),
-                    oid: tip,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "topic".into(),
+                oid: tip,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -684,14 +672,10 @@ fn detached_switch_installs_head_when_store_has_none() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: tip,
-                    reflog_to_label: "main".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: tip,
+                reflog_to_label: "main".into(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

@@ -531,14 +531,10 @@ fn switch_with_unstartable_post_checkout_hook_succeeds_with_warning() {
     let outcome = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: first,
-                    reflog_to_label: "HEAD~1".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: first,
+                reflog_to_label: "HEAD~1".into(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

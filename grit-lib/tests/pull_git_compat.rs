@@ -127,13 +127,7 @@ fn pull_up_to_date_matches_git() {
     let (grit_dir, git_dir) = setup_tracked_pair("uptodate");
     let repo = open(&grit_dir);
     let env = Environment::empty();
-    let outcome = pull_grit(
-        &repo,
-        &PullOptions {
-            fetch: fetch_opts(&env),
-            ..PullOptions::default()
-        },
-    );
+    let outcome = pull_grit(&repo, &PullOptions::default().with_fetch(fetch_opts(&env)));
     assert_eq!(outcome.result, PullResult::UpToDate);
     git_pull(&git_dir);
     assert_repo_matches_git(&grit_dir, &git_dir);
@@ -152,10 +146,7 @@ fn pull_ff_false_merge_commit_when_only_upstream_moved() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default().with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::Merged);
     assert_eq!(parent_count(&grit_dir, "HEAD"), 2, "grit merge commit");
@@ -190,10 +181,7 @@ fn pull_implicit_upstream_tracking_ref_without_merge_config() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default().with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::SetUpstream);
     assert_eq!(rev(&grit_dir, "HEAD"), rev(&origin, "main"));
@@ -227,10 +215,7 @@ fn pull_refuses_when_configured_merge_ref_did_not_fetch() {
     let repo = open(&grit_dir);
     let err = try_pull_grit(
         &repo,
-        &PullOptions {
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default().with_fetch(fetch_opts(&Environment::empty())),
     )
     .expect_err("must not fall back to origin/main");
     assert!(
@@ -254,10 +239,7 @@ fn pull_fast_forward_matches_git() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default().with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::FastForward);
     git_pull(&git_dir);
@@ -277,10 +259,7 @@ fn pull_merge_matches_git() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default().with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::Merged);
     git_pull(&git_dir);
@@ -304,11 +283,9 @@ fn pull_ff_only_refused_leaves_repo_unchanged() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            mode: Some(PullMode::FfOnly),
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(PullMode::FfOnly))
+            .with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::RefusedNotFf);
     assert_eq!(rev(&grit_dir, "HEAD"), before_head);
@@ -361,10 +338,7 @@ fn pull_ff_only_from_config_matches_git() {
     );
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default().with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::RefusedNotFf);
     git_allow_fail(&git_dir, &["pull", "-q", "--ff-only"]);
@@ -386,11 +360,9 @@ fn pull_no_rebase_overrides_rebase_config_and_merges() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            mode: Some(PullMode::Merge),
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_mode(Some(PullMode::Merge))
+            .with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::Merged);
     git(&git_dir, &["pull", "-q", "--no-rebase"]);
@@ -436,10 +408,7 @@ fn pull_unborn_adoption_matches_git() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default().with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::SetUpstream);
     assert!(repo.references().head().expect("head").oid().is_some());
@@ -494,11 +463,9 @@ fn pull_unborn_adoption_with_autostash_matches_git() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            autostash: true,
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_autostash(true)
+            .with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::SetUpstream);
     assert!(repo.references().head().expect("head").oid().is_some());
@@ -542,12 +509,10 @@ fn pull_explicit_remote_branch_via_fetch_head() {
     grit_identity(&git_dir);
 
     let repo = open(&grit_dir);
-    let mut opts = PullOptions {
-        remote: Some("origin".into()),
-        branch: Some("feature".into()),
-        fetch: fetch_opts(&Environment::empty()),
-        ..PullOptions::default()
-    };
+    let mut opts = PullOptions::default()
+        .with_remote(Some("origin".into()))
+        .with_branch(Some("feature".into()))
+        .with_fetch(fetch_opts(&Environment::empty()));
     opts.fetch.remote_name = Some("origin".into());
     let outcome = pull_grit(&repo, &opts);
     assert_eq!(outcome.result, PullResult::SetUpstream);
@@ -572,11 +537,9 @@ fn pull_autostash_restores_dirty_worktree_after_fast_forward() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            autostash: true,
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_autostash(true)
+            .with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::FastForward);
     assert_eq!(
@@ -603,13 +566,7 @@ fn pull_dry_run_leaves_head_unchanged() {
     let repo = open(&grit_dir);
     let mut fetch = fetch_opts(&Environment::empty());
     fetch.dry_run = true;
-    let outcome = pull_grit(
-        &repo,
-        &PullOptions {
-            fetch,
-            ..PullOptions::default()
-        },
-    );
+    let outcome = pull_grit(&repo, &PullOptions::default().with_fetch(fetch));
     assert_eq!(outcome.result, PullResult::UpToDate);
     assert_eq!(rev(&grit_dir, "HEAD"), head_before);
 }
@@ -626,13 +583,11 @@ fn pull_autostash_restored_when_fetch_fails() {
     );
     let err = try_pull_grit(
         &repo,
-        &PullOptions {
-            remote: Some("/tmp/grit-pull-missing-remote-do-not-exist".into()),
-            branch: Some("main".into()),
-            autostash: true,
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_remote(Some("/tmp/grit-pull-missing-remote-do-not-exist".into()))
+            .with_branch(Some("main".into()))
+            .with_autostash(true)
+            .with_fetch(fetch_opts(&Environment::empty())),
     )
     .expect_err("missing remote must fail");
     assert!(matches!(err, PullError::Remote(_)));
@@ -677,12 +632,10 @@ fn pull_explicit_fetch_dry_run_without_fetch_head() {
     fetch.dry_run = true;
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            remote: Some(origin.to_str().unwrap().into()),
-            branch: Some("main".into()),
-            fetch,
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_remote(Some(origin.to_str().unwrap().into()))
+            .with_branch(Some("main".into()))
+            .with_fetch(fetch),
     );
     assert_eq!(outcome.result, PullResult::UpToDate);
     assert_eq!(rev(&grit_dir, "HEAD"), head_before);
@@ -708,12 +661,10 @@ fn pull_literal_path_remote_and_branch() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            remote: Some(origin.to_str().unwrap().into()),
-            branch: Some("main".into()),
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_remote(Some(origin.to_str().unwrap().into()))
+            .with_branch(Some("main".into()))
+            .with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(outcome.result, PullResult::SetUpstream);
     assert_eq!(rev(&grit_dir, "HEAD"), rev(&origin, "main"));
@@ -733,11 +684,9 @@ fn pull_check_leaves_head_and_matches_git_rev_list_counts() {
     let repo = open(&grit_dir);
     let outcome = pull_grit(
         &repo,
-        &PullOptions {
-            check: true,
-            fetch: fetch_opts(&Environment::empty()),
-            ..PullOptions::default()
-        },
+        &PullOptions::default()
+            .with_check(true)
+            .with_fetch(fetch_opts(&Environment::empty())),
     );
     assert_eq!(rev(&grit_dir, "HEAD"), head_before);
     let check = outcome.check.expect("check block");

@@ -67,12 +67,10 @@ fn clone_lfs_repo_materializes_smudged_blob() {
     let env = Environment::from_vars(vars, base.path().to_path_buf());
 
     let dest = base.path().join("grit-clone");
-    let opts = CloneOptions {
-        url: remote.to_string_lossy().into_owned(),
-        dest: dest.clone(),
-        environment: env,
-        ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
-    };
+    let opts = CloneOptions::new(remote.to_string_lossy(), dest.clone())
+        .with_url(remote.to_string_lossy().into_owned())
+        .with_dest(dest.clone())
+        .with_environment(env);
     clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
 
     let len = std::fs::metadata(dest.join("a.dat"))

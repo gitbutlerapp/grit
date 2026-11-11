@@ -159,11 +159,9 @@ fn diff3_markers_byte_equal_git() {
         main2,
         side2,
         "side",
-        &MergeOptions {
-            commit: MergeCommitMode::NoCommit,
-            conflict_style: Some(ConflictStyle::Diff3),
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default()
+            .with_commit(MergeCommitMode::NoCommit)
+            .with_conflict_style(Some(ConflictStyle::Diff3)),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -187,11 +185,9 @@ fn zdiff3_markers_byte_equal_git() {
         main2,
         side2,
         "side",
-        &MergeOptions {
-            commit: MergeCommitMode::NoCommit,
-            conflict_style: Some(ConflictStyle::ZealousDiff3),
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default()
+            .with_commit(MergeCommitMode::NoCommit)
+            .with_conflict_style(Some(ConflictStyle::ZealousDiff3)),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -219,10 +215,7 @@ fn conflict_style_from_config() {
         main2,
         side2,
         "side",
-        &MergeOptions {
-            commit: MergeCommitMode::NoCommit,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::NoCommit),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -331,10 +324,7 @@ fn allow_unrelated_matches_git_tree() {
         main2,
         orphan2,
         "orphan",
-        &MergeOptions {
-            allow_unrelated: true,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_allow_unrelated(true),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

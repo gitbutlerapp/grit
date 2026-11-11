@@ -249,12 +249,10 @@ fn grit_lib_clone_hostile_path_rejected(
 ) -> Error {
     git(upstream, &["symbolic-ref", "HEAD", "refs/heads/evil"]);
     let url = upstream.to_string_lossy().into_owned();
-    let mut opts = CloneOptions {
-        url: url.clone(),
-        dest: dest.to_path_buf(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(url, dest.to_path_buf())
-    };
+    let mut opts = CloneOptions::new(url, dest.to_path_buf())
+        .with_url(url.clone())
+        .with_dest(dest.to_path_buf())
+        .with_environment(Environment::empty());
     // HFS alias names are enforced at explicit checkout on this platform; system git
     // also skips clone-failure assertions for this case (see below).
     if case_label == "hfs dotgit" {
@@ -332,12 +330,10 @@ fn open_cloned_main(parent: &Path, upstream: &Path) -> Repository {
     if dest.exists() {
         fs::remove_dir_all(&dest).expect("rm work");
     }
-    let opts = CloneOptions {
-        url: upstream.to_string_lossy().into_owned(),
-        dest: dest.clone(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(upstream.to_string_lossy(), dest.clone())
-    };
+    let opts = CloneOptions::new(upstream.to_string_lossy(), dest.clone())
+        .with_url(upstream.to_string_lossy().into_owned())
+        .with_dest(dest.clone())
+        .with_environment(Environment::empty());
     let outcome =
         clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone main");
     let commit = outcome
@@ -376,12 +372,10 @@ fn dotdot_tree_rejected_at_index_population() {
     git(upstream.path(), &["update-ref", "refs/heads/evil", &commit]);
     let dest = tempfile::tempdir().expect("dest");
     let outcome = clone_repo(
-        CloneOptions {
-            url: upstream.path().to_string_lossy().into_owned(),
-            dest: dest.path().to_path_buf(),
-            environment: Environment::empty(),
-            ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
-        },
+        CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
+            .with_url(upstream.path().to_string_lossy().into_owned())
+            .with_dest(dest.path().to_path_buf())
+            .with_environment(Environment::empty()),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -488,11 +482,7 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
         let switch_err = repo
             .checkout()
             .switch(
-                &SwitchOptions {
-                    mode,
-                    dry_run: false,
-                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-                },
+                &SwitchOptions::new(mode),
                 &mut grit_lib::progress::NullProgress,
                 &grit_lib::progress::CancelToken::never(),
             )
@@ -521,15 +511,9 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
         let restore_err = repo
             .checkout()
             .restore(
-                &RestoreOptions {
-                    pathspecs: vec![".".into()],
-                    pathspec_sources: vec![".".into()],
-                    source: RestoreSource::Tree(evil_tree_oid),
-                    staged: false,
-                    worktree: true,
-                    stage: None,
-                    remerge: None,
-                },
+                &RestoreOptions::new(vec![".".into()])
+                    .with_pathspec_sources(vec![".".into()])
+                    .with_source(RestoreSource::Tree(evil_tree_oid)),
                 &mut grit_lib::progress::NullProgress,
                 &CancelToken::never(),
             )
@@ -567,10 +551,7 @@ fn win32_only_names_check_out_off_windows_like_git() {
         );
         let dest = parent.path().join("grit-clone");
         let url = upstream.to_string_lossy().into_owned();
-        let opts = CloneOptions {
-            environment: Environment::empty(),
-            ..CloneOptions::new(url, dest.clone())
-        };
+        let opts = CloneOptions::new(url, dest.clone()).with_environment(Environment::empty());
         clone_repo(opts, &mut NoProgress, &CancelToken::never(), None)
             .unwrap_or_else(|e| panic!("{label}: grit clone should succeed: {e:?}"));
         assert_eq!(

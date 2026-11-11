@@ -63,9 +63,7 @@ fn clone_local_repacked_plus_loose_tip_stays_fast_and_links_pack() {
     let dest = tmp.path().join("dest");
     let started = Instant::now();
     let outcome = clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
-        },
+        CloneOptions::new(bare.to_string_lossy(), dest.clone()),
         &mut NoProgress,
         &CancelToken::never(),
         None,

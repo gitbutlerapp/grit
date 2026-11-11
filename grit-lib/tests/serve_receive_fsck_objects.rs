@@ -105,14 +105,10 @@ struct Pushed {
 }
 
 fn serve_push(repo: &Repository, policy: &ReceivePolicy, body: &[u8]) -> Pushed {
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
     let mut output = Vec::new();
     let outcome = ReceivePack::new(repo, &opts, policy)
         .run(&mut std::io::Cursor::new(body), &mut output)
@@ -428,19 +424,13 @@ fn clean_push_with_fsck_on_is_accepted_and_git_fsck_passes() {
 fn embedders_can_build_the_policy_in_code() {
     let f = Fixture::new(&[]);
     let bad = f.commit_without_email();
-    let policy = ReceivePolicy {
-        fsck_objects: Some(ObjectFsckPolicy::default()),
-        ..ReceivePolicy::default()
-    };
+    let policy = ReceivePolicy::default().with_fsck_objects(Some(ObjectFsckPolicy::default()));
     let pushed = f.push(&policy, bad, "refs/heads/bad");
     f.assert_refused(&pushed, bad, ObjectKind::Commit, "missingEmail");
 
     let mut lenient = ObjectFsckPolicy::default();
     lenient.set_level("missingEmail", FsckMsgLevel::Warn);
-    let policy = ReceivePolicy {
-        fsck_objects: Some(lenient),
-        ..ReceivePolicy::default()
-    };
+    let policy = ReceivePolicy::default().with_fsck_objects(Some(lenient));
     let pushed = f.push(&policy, bad, "refs/heads/bad");
     f.assert_accepted(&pushed, bad);
 }

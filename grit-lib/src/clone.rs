@@ -201,6 +201,7 @@ impl CloneTags {
 }
 
 /// Options for [`clone`].
+#[non_exhaustive]
 pub struct CloneOptions {
     /// Source URL or path (as passed on the command line).
     pub url: String,
@@ -274,6 +275,128 @@ impl CloneOptions {
             checkout: true,
             bundle_cache: None,
         }
+    }
+
+    /// Sets [`url`](Self::url).
+    #[must_use]
+    pub fn with_url(mut self, url: String) -> Self {
+        self.url = url;
+        self
+    }
+
+    /// Sets [`dest`](Self::dest).
+    #[must_use]
+    pub fn with_dest(mut self, dest: PathBuf) -> Self {
+        self.dest = dest;
+        self
+    }
+
+    /// Sets [`remote_name`](Self::remote_name).
+    #[must_use]
+    pub fn with_remote_name(mut self, remote_name: String) -> Self {
+        self.remote_name = remote_name;
+        self
+    }
+
+    /// Sets [`environment`](Self::environment).
+    #[must_use]
+    pub fn with_environment(mut self, environment: Environment) -> Self {
+        self.environment = environment;
+        self
+    }
+
+    /// Sets [`initial_branch`](Self::initial_branch).
+    #[must_use]
+    pub fn with_initial_branch(mut self, initial_branch: String) -> Self {
+        self.initial_branch = initial_branch;
+        self
+    }
+
+    /// Sets [`thread_policy`](Self::thread_policy).
+    #[must_use]
+    pub fn with_thread_policy(mut self, thread_policy: crate::parallel::ThreadPolicy) -> Self {
+        self.thread_policy = thread_policy;
+        self
+    }
+
+    /// Sets [`depth`](Self::depth).
+    #[must_use]
+    pub fn with_depth(mut self, depth: Option<u32>) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets [`filter`](Self::filter).
+    #[must_use]
+    pub fn with_filter(mut self, filter: Option<ObjectFilterSpec>) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Sets [`auto_filter`](Self::auto_filter).
+    #[must_use]
+    pub fn with_auto_filter(mut self, auto_filter: bool) -> Self {
+        self.auto_filter = auto_filter;
+        self
+    }
+
+    /// Sets [`config`](Self::config).
+    #[must_use]
+    pub fn with_config(mut self, config: Vec<(String, String)>) -> Self {
+        self.config = config;
+        self
+    }
+
+    /// Sets [`branch`](Self::branch).
+    #[must_use]
+    pub fn with_branch(mut self, branch: Option<String>) -> Self {
+        self.branch = branch;
+        self
+    }
+
+    /// Sets [`single_branch`](Self::single_branch).
+    #[must_use]
+    pub fn with_single_branch(mut self, single_branch: Option<bool>) -> Self {
+        self.single_branch = single_branch;
+        self
+    }
+
+    /// Sets [`tags`](Self::tags).
+    #[must_use]
+    pub fn with_tags(mut self, tags: Option<CloneTags>) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Sets [`promisor_fetcher`](Self::promisor_fetcher).
+    #[must_use]
+    pub fn with_promisor_fetcher(
+        mut self,
+        promisor_fetcher: Option<Arc<dyn PromisorFetcher>>,
+    ) -> Self {
+        self.promisor_fetcher = promisor_fetcher;
+        self
+    }
+
+    /// Sets [`bare`](Self::bare).
+    #[must_use]
+    pub fn with_bare(mut self, bare: bool) -> Self {
+        self.bare = bare;
+        self
+    }
+
+    /// Sets [`checkout`](Self::checkout).
+    #[must_use]
+    pub fn with_checkout(mut self, checkout: bool) -> Self {
+        self.checkout = checkout;
+        self
+    }
+
+    /// Sets [`bundle_cache`](Self::bundle_cache).
+    #[must_use]
+    pub fn with_bundle_cache(mut self, bundle_cache: Option<PathBuf>) -> Self {
+        self.bundle_cache = bundle_cache;
+        self
     }
 }
 
@@ -576,6 +699,7 @@ pub fn cleanup_failed_clone(path: &Path, keep_toplevel: bool) {
 }
 
 /// Options for [`clone_into`]: configure a remote and fetch into an already-open repository.
+#[non_exhaustive]
 pub struct CloneIntoOptions {
     /// Source URL or path.
     pub url: String,
@@ -660,6 +784,100 @@ impl CloneIntoOptions {
             auto_filter: false,
             config: Vec::new(),
         }
+    }
+
+    /// Sets [`url`](Self::url).
+    #[must_use]
+    pub fn with_url(mut self, url: String) -> Self {
+        self.url = url;
+        self
+    }
+
+    /// Sets [`remote_name`](Self::remote_name).
+    #[must_use]
+    pub fn with_remote_name(mut self, remote_name: String) -> Self {
+        self.remote_name = remote_name;
+        self
+    }
+
+    /// Sets [`initial_branch`](Self::initial_branch).
+    #[must_use]
+    pub fn with_initial_branch(mut self, initial_branch: String) -> Self {
+        self.initial_branch = initial_branch;
+        self
+    }
+
+    /// Sets [`thread_policy`](Self::thread_policy).
+    #[must_use]
+    pub fn with_thread_policy(mut self, thread_policy: crate::parallel::ThreadPolicy) -> Self {
+        self.thread_policy = thread_policy;
+        self
+    }
+
+    /// Sets [`depth`](Self::depth).
+    #[must_use]
+    pub fn with_depth(mut self, depth: Option<u32>) -> Self {
+        self.depth = depth;
+        self
+    }
+
+    /// Sets [`filter`](Self::filter).
+    #[must_use]
+    pub fn with_filter(mut self, filter: Option<ObjectFilterSpec>) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Sets [`branch`](Self::branch).
+    #[must_use]
+    pub fn with_branch(mut self, branch: Option<String>) -> Self {
+        self.branch = branch;
+        self
+    }
+
+    /// Sets [`single_branch`](Self::single_branch).
+    #[must_use]
+    pub fn with_single_branch(mut self, single_branch: Option<bool>) -> Self {
+        self.single_branch = single_branch;
+        self
+    }
+
+    /// Sets [`tags`](Self::tags).
+    #[must_use]
+    pub fn with_tags(mut self, tags: Option<CloneTags>) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Sets [`promisor_fetcher`](Self::promisor_fetcher).
+    #[must_use]
+    pub fn with_promisor_fetcher(
+        mut self,
+        promisor_fetcher: Option<Arc<dyn PromisorFetcher>>,
+    ) -> Self {
+        self.promisor_fetcher = promisor_fetcher;
+        self
+    }
+
+    /// Sets [`bare`](Self::bare).
+    #[must_use]
+    pub fn with_bare(mut self, bare: bool) -> Self {
+        self.bare = bare;
+        self
+    }
+
+    /// Sets [`checkout`](Self::checkout).
+    #[must_use]
+    pub fn with_checkout(mut self, checkout: bool) -> Self {
+        self.checkout = checkout;
+        self
+    }
+
+    /// Sets [`bundle_cache`](Self::bundle_cache).
+    #[must_use]
+    pub fn with_bundle_cache(mut self, bundle_cache: Option<PathBuf>) -> Self {
+        self.bundle_cache = bundle_cache;
+        self
     }
 }
 

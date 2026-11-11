@@ -62,15 +62,15 @@ pub fn run(
     let protocol = std::env::var("GIT_PROTOCOL")
         .map(|v| ProtocolVersion::from_git_protocol(&v))
         .unwrap_or_default();
-    let mut opts = ServeOptions {
-        protocol,
-        stateless_rpc,
-        advertise_refs,
-        agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
-        hidden_refs,
-        lazy_fetch: ServeOptions::lazy_fetch_from_environment(repo.environment()),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(protocol)
+        .with_stateless_rpc(stateless_rpc)
+        .with_advertise_refs(advertise_refs)
+        .with_agent(format!("grit/{}", env!("CARGO_PKG_VERSION")))
+        .with_hidden_refs(hidden_refs)
+        .with_lazy_fetch(ServeOptions::lazy_fetch_from_environment(
+            repo.environment(),
+        ));
     // Only a server allowed to fetch missing promised objects gets a fetcher.
     if matches!(service, Service::UploadPack) {
         opts.attach_promisor_fetcher(

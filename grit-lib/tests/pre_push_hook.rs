@@ -195,10 +195,7 @@ fn failing_pre_push_hook_blocks_dry_run() {
         "origin",
         &["main"],
         &[],
-        PushOptions {
-            dry_run: true,
-            ..PushOptions::default()
-        },
+        PushOptions::default().with_dry_run(true),
     )
     .expect_err("dry run still runs the hook");
     assert_hook_failed(err, 3);
@@ -214,10 +211,7 @@ fn no_verify_skips_pre_push_hook() {
         "origin",
         &["main"],
         &[],
-        PushOptions {
-            no_verify: true,
-            ..PushOptions::default()
-        },
+        PushOptions::default().with_no_verify(true),
     )
     .expect("push with no_verify");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);

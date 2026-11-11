@@ -364,10 +364,7 @@ fn issue_2468_squash_conflict_commit_records_rerere_postimage() {
         head,
         side,
         "side",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &CancelToken::never(),
     )

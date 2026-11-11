@@ -177,21 +177,18 @@ fn build_merge_options(run: &MergeRunOptions) -> Result<MergeOptions> {
         MergeCommitMode::Commit
     };
     let (favor, conflict_style) = run.strategy.clone().into_merge_fields();
-    Ok(MergeOptions {
-        fast_forward,
-        commit,
-        message: read_message_input(&run.message)?,
-        favor,
-        conflict_style,
-        allow_unrelated: run.allow_unrelated_histories,
-        hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        verify: if run.no_verify {
+    Ok(MergeOptions::default()
+        .with_fast_forward(fast_forward)
+        .with_commit(commit)
+        .with_message(read_message_input(&run.message)?)
+        .with_favor(favor)
+        .with_conflict_style(conflict_style)
+        .with_allow_unrelated(run.allow_unrelated_histories)
+        .with_verify(if run.no_verify {
             HookPolicy::SkipVerify
         } else {
             HookPolicy::Run
-        },
-        directory_renames: None,
-    })
+        }))
 }
 
 fn merge_continue_label(repo: &Repository) -> String {

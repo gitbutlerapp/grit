@@ -76,9 +76,7 @@ fn clone_local_repacked_plus_loose_reports_full_transfer_stats() {
 
     let dest = tmp.path().join("c5");
     let outcome = clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
-        },
+        CloneOptions::new(bare.to_string_lossy(), dest.clone()),
         &mut NoProgress,
         &CancelToken::never(),
         None,

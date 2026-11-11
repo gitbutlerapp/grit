@@ -25,11 +25,9 @@ fn push(
     cancel: &CancelToken,
 ) -> grit_lib::error::Result<Vec<PushRefStatus>> {
     let remote = Remote::from_url(&format!("file://{}", remote_dir.display())).expect("url");
-    let spec = PushRefSpec {
-        src: Some(tip),
-        dst: "refs/heads/main".to_owned(),
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_dst("refs/heads/main".to_owned());
     remote
         .push(
             local,

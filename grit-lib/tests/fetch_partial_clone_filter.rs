@@ -128,13 +128,11 @@ fn grit_clone_filtered(
 ) -> (PathBuf, grit_lib::remote::clone::CloneOutcome) {
     fs::create_dir_all(dest).expect("dest");
     let outcome = clone(
-        CloneOptions {
-            url: url.to_owned(),
-            dest: dest.to_path_buf(),
-            filter: Some(filter),
-            checkout: false,
-            ..CloneOptions::new(url, dest.to_path_buf())
-        },
+        CloneOptions::new(url, dest.to_path_buf())
+            .with_url(url.to_owned())
+            .with_dest(dest.to_path_buf())
+            .with_filter(Some(filter))
+            .with_checkout(false),
         &mut NoProgress,
         &CancelToken::never(),
         None,

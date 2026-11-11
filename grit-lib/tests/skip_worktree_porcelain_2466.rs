@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions, DEFAULT_ORPHAN_LIMIT};
-use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::restore::RestoreOptions;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashApplyOptions, StashPushOptions};
@@ -62,15 +62,8 @@ fn assert_config_local_skip_worktree(root: &std::path::Path) {
 }
 
 fn restore_opts(pathspecs: &[&str]) -> RestoreOptions {
-    RestoreOptions {
-        pathspecs: pathspecs.iter().map(|s| (*s).to_string()).collect(),
-        pathspec_sources: pathspecs.iter().map(|s| (*s).to_string()).collect(),
-        source: RestoreSource::Index,
-        staged: false,
-        worktree: true,
-        stage: None,
-        remerge: None,
-    }
+    RestoreOptions::new(pathspecs.iter().map(|s| (*s).to_string()).collect())
+        .with_pathspec_sources(pathspecs.iter().map(|s| (*s).to_string()).collect())
 }
 
 fn reset_opts(target: grit_lib::objects::ObjectId, mode: ResetMode) -> ResetOptions {

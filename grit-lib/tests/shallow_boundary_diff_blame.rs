@@ -32,10 +32,8 @@ fn git_out(dir: &Path, args: &[&str]) -> String {
 
 fn grit_shallow_clone(source_bare: &Path, dest: &Path, depth: u32) -> grit_lib::repo::Repository {
     clone_repo(
-        CloneOptions {
-            depth: Some(depth),
-            ..CloneOptions::new(source_bare.to_string_lossy(), dest.to_path_buf())
-        },
+        CloneOptions::new(source_bare.to_string_lossy(), dest.to_path_buf())
+            .with_depth(Some(depth)),
         &mut NullProgress,
         &CancelToken::never(),
         None,

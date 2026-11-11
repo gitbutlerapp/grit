@@ -135,11 +135,7 @@ fn pair_line(old: ObjectId, new: ObjectId) -> String {
 fn switch(repo: &Repository, mode: SwitchMode) -> grit_lib::porcelain::switch::SwitchOutcome {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(mode),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -402,11 +398,7 @@ fn switch_dry_run_or_skip_runs_no_hook() {
     let outcome = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: existing("side", c1),
-                dry_run: true,
-                hooks: PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(existing("side", c1)).with_dry_run(true),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -416,11 +408,7 @@ fn switch_dry_run_or_skip_runs_no_hook() {
     let outcome = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: existing("side", c1),
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(existing("side", c1)).with_hooks(PostOperationHooks::Skip),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -504,10 +492,7 @@ fn squash_merge_runs_post_merge_one() {
         &fx,
         &repo,
         "side",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
     );
     assert_eq!(outcome, IntegrateBranchOutcome::Squashed);
     assert_eq!(fx.take_log(), vec!["post-merge 1"]);
@@ -527,10 +512,7 @@ fn conflicted_no_commit_or_skipped_merge_runs_no_post_merge() {
         &fx,
         &repo,
         "side",
-        &MergeOptions {
-            hooks: PostOperationHooks::Skip,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_hooks(PostOperationHooks::Skip),
     );
     assert!(matches!(outcome, IntegrateBranchOutcome::Merged { .. }));
     assert!(fx.take_log().is_empty());
@@ -542,10 +524,7 @@ fn conflicted_no_commit_or_skipped_merge_runs_no_post_merge() {
         &fx,
         &repo,
         "side",
-        &MergeOptions {
-            commit: MergeCommitMode::NoCommit,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::NoCommit),
     );
     assert_eq!(outcome, IntegrateBranchOutcome::Stopped);
     assert!(fx.take_log().is_empty());

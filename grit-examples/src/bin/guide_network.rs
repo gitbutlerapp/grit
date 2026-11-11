@@ -66,16 +66,10 @@ fn main() -> Result<()> {
     )?;
     repo.references().update("refs/heads/main", &new_oid)?;
 
-    let spec = PushRefSpec {
-        src: Some(new_oid),
-        src_ref: Some("refs/heads/main".to_owned()),
-        dst: "refs/heads/main".to_owned(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        hook_src_ref: None,
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(new_oid))
+        .with_src_ref(Some("refs/heads/main".to_owned()))
+        .with_dst("refs/heads/main".to_owned());
     remote::push(&repo, &remote_info, &[spec], &PushOptions::default())?;
 
     println!("{new_oid}");

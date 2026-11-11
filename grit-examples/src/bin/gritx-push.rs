@@ -79,10 +79,7 @@ fn run() -> Result<()> {
         if spec.force { " (forced)" } else { "" }
     );
 
-    let opts = PushOptions {
-        push_options: cli.push_option.clone(),
-        ..Default::default()
-    };
+    let opts = PushOptions::default().with_push_options(cli.push_option.clone());
 
     let outcome = remote::push(&repo, &r, std::slice::from_ref(&spec), &opts)?;
 
@@ -120,16 +117,11 @@ fn current_branch_spec(repo: &Repository, force: bool) -> Result<PushRefSpec> {
         .references()
         .resolve(&head)
         .with_context(|| format!("cannot resolve {head}"))?;
-    Ok(PushRefSpec {
-        src: Some(oid),
-        src_ref: Some(format!("refs/heads/{branch}")),
-        dst: format!("refs/heads/{branch}"),
-        force,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        hook_src_ref: None,
-    })
+    Ok(PushRefSpec::default()
+        .with_src(Some(oid))
+        .with_src_ref(Some(format!("refs/heads/{branch}")))
+        .with_dst(format!("refs/heads/{branch}"))
+        .with_force(force))
 }
 
 /// Parse a `[+]<src>[:<dst>]` refspec (`:<dst>` / empty `<src>` deletes `<dst>`).
@@ -148,16 +140,10 @@ fn parse_refspec(repo: &Repository, spec: &str, force_flag: bool) -> Result<Push
         if dst.is_empty() {
             bail!("invalid refspec '{spec}'");
         }
-        return Ok(PushRefSpec {
-            src: None,
-            src_ref: None,
-            dst: normalize_ref(dst),
-            force,
-            delete: true,
-            expected_old: None,
-            expect_absent: false,
-            hook_src_ref: None,
-        });
+        return Ok(PushRefSpec::default()
+            .with_dst(normalize_ref(dst))
+            .with_force(force)
+            .with_delete(true));
     }
 
     let src_ref = normalize_ref(src);
@@ -167,16 +153,10 @@ fn parse_refspec(repo: &Repository, spec: &str, force_flag: bool) -> Result<Push
         .or_else(|_| repo.references().resolve(src))
         .or_else(|_| src.parse::<ObjectId>().map_err(anyhow::Error::from))
         .with_context(|| format!("cannot resolve source '{src}'"))?;
-    Ok(PushRefSpec {
-        src: Some(oid),
-        src_ref: None,
-        dst: normalize_ref(dst),
-        force,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        hook_src_ref: None,
-    })
+    Ok(PushRefSpec::default()
+        .with_src(Some(oid))
+        .with_dst(normalize_ref(dst))
+        .with_force(force))
 }
 
 /// Qualify a short branch name into a full `refs/heads/...` ref.

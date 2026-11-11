@@ -218,14 +218,10 @@ fn open(root: &Path) -> Repository {
 }
 
 fn detach_to(commit: ObjectId) -> SwitchOptions {
-    SwitchOptions {
-        mode: SwitchMode::Detached {
-            commit,
-            reflog_to_label: "next".into(),
-        },
-        dry_run: false,
-        hooks: Default::default(),
-    }
+    SwitchOptions::new(SwitchMode::Detached {
+        commit,
+        reflog_to_label: "next".into(),
+    })
 }
 
 /// Bytes of `HEAD`, the branch it names, and the index: what a failed checkout must not touch.
@@ -854,14 +850,11 @@ fn preset_cancel_switch_returns_before_wholesale_delete() {
     let err = open(&root)
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: ren,
-                    reflog_to_label: "ren".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: ren,
+                reflog_to_label: "ren".into(),
+            })
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
             &mut NullProgress,
             &cancel,
         )
@@ -896,14 +889,11 @@ fn delayed_cancel_switch_during_wholesale_delete_leaves_some_dirs() {
     let err = open(&root)
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: ren,
-                    reflog_to_label: "ren".into(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: ren,
+                reflog_to_label: "ren".into(),
+            })
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
             &mut NullProgress,
             cancel.as_ref(),
         )

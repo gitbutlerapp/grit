@@ -10624,7 +10624,7 @@ impl<'repo> core::marker::Unpin for grit_lib::merge::Merge<'repo>
 impl<'repo> core::marker::UnsafeUnpin for grit_lib::merge::Merge<'repo>
 impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::merge::Merge<'repo>
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::merge::Merge<'repo>
-pub struct grit_lib::merge::MergeOptions
+#[non_exhaustive] pub struct grit_lib::merge::MergeOptions
 pub grit_lib::merge::MergeOptions::allow_unrelated: bool
 pub grit_lib::merge::MergeOptions::commit: grit_lib::porcelain::merge::MergeCommitMode
 pub grit_lib::merge::MergeOptions::conflict_style: core::option::Option<grit_lib::diff::merge_file::ConflictStyle>
@@ -10634,6 +10634,16 @@ pub grit_lib::merge::MergeOptions::favor: grit_lib::diff::merge_file::MergeFavor
 pub grit_lib::merge::MergeOptions::hooks: grit_lib::command_runner::hooks::PostOperationHooks
 pub grit_lib::merge::MergeOptions::message: core::option::Option<alloc::string::String>
 pub grit_lib::merge::MergeOptions::verify: grit_lib::porcelain::commit::HookPolicy
+impl grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::with_allow_unrelated(self, bool) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_commit(self, grit_lib::porcelain::merge::MergeCommitMode) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_conflict_style(self, core::option::Option<grit_lib::diff::merge_file::ConflictStyle>) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_directory_renames(self, core::option::Option<grit_lib::diff::merge_trees::DirectoryRenameMode>) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_fast_forward(self, grit_lib::porcelain::merge::FastForwardPolicy) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_favor(self, grit_lib::diff::merge_file::MergeFavor) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_hooks(self, grit_lib::command_runner::hooks::PostOperationHooks) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_message(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_verify(self, grit_lib::porcelain::commit::HookPolicy) -> Self
 impl core::clone::Clone for grit_lib::porcelain::merge::MergeOptions
 pub fn grit_lib::porcelain::merge::MergeOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::merge::MergeOptions
@@ -13617,17 +13627,17 @@ impl core::marker::Unpin for grit_lib::ownership_check::OwnershipStatus
 impl core::marker::UnsafeUnpin for grit_lib::ownership_check::OwnershipStatus
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ownership_check::OwnershipStatus
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::ownership_check::OwnershipStatus
-pub struct grit_lib::ownership_check::OwnershipContext
+#[non_exhaustive] pub struct grit_lib::ownership_check::OwnershipContext
 pub grit_lib::ownership_check::OwnershipContext::sudo_uid: core::option::Option<u32>
 impl grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::from_environment(&grit_lib::prelude::Environment) -> Self
+pub const fn grit_lib::ownership_check::OwnershipContext::with_sudo_uid(self, core::option::Option<u32>) -> Self
 impl core::clone::Clone for grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::clone(&self) -> Self
 impl core::default::Default for grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::default() -> Self
 impl core::fmt::Debug for grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::ownership_check::OwnershipContext
 impl core::marker::Freeze for grit_lib::ownership_check::OwnershipContext
 impl core::marker::Send for grit_lib::ownership_check::OwnershipContext
 impl core::marker::Sync for grit_lib::ownership_check::OwnershipContext
@@ -15055,7 +15065,7 @@ impl core::marker::Unpin for grit_lib::porcelain::merge::IntegrateBranchOptions
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::IntegrateBranchOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::IntegrateBranchOptions
-pub struct grit_lib::porcelain::merge::MergeOptions
+#[non_exhaustive] pub struct grit_lib::porcelain::merge::MergeOptions
 pub grit_lib::porcelain::merge::MergeOptions::allow_unrelated: bool
 pub grit_lib::porcelain::merge::MergeOptions::commit: grit_lib::porcelain::merge::MergeCommitMode
 pub grit_lib::porcelain::merge::MergeOptions::conflict_style: core::option::Option<grit_lib::diff::merge_file::ConflictStyle>
@@ -15065,6 +15075,16 @@ pub grit_lib::porcelain::merge::MergeOptions::favor: grit_lib::diff::merge_file:
 pub grit_lib::porcelain::merge::MergeOptions::hooks: grit_lib::command_runner::hooks::PostOperationHooks
 pub grit_lib::porcelain::merge::MergeOptions::message: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::merge::MergeOptions::verify: grit_lib::porcelain::commit::HookPolicy
+impl grit_lib::porcelain::merge::MergeOptions
+pub fn grit_lib::porcelain::merge::MergeOptions::with_allow_unrelated(self, bool) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_commit(self, grit_lib::porcelain::merge::MergeCommitMode) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_conflict_style(self, core::option::Option<grit_lib::diff::merge_file::ConflictStyle>) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_directory_renames(self, core::option::Option<grit_lib::diff::merge_trees::DirectoryRenameMode>) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_fast_forward(self, grit_lib::porcelain::merge::FastForwardPolicy) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_favor(self, grit_lib::diff::merge_file::MergeFavor) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_hooks(self, grit_lib::command_runner::hooks::PostOperationHooks) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_message(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::merge::MergeOptions::with_verify(self, grit_lib::porcelain::commit::HookPolicy) -> Self
 impl core::clone::Clone for grit_lib::porcelain::merge::MergeOptions
 pub fn grit_lib::porcelain::merge::MergeOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::merge::MergeOptions
@@ -15422,7 +15442,7 @@ impl core::marker::Unpin for grit_lib::porcelain::pull::PullCheck
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::pull::PullCheck
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::PullCheck
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullCheck
-pub struct grit_lib::porcelain::pull::PullOptions
+#[non_exhaustive] pub struct grit_lib::porcelain::pull::PullOptions
 pub grit_lib::porcelain::pull::PullOptions::autostash: bool
 pub grit_lib::porcelain::pull::PullOptions::branch: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::pull::PullOptions::check: bool
@@ -15434,6 +15454,15 @@ pub grit_lib::porcelain::pull::PullOptions::stop_on_conflict: bool
 pub grit_lib::porcelain::pull::PullOptions::upstream: core::option::Option<grit_lib::porcelain::pull::FetchedUpstream>
 impl grit_lib::porcelain::pull::PullOptions
 pub fn grit_lib::porcelain::pull::PullOptions::for_working_branch(&grit_lib::repo::Repository, grit_lib::prelude::Environment, core::option::Option<grit_lib::porcelain::pull::PullMode>) -> grit_lib::error::Result<Self>
+pub fn grit_lib::porcelain::pull::PullOptions::with_autostash(self, bool) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_branch(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_check(self, bool) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_explicit_fetch(self, bool) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_fetch(self, grit_lib::remote::transfer::FetchOptions) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_mode(self, core::option::Option<grit_lib::porcelain::pull::PullMode>) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_remote(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_stop_on_conflict(self, bool) -> Self
+pub fn grit_lib::porcelain::pull::PullOptions::with_upstream(self, core::option::Option<grit_lib::porcelain::pull::FetchedUpstream>) -> Self
 impl core::clone::Clone for grit_lib::porcelain::pull::PullOptions
 pub fn grit_lib::porcelain::pull::PullOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::pull::PullOptions
@@ -15852,7 +15881,7 @@ impl core::marker::Unpin for grit_lib::porcelain::restore::RestoreSource
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::restore::RestoreSource
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::restore::RestoreSource
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::RestoreSource
-pub struct grit_lib::porcelain::restore::RestoreOptions
+#[non_exhaustive] pub struct grit_lib::porcelain::restore::RestoreOptions
 pub grit_lib::porcelain::restore::RestoreOptions::pathspec_sources: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::restore::RestoreOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::restore::RestoreOptions::remerge: core::option::Option<grit_lib::diff::merge_file::ConflictStyle>
@@ -15860,6 +15889,15 @@ pub grit_lib::porcelain::restore::RestoreOptions::source: grit_lib::porcelain::r
 pub grit_lib::porcelain::restore::RestoreOptions::stage: core::option::Option<grit_lib::porcelain::restore::ConflictSide>
 pub grit_lib::porcelain::restore::RestoreOptions::staged: bool
 pub grit_lib::porcelain::restore::RestoreOptions::worktree: bool
+impl grit_lib::porcelain::restore::RestoreOptions
+pub fn grit_lib::porcelain::restore::RestoreOptions::new(alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::restore::RestoreOptions::with_pathspec_sources(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::restore::RestoreOptions::with_pathspecs(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::porcelain::restore::RestoreOptions::with_remerge(self, core::option::Option<grit_lib::diff::merge_file::ConflictStyle>) -> Self
+pub fn grit_lib::porcelain::restore::RestoreOptions::with_source(self, grit_lib::porcelain::restore::RestoreSource) -> Self
+pub fn grit_lib::porcelain::restore::RestoreOptions::with_stage(self, core::option::Option<grit_lib::porcelain::restore::ConflictSide>) -> Self
+pub fn grit_lib::porcelain::restore::RestoreOptions::with_staged(self, bool) -> Self
+pub fn grit_lib::porcelain::restore::RestoreOptions::with_worktree(self, bool) -> Self
 impl core::clone::Clone for grit_lib::porcelain::restore::RestoreOptions
 pub fn grit_lib::porcelain::restore::RestoreOptions::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::porcelain::restore::RestoreOptions
@@ -16186,7 +16224,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusModel
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusModel
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusModel
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusModel
-pub struct grit_lib::porcelain::status::StatusOptions
+#[non_exhaustive] pub struct grit_lib::porcelain::status::StatusOptions
 pub grit_lib::porcelain::status::StatusOptions::ahead_behind: bool
 pub grit_lib::porcelain::status::StatusOptions::count_stash: bool
 pub grit_lib::porcelain::status::StatusOptions::ignored: grit_lib::porcelain::status::IgnoredMode
@@ -16196,6 +16234,14 @@ pub grit_lib::porcelain::status::StatusOptions::untracked: grit_lib::porcelain::
 pub grit_lib::porcelain::status::StatusOptions::write_index: bool
 impl grit_lib::porcelain::status::StatusOptions
 pub fn grit_lib::porcelain::status::StatusOptions::from_config(&grit_lib::config::Config<'_>) -> grit_lib::error::Result<Self>
+impl grit_lib::porcelain::status::StatusOptions
+pub fn grit_lib::porcelain::status::StatusOptions::with_ahead_behind(self, bool) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_count_stash(self, bool) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_ignored(self, grit_lib::porcelain::status::IgnoredMode) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_pathspec(self, grit_lib::worktree::pathspec::Pathspec) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_renames(self, core::option::Option<grit_lib::porcelain::status::RenameDetection>) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_untracked(self, grit_lib::porcelain::status::UntrackedMode) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_write_index(self, bool) -> Self
 impl core::clone::Clone for grit_lib::porcelain::status::StatusOptions
 pub fn grit_lib::porcelain::status::StatusOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::status::StatusOptions
@@ -16256,10 +16302,15 @@ impl core::marker::Unpin for grit_lib::porcelain::switch::SwitchMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::switch::SwitchMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::switch::SwitchMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::switch::SwitchMode
-pub struct grit_lib::porcelain::switch::SwitchOptions
+#[non_exhaustive] pub struct grit_lib::porcelain::switch::SwitchOptions
 pub grit_lib::porcelain::switch::SwitchOptions::dry_run: bool
 pub grit_lib::porcelain::switch::SwitchOptions::hooks: grit_lib::command_runner::hooks::PostOperationHooks
 pub grit_lib::porcelain::switch::SwitchOptions::mode: grit_lib::porcelain::switch::SwitchMode
+impl grit_lib::porcelain::switch::SwitchOptions
+pub fn grit_lib::porcelain::switch::SwitchOptions::new(grit_lib::porcelain::switch::SwitchMode) -> Self
+pub fn grit_lib::porcelain::switch::SwitchOptions::with_dry_run(self, bool) -> Self
+pub fn grit_lib::porcelain::switch::SwitchOptions::with_hooks(self, grit_lib::command_runner::hooks::PostOperationHooks) -> Self
+pub fn grit_lib::porcelain::switch::SwitchOptions::with_mode(self, grit_lib::porcelain::switch::SwitchMode) -> Self
 impl core::clone::Clone for grit_lib::porcelain::switch::SwitchOptions
 pub fn grit_lib::porcelain::switch::SwitchOptions::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::porcelain::switch::SwitchOptions
@@ -17641,17 +17692,17 @@ impl core::marker::Unpin for grit_lib::prelude::Odb
 impl core::marker::UnsafeUnpin for grit_lib::prelude::Odb
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::prelude::Odb
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::prelude::Odb
-pub struct grit_lib::prelude::OwnershipContext
+#[non_exhaustive] pub struct grit_lib::prelude::OwnershipContext
 pub grit_lib::prelude::OwnershipContext::sudo_uid: core::option::Option<u32>
 impl grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::from_environment(&grit_lib::prelude::Environment) -> Self
+pub const fn grit_lib::ownership_check::OwnershipContext::with_sudo_uid(self, core::option::Option<u32>) -> Self
 impl core::clone::Clone for grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::clone(&self) -> Self
 impl core::default::Default for grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::default() -> Self
 impl core::fmt::Debug for grit_lib::ownership_check::OwnershipContext
 pub fn grit_lib::ownership_check::OwnershipContext::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::ownership_check::OwnershipContext
 impl core::marker::Freeze for grit_lib::ownership_check::OwnershipContext
 impl core::marker::Send for grit_lib::ownership_check::OwnershipContext
 impl core::marker::Sync for grit_lib::ownership_check::OwnershipContext
@@ -20462,7 +20513,7 @@ impl core::marker::Unpin for grit_lib::remote::clone::CloneTags
 impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneTags
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneTags
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneTags
-pub struct grit_lib::remote::clone::CloneIntoOptions
+#[non_exhaustive] pub struct grit_lib::remote::clone::CloneIntoOptions
 pub grit_lib::remote::clone::CloneIntoOptions::bare: bool
 pub grit_lib::remote::clone::CloneIntoOptions::branch: core::option::Option<alloc::string::String>
 pub grit_lib::remote::clone::CloneIntoOptions::bundle_cache: core::option::Option<std::path::PathBuf>
@@ -20479,7 +20530,20 @@ pub grit_lib::remote::clone::CloneIntoOptions::thread_policy: grit_lib::parallel
 pub grit_lib::remote::clone::CloneIntoOptions::url: alloc::string::String
 impl grit_lib::remote::clone::CloneIntoOptions
 pub fn grit_lib::remote::clone::CloneIntoOptions::new(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_bare(self, bool) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_branch(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_bundle_cache(self, core::option::Option<std::path::PathBuf>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_checkout(self, bool) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_depth(self, core::option::Option<u32>) -> Self
 pub fn grit_lib::remote::clone::CloneIntoOptions::with_environment(self, grit_lib::prelude::Environment) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_filter(self, core::option::Option<grit_lib::remote::partial_clone::ObjectFilterSpec>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_initial_branch(self, alloc::string::String) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_promisor_fetcher(self, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_remote_name(self, alloc::string::String) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_single_branch(self, core::option::Option<bool>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_tags(self, core::option::Option<grit_lib::remote::clone::CloneTags>) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_thread_policy(self, grit_lib::parallel::ThreadPolicy) -> Self
+pub fn grit_lib::remote::clone::CloneIntoOptions::with_url(self, alloc::string::String) -> Self
 impl core::marker::Freeze for grit_lib::remote::clone::CloneIntoOptions
 impl core::marker::Send for grit_lib::remote::clone::CloneIntoOptions
 impl core::marker::Sync for grit_lib::remote::clone::CloneIntoOptions
@@ -20510,7 +20574,7 @@ impl core::marker::Unpin for grit_lib::remote::clone::CloneIntoOutcome
 impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneIntoOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneIntoOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneIntoOutcome
-pub struct grit_lib::remote::clone::CloneOptions
+#[non_exhaustive] pub struct grit_lib::remote::clone::CloneOptions
 pub grit_lib::remote::clone::CloneOptions::auto_filter: bool
 pub grit_lib::remote::clone::CloneOptions::bare: bool
 pub grit_lib::remote::clone::CloneOptions::branch: core::option::Option<alloc::string::String>
@@ -20530,6 +20594,23 @@ pub grit_lib::remote::clone::CloneOptions::thread_policy: grit_lib::parallel::Th
 pub grit_lib::remote::clone::CloneOptions::url: alloc::string::String
 impl grit_lib::remote::clone::CloneOptions
 pub fn grit_lib::remote::clone::CloneOptions::new(impl core::convert::Into<alloc::string::String>, std::path::PathBuf) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_auto_filter(self, bool) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_bare(self, bool) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_branch(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_bundle_cache(self, core::option::Option<std::path::PathBuf>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_checkout(self, bool) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_config(self, alloc::vec::Vec<(alloc::string::String, alloc::string::String)>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_depth(self, core::option::Option<u32>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_dest(self, std::path::PathBuf) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_environment(self, grit_lib::prelude::Environment) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_filter(self, core::option::Option<grit_lib::remote::partial_clone::ObjectFilterSpec>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_initial_branch(self, alloc::string::String) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_promisor_fetcher(self, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_remote_name(self, alloc::string::String) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_single_branch(self, core::option::Option<bool>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_tags(self, core::option::Option<grit_lib::remote::clone::CloneTags>) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_thread_policy(self, grit_lib::parallel::ThreadPolicy) -> Self
+pub fn grit_lib::remote::clone::CloneOptions::with_url(self, alloc::string::String) -> Self
 impl core::marker::Freeze for grit_lib::remote::clone::CloneOptions
 impl core::marker::Send for grit_lib::remote::clone::CloneOptions
 impl core::marker::Sync for grit_lib::remote::clone::CloneOptions
@@ -21557,7 +21638,7 @@ impl<'a> core::marker::Unpin for grit_lib::remote::serve::ReceivePack<'a>
 impl<'a> core::marker::UnsafeUnpin for grit_lib::remote::serve::ReceivePack<'a>
 impl<'a> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ReceivePack<'a>
 impl<'a> !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ReceivePack<'a>
-pub struct grit_lib::remote::serve::ReceivePolicy
+#[non_exhaustive] pub struct grit_lib::remote::serve::ReceivePolicy
 pub grit_lib::remote::serve::ReceivePolicy::deny_current_branch: grit_lib::serve::receive_pack::DenyCurrentBranch
 pub grit_lib::remote::serve::ReceivePolicy::deny_delete_current: bool
 pub grit_lib::remote::serve::ReceivePolicy::deny_deletes: bool
@@ -21566,6 +21647,12 @@ pub grit_lib::remote::serve::ReceivePolicy::fsck_objects: core::option::Option<g
 pub grit_lib::remote::serve::ReceivePolicy::shallow_update: bool
 impl grit_lib::remote::serve::ReceivePolicy
 pub fn grit_lib::remote::serve::ReceivePolicy::from_config(&grit_lib::config::ConfigSet) -> Self
+pub fn grit_lib::remote::serve::ReceivePolicy::with_deny_current_branch(self, grit_lib::serve::receive_pack::DenyCurrentBranch) -> Self
+pub fn grit_lib::remote::serve::ReceivePolicy::with_deny_delete_current(self, bool) -> Self
+pub fn grit_lib::remote::serve::ReceivePolicy::with_deny_deletes(self, bool) -> Self
+pub fn grit_lib::remote::serve::ReceivePolicy::with_deny_non_fast_forwards(self, bool) -> Self
+pub fn grit_lib::remote::serve::ReceivePolicy::with_fsck_objects(self, core::option::Option<grit_lib::maintenance::fsck::ObjectFsckPolicy>) -> Self
+pub fn grit_lib::remote::serve::ReceivePolicy::with_shallow_update(self, bool) -> Self
 impl core::clone::Clone for grit_lib::remote::serve::ReceivePolicy
 pub fn grit_lib::remote::serve::ReceivePolicy::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::serve::ReceivePolicy
@@ -21637,7 +21724,7 @@ impl core::marker::Unpin for grit_lib::remote::serve::RequestBodyLimitExceeded
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RequestBodyLimitExceeded
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RequestBodyLimitExceeded
-pub struct grit_lib::remote::serve::ServeOptions
+#[non_exhaustive] pub struct grit_lib::remote::serve::ServeOptions
 pub grit_lib::remote::serve::ServeOptions::accepted_promisor_remotes: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::advertise_refs: bool
 pub grit_lib::remote::serve::ServeOptions::agent: alloc::string::String
@@ -21652,6 +21739,16 @@ impl grit_lib::remote::serve::ServeOptions
 pub fn grit_lib::remote::serve::ServeOptions::attach_promisor_fetcher(&self, &grit_lib::repo::Repository, core::option::Option<alloc::rcs::arc::Arc<dyn grit_lib::objects::promisor::PromisorFetcher>>) -> bool
 pub fn grit_lib::remote::serve::ServeOptions::lazy_fetch_enabled(&self, &grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::remote::serve::ServeOptions::lazy_fetch_from_environment(&grit_lib::prelude::Environment) -> core::option::Option<bool>
+pub fn grit_lib::remote::serve::ServeOptions::with_accepted_promisor_remotes(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_advertise_refs(self, bool) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_agent(self, alloc::string::String) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_bundle_list(self, core::option::Option<grit_lib::remote::bundle_uri::BundleList>) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_hidden_refs(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_lazy_fetch(self, core::option::Option<bool>) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_protocol(self, grit_lib::remote::serve::ProtocolVersion) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_push_bundle(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_server_options(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::remote::serve::ServeOptions::with_stateless_rpc(self, bool) -> Self
 impl core::clone::Clone for grit_lib::remote::serve::ServeOptions
 pub fn grit_lib::remote::serve::ServeOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::serve::ServeOptions
@@ -22076,7 +22173,7 @@ impl core::marker::Unpin for grit_lib::objects::pack_objects::PackStats
 impl core::marker::UnsafeUnpin for grit_lib::objects::pack_objects::PackStats
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack_objects::PackStats
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack_objects::PackStats
-pub struct grit_lib::remote::transfer::PushOptions
+#[non_exhaustive] pub struct grit_lib::remote::transfer::PushOptions
 pub grit_lib::remote::transfer::PushOptions::atomic: bool
 pub grit_lib::remote::transfer::PushOptions::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
 pub grit_lib::remote::transfer::PushOptions::dry_run: bool
@@ -22086,6 +22183,16 @@ pub grit_lib::remote::transfer::PushOptions::push_options: alloc::vec::Vec<alloc
 pub grit_lib::remote::transfer::PushOptions::remote_ref_tips: core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub grit_lib::remote::transfer::PushOptions::resumable_threshold: core::option::Option<u64>
 pub grit_lib::remote::transfer::PushOptions::tracking_remote: core::option::Option<alloc::string::String>
+impl grit_lib::remote::transfer::PushOptions
+pub fn grit_lib::remote::transfer::PushOptions::with_atomic(self, bool) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_diagnostics(self, core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_dry_run(self, bool) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_network_trace(self, bool) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_no_verify(self, bool) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_push_options(self, alloc::vec::Vec<alloc::string::String>) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_remote_ref_tips(self, core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_resumable_threshold(self, core::option::Option<u64>) -> Self
+pub fn grit_lib::remote::transfer::PushOptions::with_tracking_remote(self, core::option::Option<alloc::string::String>) -> Self
 impl core::clone::Clone for grit_lib::remote::transfer::PushOptions
 pub fn grit_lib::remote::transfer::PushOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::transfer::PushOptions
@@ -22117,7 +22224,7 @@ impl core::marker::Unpin for grit_lib::remote::transfer::PushOutcome
 impl core::marker::UnsafeUnpin for grit_lib::remote::transfer::PushOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transfer::PushOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transfer::PushOutcome
-pub struct grit_lib::remote::transfer::PushRefSpec
+#[non_exhaustive] pub struct grit_lib::remote::transfer::PushRefSpec
 pub grit_lib::remote::transfer::PushRefSpec::delete: bool
 pub grit_lib::remote::transfer::PushRefSpec::dst: alloc::string::String
 pub grit_lib::remote::transfer::PushRefSpec::expect_absent: bool
@@ -22126,6 +22233,15 @@ pub grit_lib::remote::transfer::PushRefSpec::force: bool
 pub grit_lib::remote::transfer::PushRefSpec::hook_src_ref: core::option::Option<alloc::string::String>
 pub grit_lib::remote::transfer::PushRefSpec::src: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::remote::transfer::PushRefSpec::src_ref: core::option::Option<alloc::string::String>
+impl grit_lib::remote::transfer::PushRefSpec
+pub fn grit_lib::remote::transfer::PushRefSpec::with_delete(self, bool) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_dst(self, alloc::string::String) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_expect_absent(self, bool) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_expected_old(self, core::option::Option<grit_lib::objects::ObjectId>) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_force(self, bool) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_hook_src_ref(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_src(self, core::option::Option<grit_lib::objects::ObjectId>) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_src_ref(self, core::option::Option<alloc::string::String>) -> Self
 impl core::clone::Clone for grit_lib::remote::transfer::PushRefSpec
 pub fn grit_lib::remote::transfer::PushRefSpec::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::transfer::PushRefSpec
@@ -27839,7 +27955,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::StatusModel
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusModel
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusModel
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusModel
-pub struct grit_lib::status::StatusOptions
+#[non_exhaustive] pub struct grit_lib::status::StatusOptions
 pub grit_lib::status::StatusOptions::ahead_behind: bool
 pub grit_lib::status::StatusOptions::count_stash: bool
 pub grit_lib::status::StatusOptions::ignored: grit_lib::porcelain::status::IgnoredMode
@@ -27849,6 +27965,14 @@ pub grit_lib::status::StatusOptions::untracked: grit_lib::porcelain::status::Unt
 pub grit_lib::status::StatusOptions::write_index: bool
 impl grit_lib::porcelain::status::StatusOptions
 pub fn grit_lib::porcelain::status::StatusOptions::from_config(&grit_lib::config::Config<'_>) -> grit_lib::error::Result<Self>
+impl grit_lib::porcelain::status::StatusOptions
+pub fn grit_lib::porcelain::status::StatusOptions::with_ahead_behind(self, bool) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_count_stash(self, bool) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_ignored(self, grit_lib::porcelain::status::IgnoredMode) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_pathspec(self, grit_lib::worktree::pathspec::Pathspec) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_renames(self, core::option::Option<grit_lib::porcelain::status::RenameDetection>) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_untracked(self, grit_lib::porcelain::status::UntrackedMode) -> Self
+pub fn grit_lib::porcelain::status::StatusOptions::with_write_index(self, bool) -> Self
 impl core::clone::Clone for grit_lib::porcelain::status::StatusOptions
 pub fn grit_lib::porcelain::status::StatusOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::status::StatusOptions

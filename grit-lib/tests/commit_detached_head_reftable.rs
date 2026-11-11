@@ -59,14 +59,10 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
     };
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: tip,
-                    reflog_to_label: "HEAD".to_owned(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: tip,
+                reflog_to_label: "HEAD".to_owned(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -128,14 +124,10 @@ fn grit_amend_on_detached_reftable_head() {
     };
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Detached {
-                    commit: tip,
-                    reflog_to_label: "HEAD".to_owned(),
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Detached {
+                commit: tip,
+                reflog_to_label: "HEAD".to_owned(),
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

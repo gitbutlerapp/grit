@@ -65,14 +65,11 @@ pub fn bench_sparse_transitions(c: &mut Criterion) {
                 for target in &endpoints {
                     switch_repository(
                         &repo,
-                        &SwitchOptions {
-                            mode: SwitchMode::Detached {
-                                commit: *target,
-                                reflog_to_label: target.to_string(),
-                            },
-                            dry_run: false,
-                            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-                        },
+                        &SwitchOptions::new(SwitchMode::Detached {
+                            commit: *target,
+                            reflog_to_label: target.to_string(),
+                        })
+                        .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
                         &mut NullProgress,
                         &CancelToken::never(),
                     )

@@ -81,6 +81,7 @@ pub struct RenameDetection {
 /// colour, column layout, path quoting, `-z` — are deliberately absent; they
 /// belong to the renderer, not the computation.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct StatusOptions {
     /// Untracked-file reporting mode.
     pub untracked: UntrackedMode,
@@ -161,6 +162,84 @@ impl Default for StatusOptions {
             count_stash: false,
             write_index: true,
         }
+    }
+}
+
+impl StatusOptions {
+    /// Sets [`untracked`](Self::untracked).
+    #[must_use]
+    pub fn with_untracked(mut self, untracked: UntrackedMode) -> Self {
+        self.untracked = untracked;
+        self
+    }
+
+    /// Sets [`ignored`](Self::ignored).
+    #[must_use]
+    pub fn with_ignored(mut self, ignored: IgnoredMode) -> Self {
+        self.ignored = ignored;
+        self
+    }
+
+    /// Sets [`renames`](Self::renames).
+    #[must_use]
+    pub fn with_renames(mut self, renames: Option<RenameDetection>) -> Self {
+        self.renames = renames;
+        self
+    }
+
+    /// Sets [`pathspec`](Self::pathspec).
+    #[must_use]
+    pub fn with_pathspec(mut self, pathspec: crate::pathspec::Pathspec) -> Self {
+        self.pathspec = pathspec;
+        self
+    }
+
+    /// Sets [`ahead_behind`](Self::ahead_behind).
+    #[must_use]
+    pub fn with_ahead_behind(mut self, ahead_behind: bool) -> Self {
+        self.ahead_behind = ahead_behind;
+        self
+    }
+
+    /// Sets [`stat_parallel_threads`](Self::stat_parallel_threads).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_stat_parallel_threads(mut self, stat_parallel_threads: Option<usize>) -> Self {
+        self.stat_parallel_threads = stat_parallel_threads;
+        self
+    }
+
+    /// Sets [`fsmonitor_query_boundary`](Self::fsmonitor_query_boundary).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_fsmonitor_query_boundary(
+        mut self,
+        fsmonitor_query_boundary: Option<crate::fsmonitor::FsmonitorQueryBoundary>,
+    ) -> Self {
+        self.fsmonitor_query_boundary = fsmonitor_query_boundary;
+        self
+    }
+
+    /// Sets [`now_unix_seconds`](Self::now_unix_seconds).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn with_now_unix_seconds(mut self, now_unix_seconds: Option<i64>) -> Self {
+        self.now_unix_seconds = now_unix_seconds;
+        self
+    }
+
+    /// Sets [`count_stash`](Self::count_stash).
+    #[must_use]
+    pub fn with_count_stash(mut self, count_stash: bool) -> Self {
+        self.count_stash = count_stash;
+        self
+    }
+
+    /// Sets [`write_index`](Self::write_index).
+    #[must_use]
+    pub fn with_write_index(mut self, write_index: bool) -> Self {
+        self.write_index = write_index;
+        self
     }
 }
 

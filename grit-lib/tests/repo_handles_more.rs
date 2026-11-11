@@ -377,16 +377,9 @@ fn handle_fetch_push_local_bare_remote() {
     repo.remotes()
         .push(
             &remote,
-            &[PushRefSpec {
-                src: Some(head),
-                src_ref: None,
-                dst: "refs/heads/main".into(),
-                force: false,
-                delete: false,
-                expected_old: None,
-                expect_absent: false,
-                ..Default::default()
-            }],
+            &[PushRefSpec::default()
+                .with_src(Some(head))
+                .with_dst("refs/heads/main".into())],
             PushOptions::default(),
             &mut progress,
             &CancelToken::never(),

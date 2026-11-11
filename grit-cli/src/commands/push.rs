@@ -459,14 +459,12 @@ fn push_once(
     cancel: &CancelToken,
 ) -> Result<grit_lib::remote::transfer::PushOutcome> {
     let remote = open_push_destination(config, remote_name).map_err(map_remote_error)?;
-    let options = PushOptions {
-        dry_run: wire.dry_run,
-        atomic: wire.atomic,
-        push_options: wire.push_options.to_vec(),
-        remote_ref_tips: wire.remote_ref_tips.clone(),
-        no_verify: wire.no_verify,
-        ..Default::default()
-    };
+    let options = PushOptions::default()
+        .with_dry_run(wire.dry_run)
+        .with_atomic(wire.atomic)
+        .with_push_options(wire.push_options.to_vec())
+        .with_remote_ref_tips(wire.remote_ref_tips.clone())
+        .with_no_verify(wire.no_verify);
     remote
         .push(repo, specs, options, progress, cancel, Some(factory))
         .map_err(map_remote_error)

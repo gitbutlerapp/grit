@@ -881,15 +881,8 @@ fn pick_stops_before_moving_the_branch() {
 #[test]
 fn restore_stops_when_the_sink_asks() {
     let (tmp, repo, _) = repo_with_modified_files();
-    let opts = RestoreOptions {
-        pathspecs: vec![".".to_owned()],
-        pathspec_sources: vec![".".to_owned()],
-        source: RestoreSource::Index,
-        staged: false,
-        worktree: true,
-        stage: None,
-        remerge: None,
-    };
+    let opts =
+        RestoreOptions::new(vec![".".to_owned()]).with_pathspec_sources(vec![".".to_owned()]);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
     let cancel = sink.flag.clone();
     let before_index = index_bytes(&repo);
@@ -942,15 +935,9 @@ fn restore_source_cancel_restores_directory_replacing_tracked_file() {
         .expect("parse")
         .tree;
 
-    let opts = RestoreOptions {
-        pathspecs: vec![".".to_owned()],
-        pathspec_sources: vec![".".to_owned()],
-        source: RestoreSource::Tree(old_tree),
-        staged: false,
-        worktree: true,
-        stage: None,
-        remerge: None,
-    };
+    let opts = RestoreOptions::new(vec![".".to_owned()])
+        .with_pathspec_sources(vec![".".to_owned()])
+        .with_source(RestoreSource::Tree(old_tree));
     let before_index = index_bytes(&repo);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 1);
     let cancel = sink.flag.clone();

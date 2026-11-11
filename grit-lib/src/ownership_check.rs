@@ -81,7 +81,8 @@ pub enum OwnershipError {
 }
 
 /// Context passed to [`OwnershipCheck::status`].
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct OwnershipContext {
     /// When the effective user is root, treat this uid as the real user (`SUDO_UID`).
     pub sudo_uid: Option<u32>,
@@ -97,6 +98,13 @@ impl OwnershipContext {
                 .as_deref()
                 .and_then(|s| s.parse::<u32>().ok()),
         }
+    }
+
+    /// Sets [`sudo_uid`](Self::sudo_uid).
+    #[must_use]
+    pub const fn with_sudo_uid(mut self, sudo_uid: Option<u32>) -> Self {
+        self.sudo_uid = sudo_uid;
+        self
     }
 }
 

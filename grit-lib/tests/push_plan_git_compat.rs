@@ -117,10 +117,7 @@ fn dry_run_push_local(local_git: &Path, bare: &Path, specs: &[PushRefSpec]) {
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(bare),
         specs,
-        &PushOptions {
-            dry_run: true,
-            ..Default::default()
-        },
+        &PushOptions::default().with_dry_run(true),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -287,10 +284,7 @@ fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
         .push(
             &repo,
             &plan.specs,
-            PushOptions {
-                remote_ref_tips: ctx.remote_tips.clone(),
-                ..Default::default()
-            },
+            PushOptions::default().with_remote_ref_tips(ctx.remote_tips.clone()),
             &mut NoProgress,
             &CancelToken::never(),
             None,
@@ -662,10 +656,7 @@ fn dry_run_leaves_bare_refs_unchanged() {
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &specs,
-        &PushOptions {
-            dry_run: true,
-            ..Default::default()
-        },
+        &PushOptions::default().with_dry_run(true),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )

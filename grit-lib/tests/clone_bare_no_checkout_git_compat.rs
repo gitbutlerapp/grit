@@ -98,13 +98,11 @@ fn clone_bare_matches_git_layout() {
 
     let grit_bare = tempfile::tempdir().expect("grit bare");
     let outcome = clone_repo(
-        CloneOptions {
-            bare: true,
-            ..CloneOptions::new(
-                upstream.path().to_string_lossy(),
-                grit_bare.path().to_path_buf(),
-            )
-        },
+        CloneOptions::new(
+            upstream.path().to_string_lossy(),
+            grit_bare.path().to_path_buf(),
+        )
+        .with_bare(true),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -177,13 +175,11 @@ fn clone_no_checkout_leaves_no_index() {
 
     let grit_dest = tempfile::tempdir().expect("grit dest");
     let outcome = clone_repo(
-        CloneOptions {
-            checkout: false,
-            ..CloneOptions::new(
-                upstream.path().to_string_lossy(),
-                grit_dest.path().to_path_buf(),
-            )
-        },
+        CloneOptions::new(
+            upstream.path().to_string_lossy(),
+            grit_dest.path().to_path_buf(),
+        )
+        .with_checkout(false),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -262,10 +258,8 @@ fn local_clone_checkout_honors_thread_policy_on_repository() {
     let dest = tempfile::tempdir().expect("dest");
     let policy = ThreadPolicy::with_threads_override(Some(1));
     let outcome = clone_repo(
-        CloneOptions {
-            thread_policy: policy,
-            ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
-        },
+        CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
+            .with_thread_policy(policy),
         &mut NoProgress,
         &CancelToken::never(),
         None,

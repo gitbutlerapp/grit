@@ -87,18 +87,11 @@ fn push_body(old: Option<ObjectId>, new: ObjectId, refname: &str, pack: &[u8]) -
 }
 
 fn serve_push(repo: &Repository, body: &[u8]) -> ReceiveOutcome {
-    let opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: "grit-test".to_owned(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
-    let policy = ReceivePolicy {
-        deny_non_fast_forwards: true,
-        ..ReceivePolicy::default()
-    };
+    let opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true)
+        .with_agent("grit-test".to_owned());
+    let policy = ReceivePolicy::default().with_deny_non_fast_forwards(true);
     let mut output = Vec::new();
     ReceivePack::new(repo, &opts, &policy)
         .run(&mut std::io::Cursor::new(body), &mut output)

@@ -130,16 +130,9 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         }
     };
 
-    let spec = PushRefSpec {
-        src: Some(main_oid),
-        src_ref: None,
-        dst: "refs/heads/main".to_owned(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    };
+    let spec = PushRefSpec::default()
+        .with_src(Some(main_oid))
+        .with_dst("refs/heads/main".to_owned());
     let outcome = grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -149,10 +142,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec],
-        &PushOptions {
-            tracking_remote: Some("origin".to_owned()),
-            ..PushOptions::default()
-        },
+        &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -236,16 +226,9 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         main_oid.to_hex()
     );
 
-    let nonff = PushRefSpec {
-        src: Some(diverged),
-        src_ref: None,
-        dst: "refs/heads/main".to_owned(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    };
+    let nonff = PushRefSpec::default()
+        .with_src(Some(diverged))
+        .with_dst("refs/heads/main".to_owned());
     let outcome2 = grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -291,16 +274,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     let mut conn3 = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("reconnect for forced push");
-    let forced = PushRefSpec {
-        src: Some(diverged),
-        src_ref: None,
-        dst: "refs/heads/main".to_owned(),
-        force: true,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    };
+    let forced = PushRefSpec::default()
+        .with_src(Some(diverged))
+        .with_dst("refs/heads/main".to_owned())
+        .with_force(true);
     let outcome3 = grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -360,16 +337,9 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     let mut conn_mk = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("reconnect to create deletable ref");
-    let mk = PushRefSpec {
-        src: Some(diverged),
-        src_ref: None,
-        dst: "refs/heads/scratch".to_owned(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    };
+    let mk = PushRefSpec::default()
+        .with_src(Some(diverged))
+        .with_dst("refs/heads/scratch".to_owned());
     grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -397,16 +367,9 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     let mut conn_del = transport
         .connect(&url, Service::ReceivePack, &ConnectOptions::default())
         .expect("reconnect for deletion");
-    let del = PushRefSpec {
-        src: None,
-        src_ref: None,
-        dst: "refs/heads/scratch".to_owned(),
-        force: false,
-        delete: true,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    };
+    let del = PushRefSpec::default()
+        .with_dst("refs/heads/scratch".to_owned())
+        .with_delete(true);
     let outcome_del = grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -544,16 +507,9 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_a),
-        &[PushRefSpec {
-            src: Some(advanced),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(advanced))
+            .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -596,16 +552,9 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_b),
-        &[PushRefSpec {
-            src: Some(new_tip),
-            src_ref: None,
-            dst: "refs/heads/newbr".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(new_tip))
+            .with_dst("refs/heads/newbr".to_owned())],
         &PushOptions::default(),
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -647,16 +596,10 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_force),
-        &[PushRefSpec {
-            src: Some(new_tip),
-            src_ref: None,
-            dst: "refs/heads/main".to_owned(),
-            force: true,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(new_tip))
+            .with_dst("refs/heads/main".to_owned())
+            .with_force(true)],
         &PushOptions::default(),
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),

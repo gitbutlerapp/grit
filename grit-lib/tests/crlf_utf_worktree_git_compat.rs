@@ -338,12 +338,10 @@ fn grit_clone_checkouts_latin1_from_git_repo() {
     init_git_latin1_source(upstream.path());
 
     let dest = tempfile::tempdir().expect("dest");
-    let opts = CloneOptions {
-        url: upstream.path().to_string_lossy().into_owned(),
-        dest: dest.path().to_path_buf(),
-        environment: Environment::empty(),
-        ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
-    };
+    let opts = CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
+        .with_url(upstream.path().to_string_lossy().into_owned())
+        .with_dest(dest.path().to_path_buf())
+        .with_environment(Environment::empty());
     clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
 
     let bytes = fs::read(dest.path().join("a.l1")).expect("read a.l1");

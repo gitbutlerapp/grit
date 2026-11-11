@@ -112,10 +112,7 @@ fn clone_into_custom_primary_skips_checkout_when_disabled() {
 
     let outcome = clone_into(
         repo,
-        CloneIntoOptions {
-            checkout: false,
-            ..CloneIntoOptions::new(url)
-        },
+        CloneIntoOptions::new(url).with_checkout(false),
         &mut NoProgress,
         &CancelToken::never(),
         None,

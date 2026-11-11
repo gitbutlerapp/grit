@@ -191,16 +191,9 @@ fn push_delete_tag_on_local_remote() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&origin),
-        &[PushRefSpec {
-            src: Some(tag_oid),
-            src_ref: None,
-            dst: "refs/tags/v1".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(tag_oid))
+            .with_dst("refs/tags/v1".to_owned())],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),
@@ -219,16 +212,9 @@ fn push_delete_tag_on_local_remote() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Local(&origin),
-        &[PushRefSpec {
-            src: None,
-            src_ref: None,
-            dst: "refs/tags/v1".to_owned(),
-            force: false,
-            delete: true,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_dst("refs/tags/v1".to_owned())
+            .with_delete(true)],
         &PushOptions::default(),
         &mut grit_lib::remote::fetch::NoProgress,
         &grit_lib::progress::CancelToken::never(),

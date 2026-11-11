@@ -75,6 +75,7 @@ pub enum PullMode {
 
 /// Options for [`pull`].
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct PullOptions {
     /// Remote name override; when `None`, uses [`configured_remote_for_pull`].
     pub remote: Option<String>,
@@ -390,6 +391,69 @@ impl PullOptions {
             upstream: None,
             stop_on_conflict: false,
         })
+    }
+
+    /// Sets [`remote`](Self::remote).
+    #[must_use]
+    pub fn with_remote(mut self, remote: Option<String>) -> Self {
+        self.remote = remote;
+        self
+    }
+
+    /// Sets [`branch`](Self::branch).
+    #[must_use]
+    pub fn with_branch(mut self, branch: Option<String>) -> Self {
+        self.branch = branch;
+        self
+    }
+
+    /// Sets [`explicit_fetch`](Self::explicit_fetch).
+    #[must_use]
+    pub fn with_explicit_fetch(mut self, explicit_fetch: bool) -> Self {
+        self.explicit_fetch = explicit_fetch;
+        self
+    }
+
+    /// Sets [`autostash`](Self::autostash).
+    #[must_use]
+    pub fn with_autostash(mut self, autostash: bool) -> Self {
+        self.autostash = autostash;
+        self
+    }
+
+    /// Sets [`check`](Self::check).
+    #[must_use]
+    pub fn with_check(mut self, check: bool) -> Self {
+        self.check = check;
+        self
+    }
+
+    /// Sets [`mode`](Self::mode).
+    #[must_use]
+    pub fn with_mode(mut self, mode: Option<PullMode>) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Sets [`fetch`](Self::fetch).
+    #[must_use]
+    pub fn with_fetch(mut self, fetch: FetchOptions) -> Self {
+        self.fetch = fetch;
+        self
+    }
+
+    /// Sets [`upstream`](Self::upstream).
+    #[must_use]
+    pub fn with_upstream(mut self, upstream: Option<FetchedUpstream>) -> Self {
+        self.upstream = upstream;
+        self
+    }
+
+    /// Sets [`stop_on_conflict`](Self::stop_on_conflict).
+    #[must_use]
+    pub fn with_stop_on_conflict(mut self, stop_on_conflict: bool) -> Self {
+        self.stop_on_conflict = stop_on_conflict;
+        self
     }
 }
 

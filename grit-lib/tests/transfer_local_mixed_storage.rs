@@ -115,9 +115,7 @@ fn file_url(path: &Path) -> String {
 
 fn grit_clone(url: String, dest: PathBuf) {
     clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(url, dest)
-        },
+        CloneOptions::new(url, dest),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -204,15 +202,10 @@ fn push_to_empty_bare_packs_only_loose_objects_beside_linked_pack() {
     ];
     let specs: Vec<PushRefSpec> = refs
         .into_iter()
-        .map(|name| PushRefSpec {
-            src: Some(rev_parse(&src, name)),
-            src_ref: None,
-            dst: name.to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
+        .map(|name| {
+            PushRefSpec::default()
+                .with_src(Some(rev_parse(&src, name)))
+                .with_dst(name.to_owned())
         })
         .collect();
     grit_lib::repo::Repository::open(

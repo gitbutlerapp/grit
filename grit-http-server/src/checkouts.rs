@@ -294,11 +294,11 @@ fn open(repo: &ServedRepository, options: &RepositoryOptions) -> Result<Reposito
         &options.clone().with_promisor_fetcher(None).for_serving(),
     )
     .map_err(|e| internal(&e))?;
-    ServeOptions {
-        lazy_fetch: ServeOptions::lazy_fetch_from_environment(served.environment()),
-        ..ServeOptions::default()
-    }
-    .attach_promisor_fetcher(&served, options.promisor_fetcher.clone());
+    ServeOptions::default()
+        .with_lazy_fetch(ServeOptions::lazy_fetch_from_environment(
+            served.environment(),
+        ))
+        .attach_promisor_fetcher(&served, options.promisor_fetcher.clone());
     Ok(served)
 }
 

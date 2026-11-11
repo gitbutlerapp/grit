@@ -114,10 +114,7 @@ fn ff_only_refuses_divergent_and_changes_nothing() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            fast_forward: FastForwardPolicy::Only,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_fast_forward(FastForwardPolicy::Only),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -144,10 +141,7 @@ fn no_ff_creates_two_parent_commit_git_fsck_clean() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            fast_forward: FastForwardPolicy::Never,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_fast_forward(FastForwardPolicy::Never),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -174,10 +168,7 @@ fn squash_writes_squash_msg_no_merge_head() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -207,10 +198,7 @@ fn no_commit_state_readable_by_git() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::NoCommit,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::NoCommit),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -242,10 +230,7 @@ fn message_override_used() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            message: Some(custom.to_owned()),
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_message(Some(custom.to_owned())),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -269,10 +254,7 @@ fn no_commit_merge_mode_bytes_match_git() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::NoCommit,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::NoCommit),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -288,11 +270,9 @@ fn no_commit_merge_mode_bytes_match_git() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            fast_forward: FastForwardPolicy::Never,
-            commit: MergeCommitMode::NoCommit,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default()
+            .with_fast_forward(FastForwardPolicy::Never)
+            .with_commit(MergeCommitMode::NoCommit),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -321,10 +301,7 @@ fn squash_conflict_writes_merge_and_squash_msg_no_merge_head() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -358,10 +335,7 @@ fn squash_msg_date_line_matches_git() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -393,10 +367,7 @@ fn squash_conflict_abort_restores_pre_merge_state() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -430,11 +401,9 @@ fn squash_conflict_pending_message_prefers_merge_msg() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            message: Some(custom.to_owned()),
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default()
+            .with_commit(MergeCommitMode::Squash)
+            .with_message(Some(custom.to_owned())),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -464,10 +433,7 @@ fn squash_commit_clears_squash_msg() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -494,10 +460,7 @@ fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -551,10 +514,7 @@ fn squash_conflict_resolves_with_git_commit_no_edit() {
         main,
         topic,
         "topic",
-        &MergeOptions {
-            commit: MergeCommitMode::Squash,
-            ..MergeOptions::default()
-        },
+        &MergeOptions::default().with_commit(MergeCommitMode::Squash),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

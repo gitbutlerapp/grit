@@ -77,14 +77,10 @@ fn switch_to(repo: &Repository, branch: &str) {
         .expect("branch tip");
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: branch.into(),
-                    oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: branch.into(),
+                oid,
+            }),
             &mut NullProgress,
             &CancelToken::never(),
         )

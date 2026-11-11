@@ -7,7 +7,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::paths::RemoveOptions;
-use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
+use grit_lib::porcelain::restore::RestoreOptions;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::stash::{StashMode, StashPushOptions};
@@ -51,15 +51,10 @@ fn vendored_fixture() -> TempDir {
 }
 
 fn restore_opts(pathspec: &str, staged: bool, worktree: bool) -> RestoreOptions {
-    RestoreOptions {
-        pathspecs: vec![pathspec.into()],
-        pathspec_sources: vec![pathspec.into()],
-        source: RestoreSource::Index,
-        staged,
-        worktree,
-        stage: None,
-        remerge: None,
-    }
+    RestoreOptions::new(vec![pathspec.into()])
+        .with_pathspec_sources(vec![pathspec.into()])
+        .with_staged(staged)
+        .with_worktree(worktree)
 }
 
 #[test]

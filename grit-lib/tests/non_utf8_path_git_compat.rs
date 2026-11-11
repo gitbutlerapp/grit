@@ -149,10 +149,7 @@ fn exercise_non_utf8_untracked_paths(untracked_cache_enabled: bool) {
     let model = repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::All,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default().with_untracked(UntrackedMode::All),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -569,9 +566,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
 
     let clone_dest = tmp.path().join("r1c");
     let outcome = clone_repo(
-        CloneOptions {
-            ..CloneOptions::new(r1.to_string_lossy(), clone_dest.clone())
-        },
+        CloneOptions::new(r1.to_string_lossy(), clone_dest.clone()),
         &mut NoProgress,
         &CancelToken::never(),
         None,
@@ -604,15 +599,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
 
     repo.checkout()
         .restore(
-            &RestoreOptions {
-                pathspecs: vec![".".to_owned()],
-                pathspec_sources: vec![".".to_owned()],
-                source: RestoreSource::Index,
-                staged: false,
-                worktree: true,
-                stage: None,
-                remerge: None,
-            },
+            &RestoreOptions::new(vec![".".to_owned()]).with_pathspec_sources(vec![".".to_owned()]),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -729,14 +716,11 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
     let br_oid = ObjectId::from_hex(git(&root, &["rev-parse", "br"]).trim()).expect("br oid");
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "br".to_owned(),
-                    oid: br_oid,
-                },
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "br".to_owned(),
+                oid: br_oid,
+            })
+            .with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -755,14 +739,11 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
     let dirty_err = open_repo(&root)
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "br".to_owned(),
-                    oid: br_oid,
-                },
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "br".to_owned(),
+                oid: br_oid,
+            })
+            .with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -834,15 +815,9 @@ fn switch_merge_and_restore_non_utf8_tracked_paths_on_clean_tree() {
     };
     restore_paths(
         &open_repo(&root),
-        &RestoreOptions {
-            pathspecs: vec![".".to_owned()],
-            pathspec_sources: vec![".".to_owned()],
-            source: RestoreSource::Tree(br_tree),
-            staged: false,
-            worktree: true,
-            stage: None,
-            remerge: None,
-        },
+        &RestoreOptions::new(vec![".".to_owned()])
+            .with_pathspec_sources(vec![".".to_owned()])
+            .with_source(RestoreSource::Tree(br_tree)),
         &mut NullProgress,
         &CancelToken::never(),
     )

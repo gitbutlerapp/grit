@@ -60,14 +60,11 @@ mod unix {
         let err = repo
             .checkout()
             .switch(
-                &SwitchOptions {
-                    mode: SwitchMode::Existing {
-                        branch: "del".into(),
-                        oid: del_oid,
-                    },
-                    dry_run: false,
-                    hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-                },
+                &SwitchOptions::new(SwitchMode::Existing {
+                    branch: "del".into(),
+                    oid: del_oid,
+                })
+                .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
                 &mut grit_lib::progress::NullProgress,
                 &grit_lib::progress::CancelToken::never(),
             )

@@ -73,12 +73,10 @@ fn receive_pack_rejects_same_batch_casefold_branch_creates() {
     let mut report = Vec::new();
     let outcome = ReceivePack::new(
         &repo,
-        &ServeOptions {
-            protocol: ProtocolVersion::V0,
-            stateless_rpc: true,
-            agent: "grit-test".to_owned(),
-            ..ServeOptions::default()
-        },
+        &ServeOptions::default()
+            .with_protocol(ProtocolVersion::V0)
+            .with_stateless_rpc(true)
+            .with_agent("grit-test".to_owned()),
         &ReceivePolicy::default(),
     )
     .with_hook(&())

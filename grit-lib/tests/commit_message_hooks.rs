@@ -198,10 +198,7 @@ fn merge(
 }
 
 fn with_message(message: &str) -> MergeOptions {
-    MergeOptions {
-        message: Some(message.into()),
-        ..MergeOptions::default()
-    }
+    MergeOptions::default().with_message(Some(message.into()))
 }
 
 #[test]
@@ -308,11 +305,9 @@ fn finishing_a_squash_or_merge_names_squash_or_merge() {
     diverged(&fx);
     let repo = fx.repo();
 
-    let squash = MergeOptions {
-        commit: MergeCommitMode::Squash,
-        hooks: PostOperationHooks::Skip,
-        ..MergeOptions::default()
-    };
+    let squash = MergeOptions::default()
+        .with_commit(MergeCommitMode::Squash)
+        .with_hooks(PostOperationHooks::Skip);
     assert_eq!(
         merge(&fx, &repo, &squash).expect("squash"),
         IntegrateBranchOutcome::Squashed
@@ -324,10 +319,7 @@ fn finishing_a_squash_or_merge_names_squash_or_merge() {
         .contains(&"prepare-commit-msg .git/COMMIT_EDITMSG squash mergehead=no".to_owned()));
 
     fx.git(&["reset", "-q", "--hard", "HEAD~1"]);
-    let no_commit = MergeOptions {
-        commit: MergeCommitMode::NoCommit,
-        ..MergeOptions::default()
-    };
+    let no_commit = MergeOptions::default().with_commit(MergeCommitMode::NoCommit);
     assert_eq!(
         merge(&fx, &repo, &no_commit).expect("no-commit"),
         IntegrateBranchOutcome::Stopped
@@ -387,15 +379,8 @@ fn committing_a_conflicted_merge_or_squash_names_its_source_like_git() {
         };
         let fx = Fixture::new();
         conflicting_side(&fx);
-        let outcome = merge(
-            &fx,
-            &fx.repo(),
-            &MergeOptions {
-                commit: mode,
-                ..MergeOptions::default()
-            },
-        )
-        .expect("merge");
+        let outcome =
+            merge(&fx, &fx.repo(), &MergeOptions::default().with_commit(mode)).expect("merge");
         assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
         let grit_line = prepare_line_after_resolving(&fx);
 
@@ -584,10 +569,7 @@ fn merge_no_verify_skips_pre_merge_commit_and_commit_msg_only() {
     fx.write_hook("commit-msg", "exit 1");
     let repo = fx.repo();
 
-    let options = MergeOptions {
-        verify: HookPolicy::SkipVerify,
-        ..MergeOptions::default()
-    };
+    let options = MergeOptions::default().with_verify(HookPolicy::SkipVerify);
     let outcome = merge(&fx, &repo, &options).expect("merge");
     assert!(matches!(outcome, IntegrateBranchOutcome::Merged { .. }));
     assert_eq!(

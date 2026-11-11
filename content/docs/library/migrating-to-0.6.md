@@ -144,6 +144,15 @@ Input structs that grow with new flags are `#[non_exhaustive]`, so struct litera
 | [`RewriteOptions`](rustdoc:grit_lib::revwalk::history::RewriteOptions) | `new(committer)` |
 | [`ApplyOptions`](rustdoc:grit_lib::revwalk::history::ApplyOptions) | `new(identity, reflog_message)` |
 | [`RebaseOntoOptions`](rustdoc:grit_lib::revwalk::history::RebaseOntoOptions) | `new(rewrite)` |
+| [`PushOptions`](rustdoc:grit_lib::remote::transfer::PushOptions), [`PushRefSpec`](rustdoc:grit_lib::remote::transfer::PushRefSpec), [`PullOptions`](rustdoc:grit_lib::porcelain::pull::PullOptions) | `default()` |
+| [`CloneOptions`](rustdoc:grit_lib::remote::clone::CloneOptions) | `new(url, dest)` |
+| [`CloneIntoOptions`](rustdoc:grit_lib::remote::clone::CloneIntoOptions) | `new(url)` |
+| [`ServeOptions`](rustdoc:grit_lib::remote::serve::ServeOptions), [`ReceivePolicy`](rustdoc:grit_lib::remote::serve::ReceivePolicy) | `default()` |
+| [`SwitchOptions`](rustdoc:grit_lib::porcelain::switch::SwitchOptions) | `new(mode)` |
+| [`RestoreOptions`](rustdoc:grit_lib::porcelain::restore::RestoreOptions) | `new(pathspecs)` |
+| [`MergeOptions`](rustdoc:grit_lib::merge::MergeOptions), [`StatusOptions`](rustdoc:grit_lib::status::StatusOptions), [`OwnershipContext`](rustdoc:grit_lib::ownership_check::OwnershipContext) | `default()` |
+
+`OwnershipContext` is no longer `Copy`; clone it where you need a second copy.
 
 ```rust
 // 0.5.x

@@ -582,16 +582,9 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     .remotes()
     .push_to(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
-        &[PushRefSpec {
-            src: Some(tag_outcome.oid),
-            src_ref: None,
-            dst: "refs/tags/v1-ann".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            ..Default::default()
-        }],
+        &[PushRefSpec::default()
+            .with_src(Some(tag_outcome.oid))
+            .with_dst("refs/tags/v1-ann".to_owned())],
         &PushOptions::default(),
         &mut NoProgress,
         &grit_lib::progress::CancelToken::never(),

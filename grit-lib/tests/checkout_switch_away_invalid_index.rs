@@ -59,11 +59,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
         .expect("resolve feature");
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode,
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(mode),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

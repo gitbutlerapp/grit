@@ -150,16 +150,9 @@ impl Drop for DaemonGuard {
 }
 
 fn spec(src: ObjectId, dst: &str) -> PushRefSpec {
-    PushRefSpec {
-        src: Some(src),
-        src_ref: None,
-        dst: dst.to_owned(),
-        force: false,
-        delete: false,
-        expected_old: None,
-        expect_absent: false,
-        ..Default::default()
-    }
+    PushRefSpec::default()
+        .with_src(Some(src))
+        .with_dst(dst.to_owned())
 }
 
 #[test]
@@ -212,10 +205,8 @@ fn push_options_are_delivered_to_receive_pack_hook_over_git_daemon() {
         return;
     }
 
-    let opts = PushOptions {
-        push_options: vec!["ci.skip".to_owned(), "reviewer=alice".to_owned()],
-        ..PushOptions::default()
-    };
+    let opts = PushOptions::default()
+        .with_push_options(vec!["ci.skip".to_owned(), "reviewer=alice".to_owned()]);
     let outcome = grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -325,10 +316,8 @@ fn push_options_are_delivered_to_receive_pack_hook_over_ssh() {
         return;
     }
 
-    let opts = PushOptions {
-        push_options: vec!["topic=feature".to_owned(), "notify".to_owned()],
-        ..PushOptions::default()
-    };
+    let opts = PushOptions::default()
+        .with_push_options(vec!["topic=feature".to_owned(), "notify".to_owned()]);
     let outcome = grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),
@@ -414,10 +403,7 @@ fn pushing_options_to_server_without_capability_errors_typed() {
         "server must not advertise push-options for this case"
     );
 
-    let opts = PushOptions {
-        push_options: vec!["ci.skip".to_owned()],
-        ..PushOptions::default()
-    };
+    let opts = PushOptions::default().with_push_options(vec!["ci.skip".to_owned()]);
     let err = grit_lib::repo::Repository::open(
         &local_git,
         &grit_lib::config::environment::RepositoryOptions::empty(),

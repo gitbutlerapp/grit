@@ -61,16 +61,14 @@ fn push(
 ) -> grit_lib::error::Result<PushOutcome> {
     let specs: Vec<PushRefSpec> = refs
         .iter()
-        .map(|dst| PushRefSpec {
-            src: Some(setup.commit),
-            dst: (*dst).to_owned(),
-            ..Default::default()
+        .map(|dst| {
+            PushRefSpec::default()
+                .with_src(Some(setup.commit))
+                .with_dst((*dst).to_owned())
         })
         .collect();
-    let opts = PushOptions {
-        push_options: push_options.iter().map(|o| (*o).to_owned()).collect(),
-        ..Default::default()
-    };
+    let opts = PushOptions::default()
+        .with_push_options(push_options.iter().map(|o| (*o).to_owned()).collect());
     grit_lib::repo::Repository::open(
         &setup.local.join(".git"),
         &grit_lib::config::environment::RepositoryOptions::empty(),

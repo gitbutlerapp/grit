@@ -661,14 +661,9 @@ fn serve_request(repo: &Repository, request_file: &str) -> Result<()> {
         .with_context(|| format!("read serve-clone request {}", req_path.display()))?;
     let mut input: &[u8] = &req;
     let mut sink = CountingWriter { bytes: 0 };
-    let mut opts = ServeOptions {
-        protocol: ProtocolVersion::V0,
-        stateless_rpc: true,
-        advertise_refs: false,
-        agent: String::new(),
-        hidden_refs: Vec::new(),
-        ..ServeOptions::default()
-    };
+    let mut opts = ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_stateless_rpc(true);
     let _summary = UploadPack::new(repo, &mut opts)
         .run(&mut input, &mut sink)
         .context("upload-pack serve-clone")?;

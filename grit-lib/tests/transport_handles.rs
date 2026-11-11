@@ -75,12 +75,10 @@ fn tracking_fetch() -> FetchOptions {
 }
 
 fn push_main(tip: ObjectId) -> Vec<PushRefSpec> {
-    vec![PushRefSpec {
-        src: Some(tip),
-        src_ref: Some("refs/heads/main".to_owned()),
-        dst: "refs/heads/main".to_owned(),
-        ..Default::default()
-    }]
+    vec![PushRefSpec::default()
+        .with_src(Some(tip))
+        .with_src_ref(Some("refs/heads/main".to_owned()))
+        .with_dst("refs/heads/main".to_owned())]
 }
 
 #[test]
@@ -330,11 +328,9 @@ impl Connection for SessionConnection {
 }
 
 fn serve_options() -> ServeOptions {
-    ServeOptions {
-        protocol: ProtocolVersion::V0,
-        agent: "grit/test".to_owned(),
-        ..ServeOptions::default()
-    }
+    ServeOptions::default()
+        .with_protocol(ProtocolVersion::V0)
+        .with_agent("grit/test".to_owned())
 }
 
 #[test]
@@ -386,12 +382,12 @@ fn remotes_fetch_from_and_push_to_a_connection_served_in_process() {
             .expect("receive-pack");
     });
     let mut specs = push_main(tip);
-    specs.push(PushRefSpec {
-        src: Some(tip),
-        src_ref: Some("refs/heads/main".to_owned()),
-        dst: "refs/heads/protected/x".to_owned(),
-        ..Default::default()
-    });
+    specs.push(
+        PushRefSpec::default()
+            .with_src(Some(tip))
+            .with_src_ref(Some("refs/heads/main".to_owned()))
+            .with_dst("refs/heads/protected/x".to_owned()),
+    );
     let pushed = local
         .remotes()
         .push_to(

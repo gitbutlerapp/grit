@@ -334,14 +334,11 @@ fn legacy_tree_modes_switch_and_merge_on_clean_tree() {
 
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: c2,
-                },
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: c2,
+            })
+            .with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -388,14 +385,11 @@ fn legacy_tree_modes_switch_still_blocks_real_worktree_edit() {
     let err = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: "main".into(),
-                    oid: c2,
-                },
-                dry_run: false,
-                hooks: PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: "main".into(),
+                oid: c2,
+            })
+            .with_hooks(PostOperationHooks::Skip),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

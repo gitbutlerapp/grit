@@ -181,11 +181,9 @@ impl HotPathsFixture {
     }
 
     pub fn bench_status_clean(&self) {
-        let opts = StatusOptions {
-            untracked: grit_lib::porcelain::status::UntrackedMode::No,
-            ahead_behind: false,
-            ..StatusOptions::default()
-        };
+        let opts = StatusOptions::default()
+            .with_untracked(grit_lib::porcelain::status::UntrackedMode::No)
+            .with_ahead_behind(false);
         let _ = status(
             &self.repo,
             &opts,
@@ -432,28 +430,20 @@ fn wide_tree_from_fraction(repo: &Repository, file_paths: &[String], fraction: f
 pub fn bench_switch_wide(fx: &HotPathsFixture) {
     switch_repository(
         &fx.repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "bench-wide".into(),
-                oid: fx.wide_switch_tip,
-            },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        &SwitchOptions::new(SwitchMode::Existing {
+            branch: "bench-wide".into(),
+            oid: fx.wide_switch_tip,
+        }),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("switch wide");
     switch_repository(
         &fx.repo,
-        &SwitchOptions {
-            mode: SwitchMode::Existing {
-                branch: "main".into(),
-                oid: fx.main_head_oid,
-            },
-            dry_run: false,
-            hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-        },
+        &SwitchOptions::new(SwitchMode::Existing {
+            branch: "main".into(),
+            oid: fx.main_head_oid,
+        }),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

@@ -222,11 +222,9 @@ fn assert_eol_only_rewrite_is_clean(
         .entries;
     assert!(entries.is_empty(), "{case}: phantom change {entries:?}");
 
-    let options = StatusOptions {
-        untracked: UntrackedMode::No,
-        stat_parallel_threads: Some(threads),
-        ..StatusOptions::default()
-    };
+    let options = StatusOptions::default()
+        .with_untracked(UntrackedMode::No)
+        .with_stat_parallel_threads(Some(threads));
     for run in 0..2 {
         let model = grit_repo
             .status()
@@ -303,10 +301,7 @@ fn eol_crlf_real_size_change_is_still_modified() {
     let model = grit_repo
         .status()
         .run(
-            &StatusOptions {
-                untracked: UntrackedMode::No,
-                ..StatusOptions::default()
-            },
+            &StatusOptions::default().with_untracked(UntrackedMode::No),
             &mut NullProgress,
             &CancelToken::never(),
         )

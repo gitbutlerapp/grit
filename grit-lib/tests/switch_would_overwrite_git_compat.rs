@@ -59,14 +59,10 @@ fn switch_local_changes_refusal_paths_match_git() {
     let err = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: other.clone(),
-                    oid: other_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: other.clone(),
+                oid: other_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -96,14 +92,10 @@ fn switch_untracked_refusal_paths_match_git() {
     let err = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: other,
-                    oid: other_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: other,
+                oid: other_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -139,14 +131,11 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
     let outcome = repo
         .checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: other.clone(),
-                    oid: other_oid,
-                },
-                dry_run: true,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: other.clone(),
+                oid: other_oid,
+            })
+            .with_dry_run(true),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -166,14 +155,10 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
     // Sanity: a real switch still works afterward.
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: other,
-                    oid: other_oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Run,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: other,
+                oid: other_oid,
+            }),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

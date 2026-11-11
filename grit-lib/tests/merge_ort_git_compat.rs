@@ -895,10 +895,7 @@ fn criss_cross_integrate_with_favor_matches_git_merge_tree() {
             cc.ours,
             cc.theirs,
             "theirs",
-            &MergeOptions {
-                favor,
-                ..MergeOptions::default()
-            },
+            &MergeOptions::default().with_favor(favor),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

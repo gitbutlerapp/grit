@@ -31,14 +31,11 @@ fn open(root: &Path) -> Repository {
 fn switch_to(repo: &Repository, branch: &str, oid: ObjectId) {
     repo.checkout()
         .switch(
-            &SwitchOptions {
-                mode: SwitchMode::Existing {
-                    branch: branch.into(),
-                    oid,
-                },
-                dry_run: false,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
+            &SwitchOptions::new(SwitchMode::Existing {
+                branch: branch.into(),
+                oid,
+            })
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
             &mut NullProgress,
             &CancelToken::never(),
         )
