@@ -4,6 +4,7 @@
 
 mod s7;
 
+use grit_lib::objects::FileMode;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -56,10 +57,12 @@ fn bench_tree_diff_siblings(c: &mut Criterion) {
         let mut new_root = Vec::new();
         for d in 0..400 {
             let mut entries: Vec<_> = (0..300)
-                .map(|f| TreeEntry {
-                    mode: 0o100644,
-                    name: format!("f{:03}-{f:04}", if repeated { 0 } else { d }).into_bytes(),
-                    oid: old_blob,
+                .map(|f| {
+                    TreeEntry::new(
+                        format!("f{:03}-{f:04}", if repeated { 0 } else { d }).into_bytes(),
+                        FileMode::REGULAR,
+                        old_blob,
+                    )
                 })
                 .collect();
             let old = odb
@@ -77,16 +80,16 @@ fn bench_tree_diff_siblings(c: &mut Criterion) {
                     &grit_lib::objects::serialize_tree(&entries),
                 )
                 .expect("tree");
-            old_root.push(TreeEntry {
-                mode: 0o040000,
-                name: format!("d{d:03}").into_bytes(),
-                oid: old,
-            });
-            new_root.push(TreeEntry {
-                mode: 0o040000,
-                name: format!("d{d:03}").into_bytes(),
-                oid: new,
-            });
+            old_root.push(TreeEntry::new(
+                format!("d{d:03}").into_bytes(),
+                FileMode::TREE,
+                old,
+            ));
+            new_root.push(TreeEntry::new(
+                format!("d{d:03}").into_bytes(),
+                FileMode::TREE,
+                new,
+            ));
         }
         let old = odb
             .write(
@@ -181,23 +184,7 @@ fn bench_index_to_tree_wide_root(c: &mut Criterion) {
 }
 
 fn index_entry(path: &str, oid: ObjectId) -> IndexEntry {
-    IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: 0o100644,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid,
-        flags: path.len().min(0xfff) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path.as_bytes().to_vec(), oid, FileMode::REGULAR)
 }
 
 fn bench_blob_myers_10k_lines(c: &mut Criterion) {

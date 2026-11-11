@@ -2,6 +2,7 @@
 
 #![cfg(windows)]
 
+use grit_lib::objects::FileMode;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
@@ -39,50 +40,26 @@ fn build_bare_source(tmp: &Path) -> PathBuf {
         .expect("ok blob");
     let t1 = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o100644,
-            name: b"x.txt".to_vec(),
-            oid: blob,
-        }])
+        .write_tree([TreeEntry::new(b"x.txt", FileMode::REGULAR, blob)])
         .expect("t1");
     let d = component_d();
     let t2 = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o040000,
-            name: d.clone(),
-            oid: t1,
-        }])
+        .write_tree([TreeEntry::new(d.clone(), FileMode::TREE, t1)])
         .expect("t2");
     let t3 = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o040000,
-            name: d.clone(),
-            oid: t2,
-        }])
+        .write_tree([TreeEntry::new(d.clone(), FileMode::TREE, t2)])
         .expect("t3");
     let t4 = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o040000,
-            name: d,
-            oid: t3,
-        }])
+        .write_tree([TreeEntry::new(d, FileMode::TREE, t3)])
         .expect("t4");
     let root = repo
         .objects()
         .write_tree([
-            TreeEntry {
-                mode: 0o100644,
-                name: b"ok.txt".to_vec(),
-                oid: ok_blob,
-            },
-            TreeEntry {
-                mode: 0o040000,
-                name: b"long".to_vec(),
-                oid: t4,
-            },
+            TreeEntry::new(b"ok.txt", FileMode::REGULAR, ok_blob),
+            TreeEntry::new(b"long", FileMode::TREE, t4),
         ])
         .expect("root");
     let sig = Signature::new(

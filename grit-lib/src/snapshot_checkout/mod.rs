@@ -851,7 +851,7 @@ fn lookup(odb: &Odb, tree: ObjectId, path: &[u8]) -> crate::error::Result<Option
         }
         let entries = parse_tree(&odb.read(&current.1)?.data)?;
         match entries.into_iter().find(|e| e.name == component) {
-            Some(e) => current = (e.mode, e.oid),
+            Some(e) => current = (e.mode.bits(), e.oid),
             None => return Ok(None),
         }
     }
@@ -894,10 +894,19 @@ impl Dir {
                 Node::Entry(mode, oid) => (mode, oid),
                 Node::Dir(dir) => (TREE_MODE, dir.write(odb)?),
             };
-            entries.push(TreeEntry { mode, name, oid });
+            entries.push(TreeEntry::new(
+                name,
+                crate::objects::FileMode::new(mode),
+                oid,
+            ));
         }
         entries.sort_by(|a, b| {
-            tree_name_cmp(&a.name, a.mode == TREE_MODE, &b.name, b.mode == TREE_MODE)
+            tree_name_cmp(
+                &a.name,
+                a.mode == crate::objects::FileMode::TREE,
+                &b.name,
+                b.mode == crate::objects::FileMode::TREE,
+            )
         });
         odb.write(ObjectKind::Tree, &serialize_tree(&entries))
     }
@@ -968,7 +977,7 @@ fn cut_tree(odb: &Odb, tree: ObjectId, paths: &[String], strict: bool) -> Result
             }
         };
         for entry in parse_tree(&odb.read(&oid)?.data)? {
-            if entry.mode == TREE_MODE {
+            if entry.mode == crate::objects::FileMode::TREE {
                 continue;
             }
             let path = if dir.is_empty() {
@@ -976,7 +985,7 @@ fn cut_tree(odb: &Odb, tree: ObjectId, paths: &[String], strict: bool) -> Result
             } else {
                 [dir, b"/", &entry.name].concat()
             };
-            root.insert(&path, entry.mode, entry.oid);
+            root.insert(&path, entry.mode.bits(), entry.oid);
         }
     }
     for p in paths {
@@ -1101,7 +1110,7 @@ fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize>
     let mut stack = vec![tree];
     while let Some(oid) = stack.pop() {
         for entry in parse_tree(&odb.read(&oid)?.data)? {
-            match entry.mode {
+            match entry.mode.bits() {
                 TREE_MODE => stack.push(entry.oid),
                 GITLINK_MODE => {}
                 _ if seen.insert(entry.oid) => blobs.push((entry.oid, oid)),
@@ -1156,7 +1165,7 @@ fn tree_stats(odb: &Odb, tree: ObjectId) -> crate::error::Result<(u64, u64)> {
     let mut stack = vec![tree];
     while let Some(oid) = stack.pop() {
         for entry in parse_tree(&odb.read(&oid)?.data)? {
-            match entry.mode {
+            match entry.mode.bits() {
                 TREE_MODE => stack.push(entry.oid),
                 GITLINK_MODE => {}
                 _ => {

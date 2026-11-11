@@ -6,6 +6,7 @@
 //! against [`MemoryStore`] and [`MemoryRefStore`], and nothing appears under the parent
 //! directory.
 
+use grit_lib::objects::FileMode;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -68,13 +69,14 @@ fn open_injected(git_dir: &Path) -> (Repository, Arc<MemoryStore>, Arc<MemoryRef
 fn write_file_tree(repo: &Repository, files: &[(&str, &str)]) -> ObjectId {
     let entries = files
         .iter()
-        .map(|(name, body)| TreeEntry {
-            mode: 0o100644,
-            name: name.as_bytes().to_vec(),
-            oid: repo
-                .objects()
-                .write(ObjectKind::Blob, body.as_bytes())
-                .expect("blob"),
+        .map(|(name, body)| {
+            TreeEntry::new(
+                name.as_bytes().to_vec(),
+                FileMode::REGULAR,
+                repo.objects()
+                    .write(ObjectKind::Blob, body.as_bytes())
+                    .expect("blob"),
+            )
         })
         .collect::<Vec<_>>();
     repo.objects().write_tree(entries).expect("tree")

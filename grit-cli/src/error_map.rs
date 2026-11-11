@@ -240,8 +240,10 @@ pub fn resolve_rebase_upstream_revision(
 #[must_use]
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
+        // A revision expression that names nothing reads as a revision lookup failure here;
+        // `grit merge` and `grit switch` say "no branch, tag or commit" through their own mappers.
         LibError::Revision(RevisionError::NotFound { spec }) => {
-            crate::json_error::revision_not_found(&spec)
+            crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
         }
         LibError::Ref(RefError::UnbornHead) => crate::unborn_errors::unborn_head_from_cwd()
             .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
@@ -359,10 +361,44 @@ pub fn map_commit_spec_error(err: LibError) -> Error {
 /// Map a library error from `grit switch` (includes in-progress operation hints from repo state).
 #[must_use]
 pub fn map_switch_lib_error(repo: &grit_lib::repo::Repository, err: LibError) -> Error {
-    if let LibError::Merge(MergeError::OperationInProgress(kind)) = err {
-        return operation_in_progress_for_repo(repo, "switch branches", kind);
+    match err {
+        LibError::Merge(MergeError::OperationInProgress(kind)) => {
+            operation_in_progress_for_repo(repo, "switch branches", kind)
+        }
+        LibError::Revision(RevisionError::NotFound { spec }) => {
+            crate::json_error::revision_not_found(&spec)
+        }
+        other => map_lib_error(other),
     }
-    map_lib_error(err)
+}
+
+/// Map a failure resolving the commit for `grit switch --detach <rev>` or the start point of
+/// `grit switch --create <branch> <rev>`.
+///
+/// A start point that names nothing reads `unknown revision '<rev>'`; other failures render
+/// like any library error.
+#[must_use]
+pub fn map_switch_start_point_error(err: LibError) -> Error {
+    match err {
+        LibError::Revision(RevisionError::NotFound { spec }) => {
+            Error::msg(format!("unknown revision '{spec}'"))
+        }
+        other => Error::new(other),
+    }
+}
+
+/// Map a failure resolving the commit `grit merge <rev>` brings in.
+///
+/// A name that resolves to nothing reads `no branch, tag or commit named '<rev>'` with the
+/// `revision_not_found` kind; other failures go through [`map_lib_error`].
+#[must_use]
+pub fn map_merge_source_error(err: LibError) -> Error {
+    match err {
+        LibError::Revision(RevisionError::NotFound { spec }) => {
+            crate::json_error::revision_not_found(&spec)
+        }
+        other => map_lib_error(other),
+    }
 }
 
 /// Map [`PullError`] after the remote reauth path during `grit pull`.

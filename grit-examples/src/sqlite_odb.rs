@@ -5,6 +5,7 @@
 
 use grit_lib::error::ObjectError;
 use grit_lib::error::RefError;
+use grit_lib::objects::FileMode;
 use std::io::{self, Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
@@ -584,11 +585,7 @@ pub fn run_sqlite_object_store_demo(repo_root: &Path) -> Result<Vec<String>> {
     )?;
 
     let blob = repo.odb().write(ObjectKind::Blob, b"hello sqlite odb\n")?;
-    let tree_body = serialize_tree(&[TreeEntry {
-        mode: 0o100644,
-        name: b"hello.txt".to_vec(),
-        oid: blob,
-    }]);
+    let tree_body = serialize_tree(&[TreeEntry::new(b"hello.txt", FileMode::REGULAR, blob)]);
     let tree = repo.odb().write(ObjectKind::Tree, &tree_body)?;
     let commit_body = format!(
         "tree {tree}\nauthor Demo <demo@example.com> 1 +0000\ncommitter Demo <demo@example.com> 1 +0000\n\nsqlite odb demo\n"

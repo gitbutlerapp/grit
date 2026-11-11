@@ -46,7 +46,7 @@ impl Odb {
             };
             if components.peek().is_none() {
                 return Ok(Some(TreeEntry {
-                    mode,
+                    mode: crate::objects::FileMode::new(mode),
                     name: name.to_vec(),
                     oid,
                 }));
@@ -65,7 +65,7 @@ impl Odb {
             SessionTree::Parsed(entries) => Ok(entries
                 .iter()
                 .find(|e| e.name == name)
-                .map(|e| (e.mode, e.oid))),
+                .map(|e| (e.mode.bits(), e.oid))),
             SessionTree::Raw(data) => {
                 for entry in TreeRefIter::with_oid_len(&data, self.hash_algo().len()) {
                     let entry = entry?;
@@ -93,9 +93,9 @@ mod tests {
         entries.sort_by(|a, b| {
             crate::objects::tree_name_cmp(
                 &a.name,
-                a.mode == MODE_TREE,
+                a.mode == crate::objects::FileMode::TREE,
                 &b.name,
-                b.mode == MODE_TREE,
+                b.mode == crate::objects::FileMode::TREE,
             )
         });
         odb.write(ObjectKind::Tree, &serialize_tree(&entries))
@@ -104,7 +104,7 @@ mod tests {
 
     fn entry(mode: u32, name: &[u8], oid: ObjectId) -> TreeEntry {
         TreeEntry {
-            mode,
+            mode: crate::objects::FileMode::new(mode),
             name: name.to_vec(),
             oid,
         }
@@ -162,11 +162,11 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .mode,
-            0o120000
+            crate::objects::FileMode::SYMLINK
         );
         assert_eq!(
             odb.tree_entry_at_path(&root, b"sub").unwrap().unwrap().mode,
-            0o160000
+            crate::objects::FileMode::GITLINK
         );
     }
 

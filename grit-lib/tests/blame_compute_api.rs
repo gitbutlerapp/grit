@@ -1,5 +1,6 @@
 //! Stable public signature for [`grit_lib::blame::compute_blame`].
 
+use grit_lib::objects::FileMode;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::process::Command;
@@ -331,11 +332,7 @@ fn ranged_blame_preserves_custom_primary_and_read_source_fallback() {
                 Default::default(),
             )
             .expect("blob");
-        let tree = serialize_tree(&[TreeEntry {
-            mode: 0o100644,
-            name: b"target.txt".to_vec(),
-            oid: blob,
-        }]);
+        let tree = serialize_tree(&[TreeEntry::new(b"target.txt", FileMode::REGULAR, blob)]);
         let tree = store
             .write(ObjectKind::Tree, &tree, Default::default())
             .expect("tree");

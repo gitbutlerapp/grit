@@ -22,6 +22,7 @@
 use crate::error::DiffError;
 use crate::error::ObjectError;
 use crate::error::RefError;
+use crate::objects::FileMode;
 use crate::worktree::WorktreeError;
 use std::ops::RangeInclusive;
 use std::sync::OnceLock;
@@ -1482,8 +1483,8 @@ fn resolve_path_in_tree_entry(
 ) -> Result<Option<(ObjectId, u32)>> {
     Ok(odb
         .tree_entry_at_path(tree_oid, &storage_bytes(path))?
-        .filter(|e| e.mode != 0o040000)
-        .map(|e| (e.oid, e.mode)))
+        .filter(|e| e.mode != FileMode::TREE)
+        .map(|e| (e.oid, e.mode.bits())))
 }
 
 /// Split content into lines. A final line without a trailing newline is still a line
@@ -2678,7 +2679,7 @@ impl<'a> BlameSession<'a> {
         let oid_len = self.odb.hash_algo().len();
         Ok(
             find_tree_entry_by_name_dir_or_file_in_data(&obj.data, oid_len, name)?
-                .map(|e| (e.oid, e.mode)),
+                .map(|e| (e.oid, e.mode.bits())),
         )
     }
 
@@ -4773,10 +4774,10 @@ fn collect_tree_file_entries(
     let entries = parse_tree(&obj.data)?;
     for entry in entries {
         let path = format_path_stored(prefix, &entry.name);
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             collect_tree_file_entries(odb, &entry.oid, &path, out)?;
         } else {
-            out.push((path, entry.oid, entry.mode));
+            out.push((path, entry.oid, entry.mode.bits()));
         }
     }
     Ok(())
@@ -6800,18 +6801,23 @@ mod tests {
         let filler = repo.odb().write(ObjectKind::Blob, b"1\n")?;
         let mut entries: Vec<TreeEntry> = (1..=60)
             .map(|i| TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: format!("f{i}.txt").into_bytes(),
                 oid: filler,
             })
             .collect();
         entries.push(TreeEntry {
-            mode: 0o040000,
+            mode: FileMode::TREE,
             name: b"sub".to_vec(),
             oid: sub_tree,
         });
         entries.sort_by(|a, b| {
-            tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+            tree_name_cmp(
+                &a.name,
+                a.mode == FileMode::TREE,
+                &b.name,
+                b.mode == FileMode::TREE,
+            )
         });
         let root_tree = repo
             .odb()
@@ -7027,7 +7033,7 @@ mod tests {
         for name in names {
             let oid = repo.odb().write(ObjectKind::Blob, name)?;
             entries.push(TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: name.to_vec(),
                 oid,
             });
@@ -7039,7 +7045,7 @@ mod tests {
         let root = repo.odb().write(
             ObjectKind::Tree,
             &serialize_tree(&[TreeEntry {
-                mode: 0o040000,
+                mode: FileMode::TREE,
                 name: b"dir\xff".to_vec(),
                 oid: subtree,
             }]),
@@ -7049,7 +7055,7 @@ mod tests {
         for entry in entries {
             let raw = crate::repo_relpath::join_rel(b"dir\xff", &entry.name);
             let stored = storage_string(&raw);
-            let expected = Some((entry.oid, entry.mode));
+            let expected = Some((entry.oid, entry.mode.bits()));
             assert_eq!(session.resolve_path_in_tree(root, &stored)?, expected);
             assert_eq!(
                 resolve_path_in_tree_entry(repo.odb(), &root, &stored)?,

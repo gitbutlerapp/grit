@@ -15,6 +15,7 @@
 #![allow(dead_code)]
 
 use crate::config::ConfigSet;
+use crate::objects::FileMode;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use std::collections::HashMap;
@@ -333,14 +334,14 @@ fn propagate_marks(
         };
         for ent in entries {
             // Skip gitlinks (submodule commits).
-            if ent.mode == crate::index::MODE_GITLINK {
+            if ent.mode == FileMode::GITLINK {
                 continue;
             }
             let before = islands.marks.get(&ent.oid).cloned();
             add_marks(&mut islands.marks, &ent.oid, &marks, bitmap_size);
             let after = islands.marks.get(&ent.oid).cloned();
             // Recurse into sub-trees whose marks changed.
-            if ent.mode == 0o040000 && (before != after || !tree_visited.contains(&ent.oid)) {
+            if ent.mode == FileMode::TREE && (before != after || !tree_visited.contains(&ent.oid)) {
                 let em = islands
                     .marks
                     .get(&ent.oid)

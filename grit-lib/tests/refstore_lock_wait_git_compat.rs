@@ -1,5 +1,6 @@
 //! System-git round-trip for concurrent disjoint ref updates (issue #2250).
 
+use grit_lib::objects::FileMode;
 use std::fs;
 use std::process::Command;
 use std::sync::Arc;
@@ -30,11 +31,7 @@ fn files_disjoint_ref_updates_git_show_ref_and_fsck() {
         .expect("blob");
     let tree = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o100644,
-            name: b"f".to_vec(),
-            oid: blob,
-        }])
+        .write_tree([TreeEntry::new(b"f", FileMode::REGULAR, blob)])
         .expect("tree");
     let commit = repo
         .objects()
@@ -90,11 +87,7 @@ fn git_creates_ref_over_stale_empty_directory_at_exact_ref_path() {
         .expect("blob");
     let tree = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o100644,
-            name: b"f".to_vec(),
-            oid: blob,
-        }])
+        .write_tree([TreeEntry::new(b"f", FileMode::REGULAR, blob)])
         .expect("tree");
     let commit = repo
         .objects()

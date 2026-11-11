@@ -1,5 +1,6 @@
 //! `restore_paths` compatibility with system `git`.
 
+use grit_lib::objects::FileMode;
 use grit_lib::worktree::WorktreeError;
 use std::fs;
 use std::os::unix::fs::symlink;
@@ -279,23 +280,7 @@ fn restore_removes_path_missing_in_source() {
         .index()
         .load(&grit_lib::index::IndexLoadOptions::default())
         .unwrap();
-    index.stage_file(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: 0o100644,
-        uid: 0,
-        gid: 0,
-        size: 2,
-        oid: blob,
-        flags: 8,
-        flags_extended: None,
-        path: b"gone.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index.stage_file(IndexEntry::new(b"gone.txt".to_vec(), blob, FileMode::REGULAR).with_size(2));
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .unwrap();

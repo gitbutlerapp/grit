@@ -549,7 +549,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"file-a".to_vec(),
                     oid: a,
                 }]),
@@ -559,7 +559,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"file-b".to_vec(),
                     oid: b,
                 }]),
@@ -601,7 +601,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"f.txt".to_vec(),
                     oid: a,
                 }]),
@@ -611,7 +611,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"f.txt".to_vec(),
                     oid: b,
                 }]),
@@ -687,7 +687,7 @@ mod tests {
         let tree_of = |version: &str, files: usize| {
             let entries: Vec<TreeEntry> = (0..files)
                 .map(|i| TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: format!("f{i:03}.txt").into_bytes(),
                     oid: odb
                         .write(
@@ -738,7 +738,7 @@ mod tests {
         let tree_old = odb.write(
             ObjectKind::Tree,
             &serialize_tree(&[TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: b"a.bin".to_vec(),
                 oid: old_oid,
             }]),
@@ -746,7 +746,7 @@ mod tests {
         let tree_new = odb.write(
             ObjectKind::Tree,
             &serialize_tree(&[TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: b"a.bin".to_vec(),
                 oid: new_oid,
             }]),
@@ -788,7 +788,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"f.bin".to_vec(),
                     oid: big_a,
                 }]),
@@ -798,7 +798,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"f.bin".to_vec(),
                     oid: big_b,
                 }]),
@@ -834,7 +834,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"g.bin".to_vec(),
                     oid: other,
                 }]),
@@ -844,7 +844,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"g.bin".to_vec(),
                     oid: at_threshold,
                 }]),
@@ -880,7 +880,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"h.bin".to_vec(),
                     oid: other,
                 }]),
@@ -890,7 +890,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"h.bin".to_vec(),
                     oid: under,
                 }]),
@@ -925,7 +925,7 @@ mod tests {
             odb.write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"f.txt".to_vec(),
                     oid,
                 }]),

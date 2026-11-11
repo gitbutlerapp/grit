@@ -941,7 +941,7 @@ fn tree_entry_at_path(
         .odb()
         .tree_entry_at_path(&tree, path.as_bytes())
         .map_err(crate::history::error::worktree_apply_engine)?;
-    Ok(entry.map(|e| (e.oid, e.mode)))
+    Ok(entry.map(|e| (e.oid, e.mode.bits())))
 }
 
 pub(crate) fn commit_tree_for_apply(

@@ -222,23 +222,11 @@ fn index_entry_json_shape() {
     use grit_lib::objects::{FileMode, ObjectId};
 
     let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("oid");
-    let entry = IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: FileMode::REGULAR.bits(),
-        uid: 0,
-        gid: 0,
-        size: 0,
+    let entry = IndexEntry::new(
+        b"src/main.rs".to_vec(),
         oid,
-        flags: 0,
-        flags_extended: None,
-        path: b"src/main.rs".to_vec(),
-        base_index_pos: 0,
-    };
+        FileMode::new(FileMode::REGULAR.bits()),
+    );
     let json = serde_json::to_value(&entry).expect("IndexEntry");
     assert_eq!(json["path"], "src/main.rs");
     assert_eq!(json["mode"], "100644");

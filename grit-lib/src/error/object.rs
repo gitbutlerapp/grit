@@ -44,6 +44,21 @@ pub enum ObjectError {
         oid: crate::objects::ObjectId,
     },
 
+    /// Writing a tree from the index needs the object an index entry points at, and the object
+    /// database does not have it (missing objects were not allowed for this write).
+    ///
+    /// Carries the entry so a report can name the path; a bare missing object is
+    /// [`Self::NotFound`].
+    #[error("object not found: {:o} {oid} at {path}", .mode.bits())]
+    MissingTreeMember {
+        /// Repository-relative path of the index entry (UTF-8 lossy).
+        path: String,
+        /// Mode the entry would have in the tree.
+        mode: crate::objects::FileMode,
+        /// The missing object.
+        oid: crate::objects::ObjectId,
+    },
+
     /// A partial-clone promisor object is not present locally and no fetcher ran.
     #[error("promised object not available locally: {oid}")]
     PromisedMissing {
@@ -300,6 +315,7 @@ impl ObjectError {
             Self::InvalidId { .. } => "invalid_object_id",
             Self::HashCollision { .. } => "hash_collision",
             Self::NotFound { .. } => "object_not_found",
+            Self::MissingTreeMember { .. } => "missing_tree_member",
             Self::PromisedMissing { .. } => "promised_object_missing",
             Self::PromisorFetchFailed { .. } => "promisor_fetch_failed",
             Self::PromisorFetchTooDeep { .. } => "promisor_fetch_too_deep",

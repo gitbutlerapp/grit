@@ -330,7 +330,7 @@ fn outside_files(
             prefix.push(b'/');
         }
         prefix.extend_from_slice(&entry.name);
-        if entry.mode == TREE_MODE {
+        if entry.mode == crate::objects::FileMode::new(TREE_MODE) {
             // A directory above a path is walked: files directly in it are
             // in the view, but its other directories are not.
             let selected = paths.iter().map(String::as_bytes).any(|p| {

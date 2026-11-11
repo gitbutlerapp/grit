@@ -970,7 +970,7 @@ mod tests {
             write_patch, write_patch_structured, DiffEntry, DiffOptions, PatchTextOptions,
             TreeDiffOptions,
         };
-        use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
+        use grit_lib::objects::{serialize_tree, FileMode, ObjectKind, TreeEntry};
         use grit_lib::repo::{InitOptions, Repository};
 
         fn repo_with_range() -> (tempfile::TempDir, Repository, Vec<DiffEntry>) {
@@ -986,11 +986,7 @@ mod tests {
                                 format!("{tag} {i}\nsecond line\n").as_bytes(),
                             )
                             .expect("blob");
-                        TreeEntry {
-                            mode: 0o100644,
-                            name: format!("dir/f{i}.txt").into_bytes(),
-                            oid,
-                        }
+                        TreeEntry::new(format!("dir/f{i}.txt").into_bytes(), FileMode::REGULAR, oid)
                     })
                     .collect();
                 odb.write(ObjectKind::Tree, &serialize_tree(&entries))

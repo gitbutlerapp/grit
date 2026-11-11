@@ -15,8 +15,8 @@ use grit_lib::diff::merge_trees::{
 };
 use grit_lib::error::ObjectError;
 use grit_lib::index::write_tree::write_tree_from_index;
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
-use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn commit_from_tree(
@@ -53,28 +53,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )?;
 
-    use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+    use grit_lib::index::{Index, IndexEntry};
 
     // Base commit on main: one file.
     let blob_a = repo.odb().write(ObjectKind::Blob, b"base\n")?;
     let mut index = Index::new();
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: blob_a,
-        flags: 7,
-        flags_extended: None,
-        path: b"base.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(IndexEntry::new(
+        b"base.txt".to_vec(),
+        blob_a,
+        FileMode::REGULAR,
+    ));
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     let index = repo
@@ -90,40 +78,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Topic commit: parent A, adds picked.txt (not on main yet).
     let blob_pick = repo.odb().write(ObjectKind::Blob, b"hello from topic\n")?;
     let mut index = Index::new();
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: blob_a,
-        flags: 7,
-        flags_extended: None,
-        path: b"base.txt".to_vec(),
-        base_index_pos: 0,
-    });
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: blob_pick,
-        flags: 9,
-        flags_extended: None,
-        path: b"picked.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(IndexEntry::new(
+        b"base.txt".to_vec(),
+        blob_a,
+        FileMode::REGULAR,
+    ));
+    index.add_or_replace(IndexEntry::new(
+        b"picked.txt".to_vec(),
+        blob_pick,
+        FileMode::REGULAR,
+    ));
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())?;
     let index = repo

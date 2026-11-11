@@ -4,6 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::porcelain::tag::TagError;
 use grit_lib::repo::{InitOptions, Repository};
@@ -414,11 +415,7 @@ fn unusual_regular_file_mode_is_hashed() {
     let blob = odb
         .write_loose_materialize(ObjectKind::Blob, b"payload\n")
         .unwrap();
-    let tree_body = serialize_tree(&[TreeEntry {
-        mode: 0o100664,
-        name: b"file.txt".to_vec(),
-        oid: blob,
-    }]);
+    let tree_body = serialize_tree(&[TreeEntry::new(b"file.txt", FileMode::new(0o100664), blob)]);
     let tree = odb
         .write_loose_materialize(ObjectKind::Tree, &tree_body)
         .unwrap();
@@ -445,16 +442,8 @@ fn non_utf8_and_backslash_tree_entry_names() {
         .write_loose_materialize(ObjectKind::Blob, b"b\n")
         .unwrap();
     let tree_body = serialize_tree(&[
-        TreeEntry {
-            mode: 0o100644,
-            name: b"non-utf8-\xff".to_vec(),
-            oid: blob_a,
-        },
-        TreeEntry {
-            mode: 0o100644,
-            name: b"back\\slash".to_vec(),
-            oid: blob_b,
-        },
+        TreeEntry::new(b"non-utf8-\xff", FileMode::REGULAR, blob_a),
+        TreeEntry::new(b"back\\slash", FileMode::REGULAR, blob_b),
     ]);
     let tree = odb
         .write_loose_materialize(ObjectKind::Tree, &tree_body)

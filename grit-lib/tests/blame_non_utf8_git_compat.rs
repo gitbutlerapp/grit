@@ -2,6 +2,7 @@
 #![cfg(unix)]
 #![allow(clippy::unwrap_used)]
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use std::ffi::OsStr;
@@ -417,22 +418,14 @@ fn grit_written_raw_path_objects_are_readable_by_git_blame() {
         .odb()
         .write(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: 0o100644,
-                name: b"raw\xff.txt".to_vec(),
-                oid: blob,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"raw\xff.txt", FileMode::REGULAR, blob)]),
         )
         .unwrap();
     let tree = repo
         .odb()
         .write(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: 0o040000,
-                name: b"dir\xfe".to_vec(),
-                oid: subtree,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"dir\xfe", FileMode::TREE, subtree)]),
         )
         .unwrap();
     let body = format!("tree {tree}\nauthor Tool <tool@example.com> 1700000000 +0000\ncommitter Tool <tool@example.com> 1700000000 +0000\n\ninitial\n");

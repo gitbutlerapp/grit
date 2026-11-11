@@ -42,14 +42,14 @@ pub fn run(
             commit: repo
                 .checkout()
                 .resolve_revision_spec(spec)
-                .map_err(anyhow::Error::new)?,
+                .map_err(crate::error_map::map_switch_start_point_error)?,
             reflog_to_label: spec.to_owned(),
         }
     } else if create {
         let branch = target.ok_or_else(|| anyhow::anyhow!("branch name required with --create"))?;
         repo.branches()
             .resolve_create_for_switch(&branch, start_point.as_deref(), track_mode(track, no_track))
-            .map_err(anyhow::Error::new)?
+            .map_err(crate::error_map::map_switch_start_point_error)?
     } else {
         let spec = target.ok_or_else(|| anyhow::anyhow!("branch or revision required"))?;
         repo.checkout()

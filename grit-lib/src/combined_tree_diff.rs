@@ -259,9 +259,9 @@ fn tree_entry_pathcmp(a: Option<&TreeEntry>, b: Option<&TreeEntry>) -> std::cmp:
         (Some(_), None) => std::cmp::Ordering::Less,
         (Some(e1), Some(e2)) => tree_name_cmp(
             &e1.name,
-            is_tree_mode(e1.mode),
+            is_tree_mode(e1.mode.bits()),
             &e2.name,
-            is_tree_mode(e2.mode),
+            is_tree_mode(e2.mode.bits()),
         ),
     }
 }
@@ -293,7 +293,7 @@ fn emit_combined_path(
             let tpi_valid = !parent_neq[i];
             let (mode_i, oid_i, status) = if tpi_valid {
                 let e = &tp[i][tp_idx[i]];
-                (e.mode, e.oid, CombinedParentStatus::Modified)
+                (e.mode.bits(), e.oid, CombinedParentStatus::Modified)
             } else {
                 (0u32, zero_oid(), CombinedParentStatus::Added)
             };
@@ -306,7 +306,7 @@ fn emit_combined_path(
         }
         let p = CombinedDiffPath {
             path,
-            merge_mode: te.mode,
+            merge_mode: te.mode.bits(),
             merge_oid: te.oid,
             parents,
         };
@@ -318,7 +318,7 @@ fn emit_combined_path(
             let tpi_valid = !parent_neq[i];
             let (mode_i, oid_i, status) = if tpi_valid {
                 let e = &tp[i][tp_idx[i]];
-                (e.mode, e.oid, CombinedParentStatus::Deleted)
+                (e.mode.bits(), e.oid, CombinedParentStatus::Deleted)
             } else {
                 (0u32, zero_oid(), CombinedParentStatus::Added)
             };
@@ -428,7 +428,7 @@ fn ll_diff_tree_paths(
                         format!("{base_path}/{name}")
                     };
 
-                    let isdir = is_tree_mode(te.mode);
+                    let isdir = is_tree_mode(te.mode.bits());
                     let mut do_emit = true;
                     if isdir && should_recurse_dir(&full_path, opt) {
                         do_emit = opt.tree_in_recursive;
@@ -456,9 +456,9 @@ fn ll_diff_tree_paths(
                             if let Some(pe) = tp_entries[i].get(tp_idx[i]) {
                                 if tree_name_cmp(
                                     &pe.name,
-                                    is_tree_mode(pe.mode),
+                                    is_tree_mode(pe.mode.bits()),
                                     &te.name,
-                                    is_tree_mode(te.mode),
+                                    is_tree_mode(te.mode.bits()),
                                 ) == std::cmp::Ordering::Equal
                                 {
                                     child_parent_opts[i] = Some(pe.oid);
@@ -495,7 +495,7 @@ fn ll_diff_tree_paths(
             } else {
                 format!("{base_path}/{name}")
             };
-            let isdir = is_tree_mode(te.mode);
+            let isdir = is_tree_mode(te.mode.bits());
             let mut do_emit = true;
             if isdir && should_recurse_dir(&full_path, opt) {
                 do_emit = opt.tree_in_recursive;
@@ -539,7 +539,7 @@ fn ll_diff_tree_paths(
                     } else {
                         format!("{base_path}/{name}")
                     };
-                    let isdir = is_tree_mode(pe.mode);
+                    let isdir = is_tree_mode(pe.mode.bits());
                     let mut do_emit = true;
                     if isdir && should_recurse_dir(&full_path, opt) {
                         do_emit = opt.tree_in_recursive;

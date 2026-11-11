@@ -2,6 +2,7 @@
 
 mod support;
 
+use grit_lib::objects::FileMode;
 use std::ffi::OsString;
 use std::fs;
 use std::path::Path;
@@ -186,41 +187,16 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
         index.hash_algo = repo.odb().hash_algo();
         for entry in parse_tree(&raw.data)? {
             let name = String::from_utf8_lossy(&entry.name).into_owned();
-            index.add_or_replace(IndexEntry {
-                ctime_sec: 0,
-                ctime_nsec: 0,
-                mtime_sec: 0,
-                mtime_nsec: 0,
-                dev: 0,
-                ino: 0,
-                mode: entry.mode,
-                uid: 0,
-                gid: 0,
-                size: 0,
-                oid: entry.oid,
-                flags: name.len().min(0xfff) as u16,
-                flags_extended: None,
-                path: name.as_bytes().to_vec(),
-                base_index_pos: 0,
-            });
+            index.add_or_replace(IndexEntry::new(
+                name.as_bytes().to_vec(),
+                entry.oid,
+                FileMode::new(entry.mode.bits()),
+            ));
         }
-        index.add_or_replace(IndexEntry {
-            ctime_sec: 0,
-            ctime_nsec: 0,
-            mtime_sec: 0,
-            mtime_nsec: 0,
-            dev: 0,
-            ino: 0,
-            mode: MODE_REGULAR,
-            uid: 0,
-            gid: 0,
-            size: content.len() as u32,
-            oid: blob,
-            flags: path.len().min(0xfff) as u16,
-            flags_extended: None,
-            path: path.as_bytes().to_vec(),
-            base_index_pos: 0,
-        });
+        index.add_or_replace(
+            IndexEntry::new(path.as_bytes().to_vec(), blob, FileMode::REGULAR)
+                .with_size(content.len() as u32),
+        );
         write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
     }
 

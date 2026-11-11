@@ -2597,7 +2597,7 @@ pub(crate) mod tests {
                 let entries: Vec<TreeEntry> = entries
                     .iter()
                     .map(|&(name, oid)| TreeEntry {
-                        mode: 0o100644,
+                        mode: crate::objects::FileMode::REGULAR,
                         name: name.as_bytes().to_vec(),
                         oid,
                     })

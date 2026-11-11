@@ -1,6 +1,7 @@
 //! Smoke test for parallel commit-tree structured diff (library path behind `grit diff A B`).
 
 use grit_lib::diff::{DiffOptions, TreeDiffOptions};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -12,11 +13,7 @@ fn write_tree(repo: &Repository, payloads: &[(&str, &str)]) -> grit_lib::objects
         .iter()
         .map(|(name, text)| {
             let oid = odb.write(ObjectKind::Blob, text.as_bytes()).expect("blob");
-            TreeEntry {
-                mode: 0o100644,
-                name: name.as_bytes().to_vec(),
-                oid,
-            }
+            TreeEntry::new(name.as_bytes().to_vec(), FileMode::REGULAR, oid)
         })
         .collect();
     odb.write(ObjectKind::Tree, &serialize_tree(&entries))

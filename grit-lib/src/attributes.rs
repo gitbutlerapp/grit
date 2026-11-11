@@ -17,6 +17,7 @@ use crate::index::MODE_REGULAR;
 use crate::index::MODE_SYMLINK;
 use crate::index::MODE_TREE;
 use crate::objects::parse_tree;
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::odb::Odb;
@@ -1190,10 +1191,12 @@ fn walk_tree_attrs_collect(
             format!("{prefix}/{name}")
         };
         match e.mode {
-            0o040000 => {
+            FileMode::TREE => {
                 walk_tree_attrs_collect(odb, &e.oid, &path, out)?;
             }
-            0o100644 | 0o100755 | 0o120000 if name == ".gitattributes" => {
+            FileMode::REGULAR | FileMode::EXECUTABLE | FileMode::SYMLINK
+                if name == ".gitattributes" =>
+            {
                 let oid = e.oid;
                 let blob = odb.read(&oid)?;
                 if blob.kind != ObjectKind::Blob {

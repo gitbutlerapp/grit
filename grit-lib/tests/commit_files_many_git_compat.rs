@@ -4,6 +4,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{CommitFilesManyOptions, DiffDetail, DiffOptions, RenameDetection};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{
     serialize_commit, serialize_tree, CommitData, ObjectId, ObjectKind, TreeEntry,
 };
@@ -41,28 +42,16 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
         invalid_text.extend_from_slice(format!("edit {i}\n").as_bytes());
         let invalid = repo.odb().write(ObjectKind::Blob, &invalid_text).unwrap();
         let mut entries = vec![
-            TreeEntry {
-                mode: 0o100644,
-                name: b"binary".to_vec(),
-                oid: binary,
-            },
-            TreeEntry {
-                mode: if i % 3 == 0 { 0o100755 } else { 0o100644 },
-                name: b"file".to_vec(),
-                oid: blob,
-            },
-            TreeEntry {
-                mode: 0o100644,
-                name: b"invalid".to_vec(),
-                oid: invalid,
-            },
+            TreeEntry::new(b"binary", FileMode::REGULAR, binary),
+            TreeEntry::new(
+                b"file",
+                FileMode::new(if i % 3 == 0 { 0o100755 } else { 0o100644 }),
+                blob,
+            ),
+            TreeEntry::new(b"invalid", FileMode::REGULAR, invalid),
         ];
         if i % 2 == 0 {
-            entries.push(TreeEntry {
-                mode: 0o100644,
-                name: b"extra".to_vec(),
-                oid: blob,
-            });
+            entries.push(TreeEntry::new(b"extra", FileMode::REGULAR, blob));
         }
         entries.sort_by(|a, b| a.name.cmp(&b.name));
         let tree = repo

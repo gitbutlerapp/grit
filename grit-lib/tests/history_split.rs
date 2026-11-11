@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::objects::FileMode;
 
 use std::process::Command;
 
@@ -286,16 +287,8 @@ fn split_in_bare_repository() {
         .write(grit_lib::objects::ObjectKind::Blob, b"y")
         .expect("blob");
     let tree_bytes = grit_lib::objects::serialize_tree(&[
-        grit_lib::objects::TreeEntry {
-            mode: 0o100644,
-            name: b"f".to_vec(),
-            oid: blob_f,
-        },
-        grit_lib::objects::TreeEntry {
-            mode: 0o100644,
-            name: b"g".to_vec(),
-            oid: blob_g,
-        },
+        grit_lib::objects::TreeEntry::new(b"f", FileMode::REGULAR, blob_f),
+        grit_lib::objects::TreeEntry::new(b"g", FileMode::REGULAR, blob_g),
     ]);
     let child_tree = grit
         .odb()
@@ -571,9 +564,9 @@ fn tree_has_path(grit: &Repository, tree: ObjectId, path: &str) -> bool {
             return false;
         };
         if i + 1 == parts.len() {
-            return entry.mode != grit_lib::index::MODE_TREE;
+            return entry.mode != FileMode::new(grit_lib::index::MODE_TREE);
         }
-        if entry.mode != grit_lib::index::MODE_TREE {
+        if entry.mode != FileMode::new(grit_lib::index::MODE_TREE) {
             return false;
         }
         current = entry.oid;

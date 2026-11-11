@@ -1876,7 +1876,7 @@ mod tests {
         let entries: Vec<crate::objects::TreeEntry> = entries
             .iter()
             .map(|&(mode, name, oid)| crate::objects::TreeEntry {
-                mode,
+                mode: crate::objects::FileMode::new(mode),
                 name: name.as_bytes().to_vec(),
                 oid,
             })

@@ -2,11 +2,12 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use grit_lib::diff::{CopyDetection, DiffStatus, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -41,23 +42,7 @@ fn write_commit(
 }
 
 fn index_entry(path: &str, oid: ObjectId) -> IndexEntry {
-    IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid,
-        flags: path.len().min(0xfff) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path.as_bytes().to_vec(), oid, FileMode::REGULAR)
 }
 
 #[test]

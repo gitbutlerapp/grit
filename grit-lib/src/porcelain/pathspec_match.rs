@@ -3,7 +3,7 @@
 use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
 use crate::git_path::pathspec_traverses_symlink_dir;
-use crate::index::{Index, MODE_TREE};
+use crate::index::Index;
 use crate::objects::{parse_tree, ObjectId};
 use crate::pathspec::{
     has_glob_chars, pathspec_has_attr_magic, pathspec_is_exclude, sorted_paths_match_pathspec,
@@ -360,7 +360,7 @@ fn collect_tree_paths(
         } else {
             format!("{prefix}/{name}")
         };
-        if entry.mode == MODE_TREE {
+        if entry.mode == crate::objects::FileMode::TREE {
             collect_tree_paths(repo, entry.oid, &path, out)?;
         } else {
             out.push(path);

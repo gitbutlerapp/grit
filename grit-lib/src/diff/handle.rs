@@ -75,18 +75,14 @@ impl<'repo> Diff<'repo> {
     ///
     /// ```rust
     /// use grit_lib::diff::{DiffStatus, RenameDetection, TreeDiffOptions};
-    /// use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
+    /// use grit_lib::objects::{serialize_tree, FileMode, ObjectKind, TreeEntry};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// # fn main() -> grit_lib::error::Result<()> {
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
     /// let blob = repo.odb().write(ObjectKind::Blob, b"one\ntwo\nthree\n")?;
     /// let tree = |name: &str| {
-    ///     let entry = TreeEntry {
-    ///         mode: 0o100644,
-    ///         name: name.as_bytes().to_vec(),
-    ///         oid: blob,
-    ///     };
+    ///     let entry = TreeEntry::new(name, FileMode::REGULAR, blob);
     ///     repo.odb().write(ObjectKind::Tree, &serialize_tree(&[entry]))
     /// };
     /// let (old, new) = (tree("a.txt")?, tree("b.txt")?);

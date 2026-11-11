@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use grit_lib::config::ConfigSet;
@@ -43,23 +44,7 @@ fn commit(odb: &Odb, tree: ObjectId, parent: Option<ObjectId>, n: u32) -> Object
 }
 
 fn index_entry(path: &str, oid: ObjectId) -> IndexEntry {
-    IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid,
-        flags: path.len().min(0xfff) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path.as_bytes().to_vec(), oid, FileMode::REGULAR)
 }
 
 #[test]

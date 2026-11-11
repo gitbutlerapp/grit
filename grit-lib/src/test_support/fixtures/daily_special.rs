@@ -609,10 +609,9 @@ fn materialize_loose_tip_objects(repo: &Repository, head: ObjectId, count: usize
 }
 
 fn collect_blob_oids(odb: &Odb, tree_oid: &ObjectId, out: &mut Vec<ObjectId>) -> Result<()> {
-    use crate::index::MODE_TREE;
     let tree_obj = odb.read(tree_oid)?;
     for entry in crate::objects::parse_tree(&tree_obj.data)? {
-        if entry.mode == MODE_TREE {
+        if entry.mode == crate::objects::FileMode::TREE {
             collect_blob_oids(odb, &entry.oid, out)?;
         } else {
             out.push(entry.oid);

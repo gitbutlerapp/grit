@@ -1,6 +1,7 @@
 //! Seeded three-way tree merge matrix vs `git merge-tree --write-tree`.
 
 use crate::support;
+use grit_lib::objects::FileMode;
 
 use std::fs;
 
@@ -30,21 +31,13 @@ fn empty_subtree_dir_entry_matches_git_merge_tree() {
     let ours_tree = odb
         .write(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: MODE_REGULAR,
-                name: b"dir".to_vec(),
-                oid: blob,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"dir", FileMode::REGULAR, blob)]),
         )
         .expect("ours tree");
     let theirs_tree = odb
         .write(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: MODE_DIR,
-                name: b"dir".to_vec(),
-                oid: base_tree,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"dir", FileMode::TREE, base_tree)]),
         )
         .expect("theirs tree");
     let base_commit = git_commit_tree(history.worktree(), &base_tree, &[], "empty base");

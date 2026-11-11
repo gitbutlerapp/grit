@@ -4,6 +4,7 @@
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::index::MODE_REGULAR;
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use std::hint::black_box;
@@ -25,25 +26,23 @@ fn content_merge_fixture() -> (TempDir, Repository, [ObjectId; 3]) {
                 format!("main head\n{body}"),
                 format!("{body}topic tail\n"),
             ]) {
-                entries.push(TreeEntry {
-                    mode: MODE_REGULAR,
-                    name: format!("f{f:04}.txt").into_bytes(),
-                    oid: repo
-                        .odb()
+                entries.push(TreeEntry::new(
+                    format!("f{f:04}.txt").into_bytes(),
+                    FileMode::REGULAR,
+                    repo.odb()
                         .write(ObjectKind::Blob, content.as_bytes())
                         .expect("blob"),
-                });
+                ));
             }
         }
         for (root, entries) in roots.iter_mut().zip(files) {
-            root.push(TreeEntry {
-                mode: 0o040000,
-                name: format!("d{d:04}").into_bytes(),
-                oid: repo
-                    .odb()
+            root.push(TreeEntry::new(
+                format!("d{d:04}").into_bytes(),
+                FileMode::TREE,
+                repo.odb()
                     .write(ObjectKind::Tree, &serialize_tree(&entries))
                     .expect("subtree"),
-            });
+            ));
         }
     }
     let trees = roots.map(|entries| {

@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
+use grit_lib::objects::FileMode;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -189,22 +190,16 @@ pub fn entry_from_worktree_path(repo: &Repository, path: &str, payload: &[u8]) -
         .odb()
         .write(grit_lib::objects::ObjectKind::Blob, payload)
         .expect("write blob");
-    IndexEntry {
-        ctime_sec: 1_700_000_000,
-        ctime_nsec: 0,
-        mtime_sec: 1_700_000_000,
-        mtime_nsec: 0,
-        dev: 1,
-        ino: 1,
-        mode: grit_lib::index::MODE_REGULAR,
-        uid: 1000,
-        gid: 1000,
-        size: payload.len() as u32,
-        oid,
-        flags: path.len().min(0xFFF) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
+    {
+        let mut entry = IndexEntry::new(path.as_bytes().to_vec(), oid, FileMode::REGULAR)
+            .with_ctime(1_700_000_000, 0)
+            .with_mtime(1_700_000_000, 0)
+            .with_size(payload.len() as u32);
+        entry.dev = 1;
+        entry.ino = 1;
+        entry.uid = 1000;
+        entry.gid = 1000;
+        entry
     }
 }
 

@@ -3,6 +3,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::objects::FileMode;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
@@ -24,23 +25,10 @@ fn history_commit_count() -> usize {
 }
 
 fn index_entry(path: &[u8], oid: grit_lib::objects::ObjectId, size: usize) -> IndexEntry {
-    IndexEntry {
-        ctime_sec: 1_700_000_000,
-        ctime_nsec: 0,
-        mtime_sec: 1_700_000_000,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: size as u32,
-        oid,
-        flags: (path.len().min(0xfff)) as u16,
-        flags_extended: None,
-        path: path.to_vec(),
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path.to_vec(), oid, FileMode::REGULAR)
+        .with_ctime(1_700_000_000, 0)
+        .with_mtime(1_700_000_000, 0)
+        .with_size(size as u32)
 }
 
 fn build_rebase_plan_fixture(

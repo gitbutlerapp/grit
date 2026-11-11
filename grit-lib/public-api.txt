@@ -6478,6 +6478,10 @@ pub grit_lib::error::ObjectError::LooseObjectWrite
 pub grit_lib::error::ObjectError::LooseObjectWrite::path: alloc::string::String
 pub grit_lib::error::ObjectError::LooseObjectWrite::source: core::io::error::Error
 pub grit_lib::error::ObjectError::Midx(grit_lib::error::MidxError)
+pub grit_lib::error::ObjectError::MissingTreeMember
+pub grit_lib::error::ObjectError::MissingTreeMember::mode: grit_lib::objects::FileMode
+pub grit_lib::error::ObjectError::MissingTreeMember::oid: grit_lib::objects::ObjectId
+pub grit_lib::error::ObjectError::MissingTreeMember::path: alloc::string::String
 pub grit_lib::error::ObjectError::NoPromisorRemote
 pub grit_lib::error::ObjectError::NoPromisorRemote::operation: &'static str
 pub grit_lib::error::ObjectError::NotFound
@@ -8056,7 +8060,6 @@ pub fn grit_lib::index::Index::clear_cache_tree(&mut self)
 pub fn grit_lib::index::Index::clear_fsmonitor_extension(&mut self)
 pub fn grit_lib::index::Index::clear_resolve_undo(&mut self)
 pub fn grit_lib::index::Index::dedup_paths_keep_last(&mut self)
-pub fn grit_lib::index::Index::dump_cache_tree(&self, &grit_lib::prelude::Odb) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::index::Index::empty(u32) -> Self
 pub fn grit_lib::index::Index::empty_for(&grit_lib::index::IndexParseOptions<'_>) -> Self
 pub fn grit_lib::index::Index::ensure_canonical_order(&mut self)
@@ -8064,7 +8067,6 @@ pub fn grit_lib::index::Index::entries(&self) -> &[grit_lib::index::IndexEntry]
 pub fn grit_lib::index::Index::entries_are_sorted(&self) -> bool
 pub fn grit_lib::index::Index::entries_mut(&mut self) -> &mut alloc::vec::Vec<grit_lib::index::IndexEntry>
 pub fn grit_lib::index::Index::expand_sparse_directory_placeholders(&mut self, &grit_lib::prelude::Odb, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::format_cache_tree_dump(&self) -> alloc::string::String
 pub fn grit_lib::index::Index::fsmonitor_validity_changed(&mut self)
 pub fn grit_lib::index::Index::get(&self, &[u8], u8) -> core::option::Option<&grit_lib::index::IndexEntry>
 pub fn grit_lib::index::Index::get_mut(&mut self, &[u8], u8) -> core::option::Option<&mut grit_lib::index::IndexEntry>
@@ -8132,13 +8134,10 @@ impl core::marker::Unpin for grit_lib::index::error::IndexCorrupt
 impl core::marker::UnsafeUnpin for grit_lib::index::error::IndexCorrupt
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::error::IndexCorrupt
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::error::IndexCorrupt
-pub struct grit_lib::index::IndexEntry
-pub grit_lib::index::IndexEntry::base_index_pos: u32
+#[non_exhaustive] pub struct grit_lib::index::IndexEntry
 pub grit_lib::index::IndexEntry::ctime_nsec: u32
 pub grit_lib::index::IndexEntry::ctime_sec: u32
 pub grit_lib::index::IndexEntry::dev: u32
-pub grit_lib::index::IndexEntry::flags: u16
-pub grit_lib::index::IndexEntry::flags_extended: core::option::Option<u16>
 pub grit_lib::index::IndexEntry::gid: u32
 pub grit_lib::index::IndexEntry::ino: u32
 pub grit_lib::index::IndexEntry::mode: u32
@@ -8153,14 +8152,20 @@ pub fn grit_lib::index::IndexEntry::assume_unchanged(&self) -> bool
 pub fn grit_lib::index::IndexEntry::fsmonitor_valid(&self) -> bool
 pub fn grit_lib::index::IndexEntry::intent_to_add(&self) -> bool
 pub fn grit_lib::index::IndexEntry::is_sparse_directory_placeholder(&self) -> bool
+pub fn grit_lib::index::IndexEntry::new(impl core::convert::Into<alloc::vec::Vec<u8>>, grit_lib::objects::ObjectId, grit_lib::objects::FileMode) -> Self
 pub fn grit_lib::index::IndexEntry::overlay_tree_skip_output(&self) -> bool
 pub fn grit_lib::index::IndexEntry::set_assume_unchanged(&mut self, bool)
 pub fn grit_lib::index::IndexEntry::set_fsmonitor_valid(&mut self, bool)
 pub fn grit_lib::index::IndexEntry::set_intent_to_add(&mut self, bool)
 pub fn grit_lib::index::IndexEntry::set_skip_worktree(&mut self, bool)
+pub fn grit_lib::index::IndexEntry::set_stage(&mut self, u8)
 pub fn grit_lib::index::IndexEntry::skip_worktree(&self) -> bool
 pub fn grit_lib::index::IndexEntry::stage(&self) -> u8
 pub fn grit_lib::index::IndexEntry::stat_cache_unset(&self) -> bool
+pub const fn grit_lib::index::IndexEntry::with_ctime(self, u32, u32) -> Self
+pub const fn grit_lib::index::IndexEntry::with_mtime(self, u32, u32) -> Self
+pub const fn grit_lib::index::IndexEntry::with_size(self, u32) -> Self
+pub fn grit_lib::index::IndexEntry::with_stage(self, u8) -> Self
 impl core::clone::Clone for grit_lib::index::IndexEntry
 pub fn grit_lib::index::IndexEntry::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::index::IndexEntry
@@ -8168,7 +8173,6 @@ impl core::cmp::PartialEq for grit_lib::index::IndexEntry
 pub fn grit_lib::index::IndexEntry::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::index::IndexEntry
 pub fn grit_lib::index::IndexEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::index::IndexEntry
 impl core::marker::Freeze for grit_lib::index::IndexEntry
 impl core::marker::Send for grit_lib::index::IndexEntry
 impl core::marker::Sync for grit_lib::index::IndexEntry
@@ -12876,7 +12880,7 @@ pub grit_lib::objects::TreeEntryError::HashAlgoMismatch::actual: grit_lib::objec
 pub grit_lib::objects::TreeEntryError::HashAlgoMismatch::expected: grit_lib::objects::HashAlgo
 pub grit_lib::objects::TreeEntryError::HashAlgoMismatch::name: alloc::vec::Vec<u8>
 pub grit_lib::objects::TreeEntryError::InvalidMode
-pub grit_lib::objects::TreeEntryError::InvalidMode::mode: u32
+pub grit_lib::objects::TreeEntryError::InvalidMode::mode: grit_lib::objects::FileMode
 pub grit_lib::objects::TreeEntryError::InvalidMode::name: alloc::vec::Vec<u8>
 pub grit_lib::objects::TreeEntryError::InvalidName
 pub grit_lib::objects::TreeEntryError::InvalidName::name: alloc::vec::Vec<u8>
@@ -13278,12 +13282,14 @@ impl core::marker::Unpin for grit_lib::objects::TagData
 impl core::marker::UnsafeUnpin for grit_lib::objects::TagData
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::TagData
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::TagData
-pub struct grit_lib::objects::TreeEntry
-pub grit_lib::objects::TreeEntry::mode: u32
+#[non_exhaustive] pub struct grit_lib::objects::TreeEntry
+pub grit_lib::objects::TreeEntry::mode: grit_lib::objects::FileMode
 pub grit_lib::objects::TreeEntry::name: alloc::vec::Vec<u8>
 pub grit_lib::objects::TreeEntry::oid: grit_lib::objects::ObjectId
 impl grit_lib::objects::TreeEntry
+pub const fn grit_lib::objects::TreeEntry::is_tree(&self) -> bool
 pub fn grit_lib::objects::TreeEntry::mode_str(&self) -> alloc::string::String
+pub fn grit_lib::objects::TreeEntry::new(impl core::convert::Into<alloc::vec::Vec<u8>>, grit_lib::objects::FileMode, grit_lib::objects::ObjectId) -> Self
 impl core::clone::Clone for grit_lib::objects::TreeEntry
 pub fn grit_lib::objects::TreeEntry::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::objects::TreeEntry
@@ -17407,7 +17413,6 @@ pub fn grit_lib::index::Index::clear_cache_tree(&mut self)
 pub fn grit_lib::index::Index::clear_fsmonitor_extension(&mut self)
 pub fn grit_lib::index::Index::clear_resolve_undo(&mut self)
 pub fn grit_lib::index::Index::dedup_paths_keep_last(&mut self)
-pub fn grit_lib::index::Index::dump_cache_tree(&self, &grit_lib::prelude::Odb) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::index::Index::empty(u32) -> Self
 pub fn grit_lib::index::Index::empty_for(&grit_lib::index::IndexParseOptions<'_>) -> Self
 pub fn grit_lib::index::Index::ensure_canonical_order(&mut self)
@@ -17415,7 +17420,6 @@ pub fn grit_lib::index::Index::entries(&self) -> &[grit_lib::index::IndexEntry]
 pub fn grit_lib::index::Index::entries_are_sorted(&self) -> bool
 pub fn grit_lib::index::Index::entries_mut(&mut self) -> &mut alloc::vec::Vec<grit_lib::index::IndexEntry>
 pub fn grit_lib::index::Index::expand_sparse_directory_placeholders(&mut self, &grit_lib::prelude::Odb, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::Index::format_cache_tree_dump(&self) -> alloc::string::String
 pub fn grit_lib::index::Index::fsmonitor_validity_changed(&mut self)
 pub fn grit_lib::index::Index::get(&self, &[u8], u8) -> core::option::Option<&grit_lib::index::IndexEntry>
 pub fn grit_lib::index::Index::get_mut(&mut self, &[u8], u8) -> core::option::Option<&mut grit_lib::index::IndexEntry>
@@ -22735,6 +22739,9 @@ pub grit_lib::remote::RemoteError::Protocol(grit_lib::remote::protocol::Protocol
 pub grit_lib::remote::RemoteError::PushAtomicUnsupported
 pub grit_lib::remote::RemoteError::PushOptionsUnsupported
 pub grit_lib::remote::RemoteError::PushPlan(grit_lib::remote::push_plan::PushPlanError)
+pub grit_lib::remote::RemoteError::PushSourceMissing
+pub grit_lib::remote::RemoteError::PushSourceMissing::dst: alloc::string::String
+pub grit_lib::remote::RemoteError::PushSourceMissing::oid: grit_lib::objects::ObjectId
 pub grit_lib::remote::RemoteError::ReceivedPackTempMissing
 pub grit_lib::remote::RemoteError::ReceivedPackTempMissing::path: std::path::PathBuf
 pub grit_lib::remote::RemoteError::RemoteExists

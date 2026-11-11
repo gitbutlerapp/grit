@@ -11,6 +11,7 @@
 //! contends.
 
 use grit_lib::error::RefError;
+use grit_lib::objects::FileMode;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{mpsc, Arc, Barrier};
@@ -510,11 +511,7 @@ fn files_concurrent_disjoint_ref_updates_through_repository_never_lock_held() {
         .expect("blob");
     let tree = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o100644,
-            name: b"f".to_vec(),
-            oid: blob,
-        }])
+        .write_tree([TreeEntry::new(b"f", FileMode::REGULAR, blob)])
         .expect("tree");
     let commit = repo
         .objects()

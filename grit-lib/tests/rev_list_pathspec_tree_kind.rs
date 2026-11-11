@@ -1,5 +1,6 @@
 //! Path-limited revision walks must not treat non-tree commit `tree` headers as trees.
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use std::process::Command;
@@ -18,11 +19,7 @@ fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
         .objects()
         .write(ObjectKind::Blob, b"tracked\n")
         .expect("blob");
-    let tree_body = serialize_tree(&[TreeEntry {
-        mode: 0o100644,
-        name: b"tracked.txt".to_vec(),
-        oid: blob_oid,
-    }]);
+    let tree_body = serialize_tree(&[TreeEntry::new(b"tracked.txt", FileMode::REGULAR, blob_oid)]);
     let tree_as_blob = repo
         .objects()
         .write(ObjectKind::Blob, &tree_body)

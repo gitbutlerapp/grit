@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use grit_lib::apply::parse_patch;
@@ -9,7 +10,7 @@ use grit_lib::blame::BlameOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{CopyDetection, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -176,23 +177,9 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
         .with_threads(Some(ThreadPolicy::default()));
     let _ = diff.tree_to_tree(Some(&t1), Some(&t2), &copies)?;
     let mut index = Index::new();
-    index.entries_mut().push(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: b2,
-        flags: 5,
-        flags_extended: None,
-        path: b"f.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index
+        .entries_mut()
+        .push(IndexEntry::new(b"f.txt".to_vec(), b2, FileMode::REGULAR));
     let head_tree = write_tree_from_index(repo.odb(), &index, "")?;
     let _ = diff.index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())?;
     let _ = diff.index_to_worktree(

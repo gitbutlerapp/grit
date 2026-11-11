@@ -386,7 +386,7 @@ mod tests {
         for (name, data) in entries {
             let oid = repo.odb().write(ObjectKind::Blob, data).expect("blob");
             tes.push(TreeEntry {
-                mode: 0o100644,
+                mode: crate::objects::FileMode::REGULAR,
                 name: name.as_bytes().to_vec(),
                 oid,
             });

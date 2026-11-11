@@ -10,7 +10,7 @@ use grit_lib::diff::{
     DiffStatus, DiffTarget, RenameDetection, SubmoduleIgnoreMode, TreeDiffOptions,
 };
 use grit_lib::error::{Error, RefError};
-use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_GITLINK, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{serialize_tree, FileMode, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
@@ -67,11 +67,7 @@ fn write_tree(repo: &Repository, files: &[(&str, String)]) -> ObjectId {
             .odb()
             .write(ObjectKind::Tree, &serialize_tree(&entries))
             .expect("subtree");
-        subtrees.push(TreeEntry {
-            mode: 0o040000,
-            name: dir.as_bytes().to_vec(),
-            oid,
-        });
+        subtrees.push(TreeEntry::new(dir.as_bytes().to_vec(), FileMode::TREE, oid));
     }
     let mut entries: Vec<TreeEntry> = root
         .get("")
@@ -91,7 +87,7 @@ fn write_tree(repo: &Repository, files: &[(&str, String)]) -> ObjectId {
 
 fn tree_sort_key(entry: &TreeEntry) -> Vec<u8> {
     let mut key = entry.name.clone();
-    if entry.mode == 0o040000 {
+    if entry.mode == FileMode::TREE {
         key.push(b'/');
     }
     key
@@ -102,11 +98,7 @@ fn blob_entry(repo: &Repository, name: &str, body: &str) -> TreeEntry {
         .odb()
         .write(ObjectKind::Blob, body.as_bytes())
         .expect("blob");
-    TreeEntry {
-        mode: 0o100644,
-        name: name.as_bytes().to_vec(),
-        oid,
-    }
+    TreeEntry::new(name.as_bytes().to_vec(), FileMode::REGULAR, oid)
 }
 
 fn write_commit(repo: &Repository, tree: ObjectId, parent: Option<ObjectId>) -> ObjectId {
@@ -410,11 +402,7 @@ fn tree_to_tree_submodules_all_drops_gitlinks() {
     let gitlink = |oid: ObjectId| {
         let entries = vec![
             blob_entry(&repo, "file.txt", "x\n"),
-            TreeEntry {
-                mode: 0o160000,
-                name: b"sub".to_vec(),
-                oid,
-            },
+            TreeEntry::new(b"sub", FileMode::GITLINK, oid),
         ];
         repo.odb()
             .write(ObjectKind::Tree, &serialize_tree(&entries))
@@ -535,23 +523,11 @@ fn index_to_tree_renames_pathspec_and_submodules() {
     assert!(clean.entries.is_empty());
 
     let mut with_gitlink = index.clone();
-    with_gitlink.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_GITLINK,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: fx.base_commit,
-        flags: 3,
-        flags_extended: None,
-        path: b"sub".to_vec(),
-        base_index_pos: 0,
-    });
+    with_gitlink.add_or_replace(IndexEntry::new(
+        b"sub".to_vec(),
+        fx.base_commit,
+        FileMode::GITLINK,
+    ));
     let shown = diff
         .index_to_tree(
             &with_gitlink,

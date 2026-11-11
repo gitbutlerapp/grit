@@ -1,5 +1,6 @@
 //! Parsed-tree cache and per-side directory metadata for three-way tree merges.
 
+use crate::objects::FileMode;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
@@ -74,7 +75,7 @@ fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> crate::index::IndexEntry 
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: te.mode,
+        mode: te.mode.bits(),
         uid: 0,
         gid: 0,
         size: 0,
@@ -109,7 +110,7 @@ pub(crate) fn lookup_index_entry_at_path_cached(
         if is_last {
             return Ok(Some(tree_entry_to_index(path, te)));
         }
-        if te.mode != MODE_DIR {
+        if te.mode != FileMode::TREE {
             return Ok(None);
         }
         current = te.oid;
@@ -143,7 +144,7 @@ pub(crate) fn tree_has_entries_with_path_prefix_cached(
             if name.len() > rest.len() && name.starts_with(rest) && name[rest.len()] == b'/' {
                 return Ok(true);
             }
-            if te.mode != MODE_DIR {
+            if te.mode != FileMode::TREE {
                 continue;
             }
             if name == rest {
@@ -212,7 +213,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &serialize_tree(&[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: b"file".to_vec(),
                     oid: blob,
                 }]),

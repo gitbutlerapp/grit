@@ -13,7 +13,6 @@ use crate::config::ConfigSet;
 use crate::error::RefError;
 use crate::error::{Error, Result};
 use crate::ident::Signature;
-use crate::index::MODE_TREE;
 use crate::merge_base;
 use crate::objects::{parse_commit, parse_tree, CommitRef, ObjectId, ObjectKind, OidHashMap};
 use crate::refs::store::{RefNameRef, RefStore as _, RefStoreError};
@@ -1175,7 +1174,7 @@ fn object_children(
         ObjectKind::Tree => {
             let mut subtrees = Vec::new();
             for entry in parse_tree(&obj.data).ok()? {
-                if entry.mode == MODE_TREE {
+                if entry.mode == crate::objects::FileMode::TREE {
                     subtrees.push((entry.oid, ObjectKind::Tree));
                 } else if !promised.contains(&entry.oid) && !repo.odb().exists(&entry.oid) {
                     return None;
@@ -2372,7 +2371,7 @@ mod completeness_tests {
         let entries = entries
             .iter()
             .map(|&(mode, name, oid)| TreeEntry {
-                mode,
+                mode: crate::objects::FileMode::new(mode),
                 name: name.as_bytes().to_vec(),
                 oid,
             })

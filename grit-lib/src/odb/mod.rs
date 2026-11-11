@@ -486,7 +486,7 @@ mod session_tree_entries_tests {
 
     fn tree(entries: usize) -> SessionTree {
         let entry = TreeEntry {
-            mode: 0o100644,
+            mode: crate::objects::FileMode::REGULAR,
             name: b"f".to_vec(),
             oid: ObjectId::zero(),
         };
@@ -4642,7 +4642,7 @@ mod tests {
             .write(
                 ObjectKind::Tree,
                 &crate::objects::serialize_tree(&[crate::objects::TreeEntry {
-                    mode: 0o100644,
+                    mode: crate::objects::FileMode::REGULAR,
                     name: b"f".to_vec(),
                     oid: blob,
                 }]),
@@ -4749,7 +4749,7 @@ mod tests {
         let (_dir, objects, small, _big) = bounded_read_fixture();
         let odb = Odb::new(&objects);
         let entries = [crate::objects::TreeEntry {
-            mode: 0o100644,
+            mode: crate::objects::FileMode::REGULAR,
             name: b"small".to_vec(),
             oid: small,
         }];

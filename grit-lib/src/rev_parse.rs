@@ -9,6 +9,7 @@ use crate::error::ObjectError;
 use crate::error::RefError;
 use crate::error::RevisionError;
 use crate::git_path::CanonicalizeExt;
+use crate::objects::FileMode;
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
@@ -1688,7 +1689,7 @@ fn resolve_tree_path_rev_parse(
                 // `test_submodule_content` relies on `rev-parse <commit>:sub1`.)
                 return Ok(entry.oid);
             }
-            if entry.mode != crate::index::MODE_TREE {
+            if entry.mode != FileMode::TREE {
                 return Err(TreePathError::NotInTree);
             }
             return resolve_tree_path_rev_parse(repo, &entry.oid, &rest.join("/"));
@@ -1805,7 +1806,7 @@ fn walk_tree_to_blob_entry(
         let name = String::from_utf8_lossy(&entry.name);
         if name == first {
             if rest.is_empty() {
-                if entry.mode == crate::index::MODE_TREE {
+                if entry.mode == FileMode::TREE {
                     return Err(Error::Ref(RefError::Invalid {
                         detail: format!("'{path}' is a tree, not a blob"),
                     })
@@ -1813,7 +1814,7 @@ fn walk_tree_to_blob_entry(
                 }
                 return Ok((entry.oid, entry.mode_str()));
             }
-            if entry.mode != crate::index::MODE_TREE {
+            if entry.mode != FileMode::TREE {
                 return Err(TreePathError::NotInTree);
             }
             return walk_tree_to_blob_entry(repo, &entry.oid, &rest.join("/"));
@@ -3512,7 +3513,7 @@ pub(crate) fn resolve_treeish_path_to_object(
         if idx + 1 == parts_vec.len() {
             return Ok(entry.oid);
         }
-        if entry.mode != crate::index::MODE_TREE {
+        if entry.mode != FileMode::TREE {
             return Err(Error::from(RevisionError::NotFound {
                 spec: path.to_owned(),
             }));

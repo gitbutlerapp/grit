@@ -936,7 +936,11 @@ fn decide_push_wire(
         }));
     };
     if !local_odb.contains(&src)? {
-        return Err(Error::Object(ObjectError::NotFound { oid: src }));
+        return Err(crate::remote::RemoteError::PushSourceMissing {
+            dst: spec.dst.clone(),
+            oid: src,
+        }
+        .into());
     }
 
     // New ref: nothing on the remote yet — always allowed.

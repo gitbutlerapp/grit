@@ -1,6 +1,7 @@
 //! Garbage collection and pruning on a custom primary store through
 //! [`PrunableObjectStore`], cross-checked against the files backend and the system `git`.
 
+use grit_lib::objects::FileMode;
 use std::collections::{BTreeSet, HashMap};
 use std::ffi::OsString;
 use std::ops::ControlFlow;
@@ -100,11 +101,7 @@ fn blob(repo: &Repository, data: &str) -> ObjectId {
 fn tree(repo: &Repository, entries: &[(&str, ObjectId)]) -> ObjectId {
     let entries: Vec<TreeEntry> = entries
         .iter()
-        .map(|(name, oid)| TreeEntry {
-            mode: 0o100644,
-            name: name.as_bytes().to_vec(),
-            oid: *oid,
-        })
+        .map(|(name, oid)| TreeEntry::new(name.as_bytes().to_vec(), FileMode::REGULAR, *oid))
         .collect();
     repo.odb()
         .write(ObjectKind::Tree, &serialize_tree(&entries))

@@ -1020,7 +1020,7 @@ mod tests {
                 .iter()
                 .enumerate()
                 .map(|(i, oid)| crate::objects::TreeEntry {
-                    mode: 0o100644,
+                    mode: crate::objects::FileMode::REGULAR,
                     name: format!("f{i}").into_bytes(),
                     oid: *oid,
                 })

@@ -16,7 +16,6 @@
 //! [`crate::push_report::PushRefStatus`] rather than redefining it.
 
 use crate::environment::RepositoryOptions;
-use crate::error::ObjectError;
 use crate::error::RefError;
 use crate::partial_clone::ObjectFilterSpec;
 use crate::worktree::WorktreeError;
@@ -2030,11 +2029,11 @@ fn collect_reachable_excluding_peer(
             }
             ObjectKind::Tree => {
                 for entry in parse_tree(&obj.data)? {
-                    if entry.mode == 0o160000 {
+                    if entry.mode == crate::objects::FileMode::GITLINK {
                         continue;
                     }
                     let path_hash = pack_name_hash_extend(prefix_hash, &entry.name);
-                    let queued = if entry.mode & 0o170000 == 0o040000 {
+                    let queued = if entry.mode.bits() & 0o170000 == 0o040000 {
                         let dir_hash = pack_name_hash_extend(path_hash, b"/");
                         enqueue(
                             entry.oid,
@@ -3551,7 +3550,11 @@ fn decide_push(
         }));
     };
     if !local_odb.contains(&src)? {
-        return Err(Error::Object(ObjectError::NotFound { oid: src }));
+        return Err(crate::remote::RemoteError::PushSourceMissing {
+            dst: spec.dst.clone(),
+            oid: src,
+        }
+        .into());
     }
 
     // Unchanged: the remote is already at the source.

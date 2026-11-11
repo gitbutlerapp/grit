@@ -14,6 +14,7 @@
 //! reftable, or an injected store) sees the same notes.
 
 use crate::error::NotesError;
+use crate::objects::FileMode;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 
@@ -109,7 +110,7 @@ fn collect_notes_tree_entries(
         }
         path.extend_from_slice(&entry.name);
 
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             collect_notes_tree_entries(
                 repo,
                 &entry.oid,
@@ -126,7 +127,7 @@ fn collect_notes_tree_entries(
             let counts = note_object_name(&path).is_some();
             if max_listable_notes.is_none() || counts {
                 out.push(NotesTreeEntry {
-                    mode: entry.mode,
+                    mode: entry.mode.bits(),
                     path,
                     oid: entry.oid,
                 });
@@ -360,7 +361,7 @@ fn classify_notes_tree(entries: &[TreeEntry]) -> NotesTreeLayout {
     let mut flat = false;
     let mut fanout = false;
     for entry in entries {
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             if is_fanout_tree_name(&entry.name) {
                 fanout = true;
             }
@@ -379,13 +380,20 @@ fn classify_notes_tree(entries: &[TreeEntry]) -> NotesTreeLayout {
 fn count_flat_note_entries(entries: &[TreeEntry]) -> usize {
     entries
         .iter()
-        .filter(|e| e.mode != 0o040000 && is_full_note_blob_name(&e.name))
+        .filter(|e| e.mode != FileMode::TREE && is_full_note_blob_name(&e.name))
         .count()
 }
 
 fn store_tree_entries(repo: &Repository, entries: &[TreeEntry]) -> Result<ObjectId> {
     let mut sorted = entries.to_vec();
-    sorted.sort_by(|a, b| tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+    sorted.sort_by(|a, b| {
+        tree_name_cmp(
+            &a.name,
+            a.mode == FileMode::TREE,
+            &b.name,
+            b.mode == FileMode::TREE,
+        )
+    });
     repo.odb().write(ObjectKind::Tree, &serialize_tree(&sorted))
 }
 
@@ -417,7 +425,7 @@ pub(crate) fn lookup_note_blob_oid(
         let entries = read_tree_entries(repo, &tree_oid)?;
         if let Some(entry) = entries
             .iter()
-            .find(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), &hex[offset..]))
+            .find(|e| e.mode != FileMode::TREE && hex_name_eq(e.name.as_slice(), &hex[offset..]))
         {
             return Ok(Some(entry.oid));
         }
@@ -427,7 +435,7 @@ pub(crate) fn lookup_note_blob_oid(
         let prefix = &hex[offset..offset + 2];
         let Some(child) = entries
             .iter()
-            .find(|e| e.mode == 0o040000 && hex_name_eq(e.name.as_slice(), prefix))
+            .find(|e| e.mode == FileMode::TREE && hex_name_eq(e.name.as_slice(), prefix))
         else {
             return Ok(None);
         };
@@ -457,7 +465,7 @@ pub(crate) fn splice_note_upsert(
         let tree = store_tree_entries(
             repo,
             &[TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: hex.to_vec(),
                 oid: blob_oid,
             }],
@@ -482,7 +490,7 @@ pub(crate) fn splice_note_upsert(
             } else {
                 let mut entries = root_entries;
                 entries.push(TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: hex.to_vec(),
                     oid: blob_oid,
                 });
@@ -530,14 +538,14 @@ pub(crate) fn splice_note_remove(
 fn find_note_in_flat_tree(entries: &[TreeEntry], hex: &[u8]) -> Option<(u32, ObjectId)> {
     entries
         .iter()
-        .find(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), hex))
-        .map(|e| (e.mode, e.oid))
+        .find(|e| e.mode != FileMode::TREE && hex_name_eq(e.name.as_slice(), hex))
+        .map(|e| (e.mode.bits(), e.oid))
 }
 
 fn replace_blob_in_entries(entries: &mut [TreeEntry], hex: &[u8], mode: u32, blob: ObjectId) {
     for entry in entries.iter_mut() {
-        if entry.mode != 0o040000 && hex_name_eq(entry.name.as_slice(), hex) {
-            entry.mode = mode;
+        if entry.mode != FileMode::TREE && hex_name_eq(entry.name.as_slice(), hex) {
+            entry.mode = FileMode::new(mode);
             entry.oid = blob;
             return;
         }
@@ -546,7 +554,7 @@ fn replace_blob_in_entries(entries: &mut [TreeEntry], hex: &[u8], mode: u32, blo
 
 fn remove_blob_named(entries: &mut Vec<TreeEntry>, name: &[u8]) -> bool {
     let before = entries.len();
-    entries.retain(|e| !(e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), name)));
+    entries.retain(|e| !(e.mode != FileMode::TREE && hex_name_eq(e.name.as_slice(), name)));
     entries.len() < before
 }
 
@@ -565,10 +573,9 @@ fn walk_note_for_upsert(
         if layout == NotesTreeLayout::Irregular {
             return Ok(None);
         }
-        if let Some(idx) = entries
-            .iter()
-            .position(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), &hex[offset..]))
-        {
+        if let Some(idx) = entries.iter().position(|e| {
+            e.mode != FileMode::TREE && hex_name_eq(e.name.as_slice(), &hex[offset..])
+        }) {
             if entries[idx].oid == blob_oid {
                 return Ok(Some(root_tree));
             }
@@ -583,7 +590,7 @@ fn walk_note_for_upsert(
             let prefix = &hex[offset..offset + 2];
             if let Some(child_idx) = entries
                 .iter()
-                .position(|e| e.mode == 0o040000 && hex_name_eq(e.name.as_slice(), prefix))
+                .position(|e| e.mode == FileMode::TREE && hex_name_eq(e.name.as_slice(), prefix))
             {
                 let child_oid = entries[child_idx].oid;
                 path.push(NoteTreeHop {
@@ -597,14 +604,14 @@ fn walk_note_for_upsert(
             let leaf = store_tree_entries(
                 repo,
                 &[TreeEntry {
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     name: hex[offset + 2..].to_vec(),
                     oid: blob_oid,
                 }],
             )?;
             let mut parent_entries = entries;
             parent_entries.push(TreeEntry {
-                mode: 0o040000,
+                mode: FileMode::TREE,
                 name: prefix.to_vec(),
                 oid: leaf,
             });
@@ -617,7 +624,7 @@ fn walk_note_for_upsert(
 
         let mut new_entries = entries;
         new_entries.push(TreeEntry {
-            mode: 0o100644,
+            mode: FileMode::REGULAR,
             name: hex[offset..].to_vec(),
             oid: blob_oid,
         });
@@ -638,10 +645,9 @@ fn walk_note_for_remove(
         if classify_notes_tree(&entries) == NotesTreeLayout::Irregular {
             return Ok(None);
         }
-        if let Some(idx) = entries
-            .iter()
-            .position(|e| e.mode != 0o040000 && hex_name_eq(e.name.as_slice(), &hex[offset..]))
-        {
+        if let Some(idx) = entries.iter().position(|e| {
+            e.mode != FileMode::TREE && hex_name_eq(e.name.as_slice(), &hex[offset..])
+        }) {
             let mut new_entries = entries;
             new_entries.remove(idx);
             return Ok(Some(rewrite_note_path_or_drop(repo, &path, new_entries)?));
@@ -652,7 +658,7 @@ fn walk_note_for_remove(
         let prefix = &hex[offset..offset + 2];
         let Some(child_idx) = entries
             .iter()
-            .position(|e| e.mode == 0o040000 && hex_name_eq(e.name.as_slice(), prefix))
+            .position(|e| e.mode == FileMode::TREE && hex_name_eq(e.name.as_slice(), prefix))
         else {
             return Ok(Some(root_tree));
         };
@@ -730,11 +736,15 @@ fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<
     let mut tree_entries = Vec::with_capacity(children.len());
     for (name, child) in children {
         match child {
-            NotesTreeChild::Blob { mode, oid } => tree_entries.push(TreeEntry { mode, name, oid }),
+            NotesTreeChild::Blob { mode, oid } => tree_entries.push(TreeEntry {
+                mode: FileMode::new(mode),
+                name,
+                oid,
+            }),
             NotesTreeChild::Tree(child_entries) => {
                 let oid = write_notes_subtree(repo, &child_entries)?;
                 tree_entries.push(TreeEntry {
-                    mode: 0o040000,
+                    mode: FileMode::TREE,
                     name,
                     oid,
                 });
@@ -742,8 +752,14 @@ fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<
         }
     }
 
-    tree_entries
-        .sort_by(|a, b| tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+    tree_entries.sort_by(|a, b| {
+        tree_name_cmp(
+            &a.name,
+            a.mode == FileMode::TREE,
+            &b.name,
+            b.mode == FileMode::TREE,
+        )
+    });
 
     let tree_data = serialize_tree(&tree_entries);
     repo.odb().write(ObjectKind::Tree, &tree_data)

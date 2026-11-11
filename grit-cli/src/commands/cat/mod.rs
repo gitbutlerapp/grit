@@ -129,8 +129,8 @@ fn build_content_for_kind(
                     let entries = parsed
                         .iter()
                         .map(|e| TreeLineJson {
-                            mode: tree_entry_mode_cat_file_p(e.mode),
-                            object_type: tree_entry_cat_file_type(e.mode).to_owned(),
+                            mode: tree_entry_mode_cat_file_p(e.mode.bits()),
+                            object_type: tree_entry_cat_file_type(e.mode.bits()).to_owned(),
                             oid: e.oid.to_hex(),
                             path: String::from_utf8_lossy(&e.name).into_owned(),
                         })

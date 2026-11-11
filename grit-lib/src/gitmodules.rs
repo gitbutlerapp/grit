@@ -6,6 +6,7 @@
 //! Submodule name and URL validation rules matching Git's (`check_submodule_name`,
 //! `check_submodule_url`).
 
+use crate::objects::FileMode;
 use std::collections::HashSet;
 use std::path::Path;
 use std::path::PathBuf;
@@ -121,7 +122,7 @@ pub(crate) fn fsck_dot_special_tree_pass(
         let Ok(name_str) = std::str::from_utf8(&name) else {
             continue;
         };
-        let is_symlink = mode == 0o120000;
+        let is_symlink = mode == FileMode::SYMLINK;
 
         if tree_entry_name_is_dot_gitmodules(name_str) {
             if is_symlink {
@@ -809,9 +810,9 @@ fn collect_gitmodules_blobs_from_tree(
         }
         let entries = parse_tree(&obj.data)?;
         for TreeEntry { mode, name, oid } in entries {
-            if tree_entry_is_gitmodules_blob(mode, &name) {
+            if tree_entry_is_gitmodules_blob(mode.bits(), &name) {
                 blobs.insert(oid);
-            } else if mode == 0o040000 {
+            } else if mode == FileMode::TREE {
                 stack.push(oid);
             }
         }

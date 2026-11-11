@@ -1,29 +1,17 @@
 //! Large-index read/write and mutation coverage (index.rs hot paths).
 
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn make_entry(path: &str, oid: ObjectId, stage: u8) -> IndexEntry {
-    let mut e = IndexEntry {
-        ctime_sec: 1,
-        ctime_nsec: 0,
-        mtime_sec: 1,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 4,
-        oid,
-        flags: path.len().min(0xFFF) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
-    };
-    e.flags = (e.flags & 0x0FFF) | ((stage as u16 & 3) << 12);
+    let mut e = IndexEntry::new(path.as_bytes().to_vec(), oid, FileMode::REGULAR)
+        .with_ctime(1, 0)
+        .with_mtime(1, 0)
+        .with_size(4);
+    e.set_stage(stage);
     e
 }
 

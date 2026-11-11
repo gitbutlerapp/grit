@@ -566,9 +566,9 @@ pub fn tree_entry_cat_file_type(mode: u32) -> &'static str {
 pub fn format_tree_entries_cat_file_p(entries: &[TreeEntry]) -> Vec<u8> {
     let mut out = Vec::new();
     for e in entries {
-        out.extend_from_slice(tree_entry_mode_cat_file_p(e.mode).as_bytes());
+        out.extend_from_slice(tree_entry_mode_cat_file_p(e.mode.bits()).as_bytes());
         out.push(b' ');
-        out.extend_from_slice(tree_entry_cat_file_type(e.mode).as_bytes());
+        out.extend_from_slice(tree_entry_cat_file_type(e.mode.bits()).as_bytes());
         out.push(b' ');
         out.extend_from_slice(e.oid.to_hex().as_bytes());
         out.push(b'\t');

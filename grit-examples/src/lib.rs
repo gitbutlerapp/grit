@@ -1,3 +1,4 @@
+use grit_lib::objects::FileMode;
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
@@ -59,12 +60,12 @@ fn append_tree_entries(
 
     for entry in parse_tree(&object.data)? {
         let path = prefix.join(String::from_utf8_lossy(&entry.name).as_ref());
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             append_tree_entries(repo, entry.oid, &path, entries)?;
         } else {
             entries.push(index_entry(
                 path.as_os_str().as_encoded_bytes().to_vec(),
-                entry.mode,
+                entry.mode.bits(),
                 entry.oid,
                 0,
                 0,
@@ -91,7 +92,7 @@ fn checkout_tree_at(repo: &Repository, tree_oid: ObjectId, dir: &Path) -> Result
 
     for entry in parse_tree(&object.data)? {
         let path = dir.join(String::from_utf8_lossy(&entry.name).as_ref());
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             checkout_tree_at(repo, entry.oid, &path)?;
             continue;
         }
@@ -103,7 +104,7 @@ fn checkout_tree_at(repo: &Repository, tree_oid: ObjectId, dir: &Path) -> Result
             fs::create_dir_all(parent)?;
         }
         fs::write(&path, blob.data)?;
-        if entry.mode == MODE_EXECUTABLE {
+        if entry.mode == FileMode::EXECUTABLE {
             let mut perms = fs::metadata(&path)?.permissions();
             perms.set_mode(0o755);
             fs::set_permissions(&path, perms)?;
@@ -120,23 +121,10 @@ pub fn index_entry(
     size: u32,
     mtime_sec: u32,
 ) -> IndexEntry {
-    IndexEntry {
-        ctime_sec: mtime_sec,
-        ctime_nsec: 0,
-        mtime_sec,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode,
-        uid: 0,
-        gid: 0,
-        size,
-        oid,
-        flags: (path.len().min(0xfff)) as u16,
-        flags_extended: None,
-        path,
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path, oid, FileMode::new(mode))
+        .with_ctime(mtime_sec, 0)
+        .with_mtime(mtime_sec, 0)
+        .with_size(size)
 }
 
 /// Stage one work-tree file in the index.

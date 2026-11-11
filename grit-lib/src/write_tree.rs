@@ -1,6 +1,7 @@
 //! Build tree objects from index entries (`git write-tree` core logic).
 
 use crate::error::ObjectError;
+use crate::objects::FileMode;
 use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
@@ -474,7 +475,7 @@ fn rebuild_directory_node(
         };
 
         if oid.is_zero() {
-            return Err(missing_member_error(&oid));
+            return Err(missing_member_error(mode, &oid, path));
         }
         let gitlink = mode == MODE_GITLINK;
         let allow_missing = gitlink || flags.missing_ok || (slash.is_none() && row.intent_to_add());
@@ -483,7 +484,7 @@ fn rebuild_directory_node(
         }
 
         members.push(TreeEntry {
-            mode,
+            mode: FileMode::new(mode),
             name: tail[..name_len].to_vec(),
             oid,
         });
@@ -493,14 +494,15 @@ fn rebuild_directory_node(
     if !unconfirmed.is_empty() {
         let oids: Vec<ObjectId> = unconfirmed.iter().map(|(oid, _, _)| *oid).collect();
         let present = odb.contains_many(&oids)?;
-        if let Some(((oid, _, _), _)) = unconfirmed.iter().zip(present).find(|(_, has)| !has) {
-            return Err(missing_member_error(oid));
+        if let Some(((oid, mode, path), _)) = unconfirmed.iter().zip(present).find(|(_, has)| !has)
+        {
+            return Err(missing_member_error(*mode, oid, path));
         }
     }
 
     members.sort_by(|a, b| {
-        let a_tree = a.mode == MODE_TREE;
-        let b_tree = b.mode == MODE_TREE;
+        let a_tree = a.mode == FileMode::TREE;
+        let b_tree = b.mode == FileMode::TREE;
         tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
     });
 
@@ -518,8 +520,12 @@ fn rebuild_directory_node(
     Ok((pos as i32, known_present))
 }
 
-fn missing_member_error(oid: &ObjectId) -> Error {
-    Error::Object(ObjectError::NotFound { oid: *oid })
+fn missing_member_error(mode: u32, oid: &ObjectId, path: &[u8]) -> Error {
+    Error::Object(ObjectError::MissingTreeMember {
+        path: String::from_utf8_lossy(path).into_owned(),
+        mode: FileMode::new(mode),
+        oid: *oid,
+    })
 }
 
 /// Whether `node` and every descendant are valid and their trees are in `reusable`.
@@ -770,6 +776,7 @@ pub fn write_tree_from_index(
 /// # Errors
 ///
 /// Returns an error if tree object creation fails.
+#[cfg(test)]
 pub(crate) fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTreeNode> {
     ensure_empty_blob_for_intent_to_add(odb, index)?;
     let mut entries: Vec<&IndexEntry> = index
@@ -807,7 +814,7 @@ fn build_cache_tree_from_tree_named(
     let mut entry_count: i32 = 0;
     let mut children: Vec<CacheTreeNode> = Vec::new();
     for te in entries {
-        if te.mode == MODE_TREE {
+        if te.mode == FileMode::TREE {
             let child = build_cache_tree_from_tree_named(odb, &te.oid, te.name.clone())?;
             entry_count = entry_count.saturating_add(child.entry_count.max(0));
             children.push(child);
@@ -901,11 +908,15 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     let mut tree_entries = Vec::with_capacity(children.len());
     for (name, child) in children {
         match child {
-            ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry { mode, name, oid }),
+            ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry {
+                mode: FileMode::new(mode),
+                name,
+                oid,
+            }),
             ChildKind::Tree(sub_prefix, sub_entries) => {
                 let sub_oid = build_tree(odb, &sub_entries, &sub_prefix)?;
                 tree_entries.push(TreeEntry {
-                    mode: MODE_TREE,
+                    mode: FileMode::TREE,
                     name,
                     oid: sub_oid,
                 });
@@ -914,8 +925,8 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     }
 
     tree_entries.sort_by(|a, b| {
-        let a_tree = a.mode == MODE_TREE;
-        let b_tree = b.mode == MODE_TREE;
+        let a_tree = a.mode == FileMode::TREE;
+        let b_tree = b.mode == FileMode::TREE;
         tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
     });
 
@@ -923,6 +934,7 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     odb.write(ObjectKind::Tree, &data)
 }
 
+#[cfg(test)]
 fn build_cache_tree_node(
     odb: &Odb,
     dir_prefix: &[u8],
@@ -964,7 +976,7 @@ fn build_cache_tree_node(
     for (child_name, child) in children {
         match child {
             ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry {
-                mode,
+                mode: FileMode::new(mode),
                 name: child_name,
                 oid,
             }),
@@ -977,7 +989,7 @@ fn build_cache_tree_node(
                     )))
                 })?;
                 tree_entries.push(TreeEntry {
-                    mode: MODE_TREE,
+                    mode: FileMode::TREE,
                     name: child_name,
                     oid,
                 });
@@ -987,8 +999,8 @@ fn build_cache_tree_node(
     }
 
     tree_entries.sort_by(|a, b| {
-        let a_tree = a.mode == MODE_TREE;
-        let b_tree = b.mode == MODE_TREE;
+        let a_tree = a.mode == FileMode::TREE;
+        let b_tree = b.mode == FileMode::TREE;
         tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
     });
     cache_children.sort_by(|a, b| a.name.cmp(&b.name));
@@ -1043,7 +1055,7 @@ pub(crate) fn write_tree_partial_from_index(
             let fp = full_path(prefix, &te.name);
             if !path_index.subtree_touched(&fp) {
                 by_name.insert(te.name.clone(), te);
-            } else if te.mode == MODE_TREE {
+            } else if te.mode == FileMode::TREE {
                 if path_index.contains(&fp) && !index_has_entry_under(index, &fp) {
                     continue;
                 }
@@ -1054,7 +1066,7 @@ pub(crate) fn write_tree_partial_from_index(
                 by_name.insert(
                     te.name.clone(),
                     TreeEntry {
-                        mode: MODE_TREE,
+                        mode: FileMode::TREE,
                         name: te.name,
                         oid: sub_oid,
                     },
@@ -1066,7 +1078,7 @@ pub(crate) fn write_tree_partial_from_index(
                     by_name.insert(
                         te.name.clone(),
                         TreeEntry {
-                            mode: canonicalize_blob_mode(ie.mode),
+                            mode: FileMode::new(canonicalize_blob_mode(ie.mode)),
                             name: te.name,
                             oid: ie.oid,
                         },
@@ -1106,7 +1118,7 @@ pub(crate) fn write_tree_partial_from_index(
                 by_name.insert(
                     dir_name.clone(),
                     TreeEntry {
-                        mode: MODE_TREE,
+                        mode: FileMode::TREE,
                         name: dir_name,
                         oid: sub_oid,
                     },
@@ -1117,7 +1129,7 @@ pub(crate) fn write_tree_partial_from_index(
                     by_name.insert(
                         name.clone(),
                         TreeEntry {
-                            mode: canonicalize_blob_mode(ie.mode),
+                            mode: FileMode::new(canonicalize_blob_mode(ie.mode)),
                             name,
                             oid: ie.oid,
                         },
@@ -1128,8 +1140,8 @@ pub(crate) fn write_tree_partial_from_index(
 
         let mut out: Vec<TreeEntry> = by_name.into_values().collect();
         out.sort_by(|a, b| {
-            let a_tree = a.mode == MODE_TREE;
-            let b_tree = b.mode == MODE_TREE;
+            let a_tree = a.mode == FileMode::TREE;
+            let b_tree = b.mode == FileMode::TREE;
             tree_name_cmp(&a.name, a_tree, &b.name, b_tree)
         });
         let data = serialize_tree(&out);
@@ -1173,7 +1185,7 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
-    use crate::index::{IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK, MODE_TREE};
+    use crate::index::{IndexEntry, MODE_REGULAR, MODE_TREE};
     use crate::objects::parse_tree;
     use tempfile::TempDir;
 
@@ -1339,7 +1351,14 @@ mod tests {
         let mut index = Index::new();
         index.add_or_replace(entry("gone", MODE_REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
-        assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
+        assert!(
+            matches!(&err, Error::Object(ObjectError::MissingTreeMember { path, oid, .. }) if path == "gone" && *oid == missing),
+            "{err:?}"
+        );
+        assert_eq!(
+            err.to_string(),
+            "object not found: 100644 0000000000000000000000000000000000000001 at gone"
+        );
     }
 
     #[test]
@@ -1360,7 +1379,10 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
+        assert!(
+            matches!(&err, Error::Object(ObjectError::MissingTreeMember { path, oid, .. }) if path == "sub" && *oid == zero),
+            "{err:?}"
+        );
     }
 
     #[test]
@@ -1503,17 +1525,17 @@ mod tests {
 
         assert_eq!(root_entries.len(), 3);
         assert_eq!(root_entries[0].name, b"a.txt");
-        assert_eq!(root_entries[0].mode, MODE_REGULAR);
+        assert_eq!(root_entries[0].mode, FileMode::REGULAR);
         assert_eq!(root_entries[1].name, b"bin");
-        assert_eq!(root_entries[1].mode, MODE_TREE);
+        assert_eq!(root_entries[1].mode, FileMode::TREE);
         assert_eq!(root_entries[2].name, b"link");
-        assert_eq!(root_entries[2].mode, MODE_SYMLINK);
+        assert_eq!(root_entries[2].mode, FileMode::SYMLINK);
 
         let bin_tree_obj = odb.read(&root_entries[1].oid).unwrap();
         let bin_entries = parse_tree(&bin_tree_obj.data).unwrap();
         assert_eq!(bin_entries.len(), 1);
         assert_eq!(bin_entries[0].name, b"run.sh");
-        assert_eq!(bin_entries[0].mode, MODE_EXECUTABLE);
+        assert_eq!(bin_entries[0].mode, FileMode::EXECUTABLE);
     }
 
     #[test]
@@ -1608,6 +1630,21 @@ mod tests {
             .find(|c| c.name == name)
             .and_then(|c| c.oid)
             .unwrap()
+    }
+
+    #[test]
+    fn dump_cache_tree_matches_stored_tree_when_current() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let mut index = build_nested_index(&odb);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let stored = index.format_cache_tree_dump();
+        let dump = index.dump_cache_tree(&odb).unwrap();
+        assert!(
+            dump.contains(" beta/four/ (1 entries, 0 subtrees)\n"),
+            "{dump}"
+        );
+        assert_eq!(dump, stored);
     }
 
     fn build_nested_index(odb: &Odb) -> Index {
@@ -1750,7 +1787,7 @@ mod tests {
         index.add_or_replace(entry("beta/three", MODE_REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(
-            matches!(&err, Error::Object(ObjectError::NotFound { oid }) if *oid == missing),
+            matches!(&err, Error::Object(ObjectError::MissingTreeMember { oid, path, .. }) if *oid == missing && path == "beta/three"),
             "{err:?}"
         );
     }
@@ -1971,8 +2008,8 @@ mod tests {
         assert_eq!(top.len(), 2);
         let a_entry = top.iter().find(|e| e.name == b"a").expect("dir a");
         let a0_entry = top.iter().find(|e| e.name == b"a0").expect("dir a0");
-        assert_eq!(a_entry.mode, MODE_TREE);
-        assert_eq!(a0_entry.mode, MODE_TREE);
+        assert_eq!(a_entry.mode, FileMode::TREE);
+        assert_eq!(a0_entry.mode, FileMode::TREE);
 
         let a_tree = parse_tree(&odb.read(&a_entry.oid).unwrap().data).unwrap();
         assert_eq!(a_tree.len(), 1);

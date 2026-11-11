@@ -132,16 +132,16 @@ pub fn flatten_tree_full(
         crate::path_population::validate_tree_walk_entry(
             prefix.as_bytes(),
             &entry.name,
-            entry.mode,
+            entry.mode.bits(),
             protect,
         )?;
-        if entry.mode == 0o40000 {
+        if entry.mode == FileMode::TREE {
             let sub = flatten_tree_full(odb, &entry.oid, &full_path, protect)?;
             result.extend(sub);
         } else {
             result.push(FlatTreeEntry {
                 path: full_path,
-                mode: entry.mode,
+                mode: entry.mode.bits(),
                 oid: entry.oid,
             });
         }
@@ -188,14 +188,19 @@ fn flatten_tree_full_raw(
         } else {
             crate::repo_relpath::join_rel(prefix, &entry.name)
         };
-        crate::path_population::validate_tree_walk_entry(prefix, &entry.name, entry.mode, protect)?;
-        if entry.mode == 0o40000 {
+        crate::path_population::validate_tree_walk_entry(
+            prefix,
+            &entry.name,
+            entry.mode.bits(),
+            protect,
+        )?;
+        if entry.mode == FileMode::TREE {
             let sub = flatten_tree_full_raw(odb, &entry.oid, &full_path, protect)?;
             result.extend(sub);
         } else {
             result.push(RawFlatTreeEntry {
                 path: full_path,
-                mode: entry.mode,
+                mode: entry.mode.bits(),
                 oid: entry.oid,
             });
         }
@@ -290,10 +295,10 @@ fn stash_tree_entry_at_path(
     Ok(repo
         .odb()
         .tree_entry_at_path(&tree, path)?
-        .filter(|entry| entry.mode != MODE_TREE)
+        .filter(|entry| entry.mode != FileMode::TREE)
         .map(|entry| StashTreeEntry {
             path: path.to_owned(),
-            mode: entry.mode,
+            mode: entry.mode.bits(),
             oid: entry.oid,
         }))
 }
@@ -3953,18 +3958,18 @@ mod coverage_tests {
         };
         let stable = tree(
             (0..20_000)
-                .map(|i| leaf(&format!("f{i:05}"), MODE_REGULAR, blob))
+                .map(|i| leaf(&format!("f{i:05}"), FileMode::REGULAR, blob))
                 .collect(),
         );
         let base = tree(vec![
-            leaf("edited", MODE_REGULAR, blob),
-            leaf("removed", MODE_REGULAR, blob),
-            leaf("stable", MODE_TREE, stable),
+            leaf("edited", FileMode::REGULAR, blob),
+            leaf("removed", FileMode::REGULAR, blob),
+            leaf("stable", FileMode::TREE, stable),
         ]);
         let other = tree(vec![
-            leaf("added", MODE_REGULAR, changed),
-            leaf("edited", 0o100755, changed),
-            leaf("stable", MODE_TREE, stable),
+            leaf("added", FileMode::REGULAR, changed),
+            leaf("edited", FileMode::EXECUTABLE, changed),
+            leaf("stable", FileMode::TREE, stable),
         ]);
         let delta = StashTreeDelta::read(&repo, &base, &other).unwrap();
         assert_eq!(delta.base.len(), 2);
@@ -3991,13 +3996,12 @@ mod coverage_tests {
                 .oid,
             blob
         );
-        let bad = tree(vec![leaf(".git", MODE_REGULAR, changed)]);
+        let bad = tree(vec![leaf(".git", FileMode::REGULAR, changed)]);
         assert!(StashTreeDelta::read(&repo, &base, &bad).is_err());
     }
 
     #[test]
     fn stash_delta_decodes_paths_before_validation_and_lookup() {
-        use crate::index::MODE_REGULAR;
         use crate::objects::{serialize_tree, TreeEntry};
 
         let tmp = TempDir::new().unwrap();
@@ -4017,7 +4021,7 @@ mod coverage_tests {
         };
         let empty = repo.odb().write(ObjectKind::Tree, b"").unwrap();
         for path in [b"grit+pathhex:6162".as_slice(), b"non-utf8-\xff"] {
-            let other = tree(path, MODE_REGULAR, blob);
+            let other = tree(path, FileMode::REGULAR, blob);
             let delta = StashTreeDelta::read(&repo, &empty, &other).unwrap();
             assert_eq!(delta.changes[0].0, path);
             assert_eq!(
@@ -4028,8 +4032,8 @@ mod coverage_tests {
                 blob
             );
         }
-        let unsafe_child = tree(b".git", MODE_REGULAR, blob);
-        let other = tree(b"non-utf8-\xff", MODE_TREE, unsafe_child);
+        let unsafe_child = tree(b".git", FileMode::REGULAR, blob);
+        let other = tree(b"non-utf8-\xff", FileMode::TREE, unsafe_child);
         assert!(StashTreeDelta::read(&repo, &empty, &other).is_err());
     }
 

@@ -10,12 +10,13 @@
 //! The sidecar lives at `.git/grit/history-last-work` and is written or removed together with
 //! `.git/grit/history-last`.
 
+use crate::objects::FileMode;
 use std::collections::{BTreeSet, HashMap};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::index::{entry_from_metadata, IndexEntry, MODE_GITLINK, MODE_TREE};
+use crate::index::{entry_from_metadata, IndexEntry, MODE_GITLINK};
 use crate::lockfile::{LockFile, LockWait};
 use crate::objects::HashAlgo;
 use crate::objects::{ObjectId, ObjectKind};
@@ -410,17 +411,17 @@ fn tree_blob_at_path(
     let Some(entry) = odb
         .tree_entry_at_path(&tree, path.as_bytes())
         .map_err(apply_err)?
-        .filter(|entry| entry.mode != MODE_TREE)
+        .filter(|entry| entry.mode != FileMode::TREE)
     else {
         return Ok(None);
     };
-    let data = if entry.mode == MODE_GITLINK {
+    let data = if entry.mode == FileMode::GITLINK {
         Vec::new()
     } else {
         odb.read(&entry.oid).map_err(apply_err)?.data
     };
     Ok(Some(IndexBlob {
-        mode: entry.mode,
+        mode: entry.mode.bits(),
         oid: entry.oid,
         data,
     }))

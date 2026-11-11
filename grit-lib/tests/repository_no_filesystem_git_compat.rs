@@ -2,6 +2,7 @@
 //! store and config are all injected: a local fetch reads a repository `git` wrote, and
 //! a bundle written into memory clones and passes `git fsck --strict`.
 
+use grit_lib::objects::FileMode;
 use std::fs;
 use std::path::Path;
 use std::sync::Arc;
@@ -78,11 +79,7 @@ fn git_history_fetched_into_memory_round_trips_through_an_in_memory_bundle() {
             .data,
     )
     .expect("parse tree");
-    entries.push(TreeEntry {
-        mode: 0o100644,
-        name: b"memory.txt".to_vec(),
-        oid: blob,
-    });
+    entries.push(TreeEntry::new(b"memory.txt", FileMode::REGULAR, blob));
     let tree = repo.objects().write_tree(entries).expect("tree");
     let who = Signature::new(
         "Ada",

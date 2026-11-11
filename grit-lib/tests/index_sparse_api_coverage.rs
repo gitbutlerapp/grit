@@ -1,6 +1,7 @@
 //! Additional API coverage for index format selection and sparse-checkout application.
 
 use crate::support;
+use grit_lib::objects::FileMode;
 
 use std::fs;
 
@@ -108,23 +109,12 @@ fn write_tree_and_cache_tree_after_sparse_apply() {
         .odb()
         .write(ObjectKind::Blob, b"extra\n")
         .expect("blob");
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 1,
-        ctime_nsec: 0,
-        mtime_sec: 1,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 6,
-        oid: blob,
-        flags: 8,
-        flags_extended: None,
-        path: b"extra.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(
+        IndexEntry::new(b"extra.txt".to_vec(), blob, FileMode::REGULAR)
+            .with_ctime(1, 0)
+            .with_mtime(1, 0)
+            .with_size(6),
+    );
     let _tree = write_tree_update_index(&grit.odb(), &mut index, "", WriteTreeFlags::default())
         .expect("write-tree");
     grit.index()

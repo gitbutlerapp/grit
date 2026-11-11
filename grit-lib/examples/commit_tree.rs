@@ -4,9 +4,9 @@
 //! Run: `cargo run -p grit-lib --example commit_tree`
 
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
-use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn main() -> grit_lib::error::Result<()> {
@@ -22,23 +22,7 @@ fn main() -> grit_lib::error::Result<()> {
         .odb()
         .write(ObjectKind::Blob, b"hello from grit-lib examples\n")?;
     let path = b"README".to_vec();
-    let entry = IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: blob_oid,
-        flags: (path.len().min(0xfff)) as u16,
-        flags_extended: None,
-        path,
-        base_index_pos: 0,
-    };
+    let entry = IndexEntry::new(path, blob_oid, FileMode::REGULAR);
 
     let mut index = Index::new();
     index.add_or_replace(entry);

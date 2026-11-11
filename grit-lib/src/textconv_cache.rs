@@ -4,6 +4,7 @@
 //! `diff.<driver>.textconv` command string; when it changes, the cache is treated as empty.
 
 use crate::error::ObjectError;
+use crate::objects::FileMode;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -49,7 +50,7 @@ fn collect_tree_entries(
             path.push(b'/');
         }
         path.extend_from_slice(&entry.name);
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             collect_tree_entries(odb, &entry.oid, &path, out)?;
         } else {
             out.push(NotesEntry {
@@ -129,22 +130,28 @@ fn write_notes_subtree(odb: &Odb, entries: &[NotesEntry]) -> crate::error::Resul
     for (name, child) in children {
         match child {
             NotesChild::Blob(oid) => tree_entries.push(TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name,
                 oid,
             }),
             NotesChild::Tree(child_entries) => {
                 let oid = write_notes_subtree(odb, &child_entries)?;
                 tree_entries.push(TreeEntry {
-                    mode: 0o040000,
+                    mode: FileMode::TREE,
                     name,
                     oid,
                 });
             }
         }
     }
-    tree_entries
-        .sort_by(|a, b| tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000));
+    tree_entries.sort_by(|a, b| {
+        tree_name_cmp(
+            &a.name,
+            a.mode == FileMode::TREE,
+            &b.name,
+            b.mode == FileMode::TREE,
+        )
+    });
     let data = serialize_tree(&tree_entries);
     odb.write(ObjectKind::Tree, &data)
 }

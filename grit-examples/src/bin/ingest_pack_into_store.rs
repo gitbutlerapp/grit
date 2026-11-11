@@ -5,6 +5,7 @@
 //! through the [`WritableObjectStore`](grit_lib::objects::odb::store::WritableObjectStore)
 //! trait, and through a repository whose primary is that store.
 
+use grit_lib::objects::FileMode;
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -28,11 +29,7 @@ fn main() -> grit_lib::error::Result<()> {
             .write(ObjectKind::Blob, format!("version {version}\n").as_bytes())?;
         let tree = source.odb().write(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: 0o100644,
-                name: b"file.txt".to_vec(),
-                oid: blob,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"file.txt", FileMode::REGULAR, blob)]),
         )?;
         let parent_line = parent.map(|p| format!("parent {p}\n")).unwrap_or_default();
         let body = format!(

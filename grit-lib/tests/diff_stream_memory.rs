@@ -4,6 +4,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::objects::FileMode;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use grit_lib::diff::{DiffOptions, TreeDiffOptions};
@@ -48,11 +49,11 @@ fn tree_with_version(repo: &Repository, version: u8) -> grit_lib::objects::Objec
                 .map(|line| line_content(file, line, version))
                 .collect();
             let oid = odb.write(ObjectKind::Blob, body.as_bytes()).expect("blob");
-            TreeEntry {
-                mode: 0o100644,
-                name: format!("file-{file:03}.txt").into_bytes(),
+            TreeEntry::new(
+                format!("file-{file:03}.txt").into_bytes(),
+                FileMode::REGULAR,
                 oid,
-            }
+            )
         })
         .collect();
     odb.write(ObjectKind::Tree, &serialize_tree(&entries))

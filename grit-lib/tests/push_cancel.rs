@@ -5,6 +5,7 @@
 //! Repositories are built with the library only; the smart-HTTP server is an
 //! in-process [`HttpClient`] over [`receive_pack`].
 
+use grit_lib::objects::FileMode;
 use std::collections::BTreeSet;
 use std::io::{Cursor, Read};
 use std::path::{Path, PathBuf};
@@ -58,10 +59,12 @@ fn build_history(repo: &Repository, commits: usize, files: usize, blob_len: usiz
         let entries: Vec<TreeEntry> = contents
             .iter()
             .enumerate()
-            .map(|(i, data)| TreeEntry {
-                mode: 0o100644,
-                name: format!("f{i:04}").into_bytes(),
-                oid: odb.write(ObjectKind::Blob, data).expect("blob"),
+            .map(|(i, data)| {
+                TreeEntry::new(
+                    format!("f{i:04}").into_bytes(),
+                    FileMode::REGULAR,
+                    odb.write(ObjectKind::Blob, data).expect("blob"),
+                )
             })
             .collect();
         let tree = odb
@@ -529,11 +532,7 @@ fn local_push_cancelled_while_streaming_one_large_blob_drops_quarantine() {
         .odb()
         .write(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: 0o100644,
-                name: b"blob.bin".to_vec(),
-                oid: blob,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"blob.bin", FileMode::REGULAR, blob)]),
         )
         .expect("tree");
     let body = format!(

@@ -74,6 +74,16 @@ pub enum RemoteError {
     /// An atomic wire push was requested, but the remote did not advertise `atomic`.
     #[error("the remote does not support atomic pushes")]
     PushAtomicUnsupported,
+    /// A push update's source object is not in the local object database, so it cannot be sent.
+    #[error(
+        "object not found: source object {oid} for '{dst}' is missing from the local object store"
+    )]
+    PushSourceMissing {
+        /// The destination ref on the remote (e.g. `refs/heads/main`).
+        dst: String,
+        /// The missing source object.
+        oid: crate::objects::ObjectId,
+    },
     /// Push options were sent but the remote did not advertise `push-options`.
     #[error("the receiving end does not support push options")]
     PushOptionsUnsupported,
@@ -233,6 +243,7 @@ impl RemoteError {
             Self::Auth { .. } => "auth",
             Self::CredentialsUnavailable { .. } => "credentials_unavailable",
             Self::PushAtomicUnsupported => "push_atomic_unsupported",
+            Self::PushSourceMissing { .. } => "push_source_missing",
             Self::PushOptionsUnsupported => "push_options_unsupported",
             Self::FetchUnshallowNotShallow => "fetch_unshallow_not_shallow",
             Self::FetchShallowUnsupported => "fetch_shallow_unsupported",

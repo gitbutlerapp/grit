@@ -4,6 +4,7 @@
 
 use crate::support;
 use grit_lib::error::RefError;
+use grit_lib::objects::FileMode;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
@@ -183,11 +184,7 @@ fn ref_update_after_git_prune_removed_the_commit_is_refused() {
             .expect("blob");
         let tree = grit
             .objects()
-            .write_tree([TreeEntry {
-                mode: 0o100644,
-                name: b"f".to_vec(),
-                oid: blob,
-            }])
+            .write_tree([TreeEntry::new(b"f", FileMode::REGULAR, blob)])
             .expect("tree");
         let next = grit
             .objects()

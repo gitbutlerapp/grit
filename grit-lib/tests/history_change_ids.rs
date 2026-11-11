@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::objects::FileMode;
 
 use std::path::Path;
 use std::process::Command;
@@ -85,23 +86,10 @@ fn write_tree_blob(repo: &Repository, path: &str, content: &[u8]) -> ObjectId {
     let blob = repo.odb().write(ObjectKind::Blob, content).expect("blob");
     let mut index = Index::new();
     index.hash_algo = repo.odb().hash_algo();
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: content.len() as u32,
-        oid: blob,
-        flags: path.len().min(0xfff) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(
+        IndexEntry::new(path.as_bytes().to_vec(), blob, FileMode::REGULAR)
+            .with_size(content.len() as u32),
+    );
     write_tree_from_index(repo.odb(), &index, "").expect("tree")
 }
 

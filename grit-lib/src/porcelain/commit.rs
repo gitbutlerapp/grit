@@ -1214,10 +1214,10 @@ fn commit_files_from_raw_paths(
     ) -> Result<()> {
         for entry in crate::objects::parse_tree(&odb.read(tree)?.data)? {
             let path = crate::repo_relpath::join_rel(prefix, &entry.name);
-            if entry.mode == crate::index::MODE_TREE {
+            if entry.mode == crate::objects::FileMode::TREE {
                 collect(odb, &entry.oid, &path, out)?;
             } else {
-                out.insert(path, (entry.mode, entry.oid));
+                out.insert(path, (entry.mode.bits(), entry.oid));
             }
         }
         Ok(())

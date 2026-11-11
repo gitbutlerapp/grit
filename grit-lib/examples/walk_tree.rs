@@ -3,9 +3,8 @@
 //! Run: `cargo run -p grit-lib --example walk_tree`
 
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::MODE_TREE;
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{parse_tree, serialize_commit, CommitData, ObjectKind};
-use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
 
 fn walk_tree(
@@ -22,7 +21,7 @@ fn walk_tree(
         } else {
             format!("{prefix}/{name}")
         };
-        if e.mode == MODE_TREE {
+        if e.mode == FileMode::TREE {
             println!("{path}/ (tree {})", e.oid);
             walk_tree(repo, e.oid, &path)?;
         } else {
@@ -41,7 +40,7 @@ fn main() -> grit_lib::error::Result<()> {
             .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files),
     )?;
 
-    use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+    use grit_lib::index::{Index, IndexEntry};
 
     let blob_a = repo.odb().write(ObjectKind::Blob, b"a\n")?;
     let blob_b = repo.odb().write(ObjectKind::Blob, b"b\n")?;
@@ -51,23 +50,7 @@ fn main() -> grit_lib::error::Result<()> {
         (b"a.txt".as_slice(), blob_a),
         (b"sub/b.txt".as_slice(), blob_b),
     ] {
-        let entry = IndexEntry {
-            ctime_sec: 0,
-            ctime_nsec: 0,
-            mtime_sec: 0,
-            mtime_nsec: 0,
-            dev: 0,
-            ino: 0,
-            mode: MODE_REGULAR,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            oid,
-            flags: (rel.len().min(0xfff)) as u16,
-            flags_extended: None,
-            path: rel.to_vec(),
-            base_index_pos: 0,
-        };
+        let entry = IndexEntry::new(rel.to_vec(), oid, FileMode::REGULAR);
         index.add_or_replace(entry);
     }
     repo.index()

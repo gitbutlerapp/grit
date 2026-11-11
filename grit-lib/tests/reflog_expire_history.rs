@@ -9,6 +9,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::objects::FileMode;
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -88,19 +89,16 @@ impl<'a> HistoryBuilder<'a> {
                 let entries = blobs
                     .iter()
                     .enumerate()
-                    .map(|(f, oid)| TreeEntry {
-                        mode: 0o100644,
-                        name: format!("f{f:03}").into_bytes(),
-                        oid: *oid,
+                    .map(|(f, oid)| {
+                        TreeEntry::new(format!("f{f:03}").into_bytes(), FileMode::REGULAR, *oid)
                     })
                     .collect::<Vec<_>>();
-                TreeEntry {
-                    mode: 0o040000,
-                    name: format!("d{d}").into_bytes(),
-                    oid: odb
-                        .write(ObjectKind::Tree, &serialize_tree(&entries))
+                TreeEntry::new(
+                    format!("d{d}").into_bytes(),
+                    FileMode::TREE,
+                    odb.write(ObjectKind::Tree, &serialize_tree(&entries))
                         .expect("write subtree"),
-                }
+                )
             })
             .collect::<Vec<_>>();
         odb.write(ObjectKind::Tree, &serialize_tree(&dirs))
@@ -124,11 +122,7 @@ impl<'a> HistoryBuilder<'a> {
                 &self.repo.odb().read(&tree).expect("read root tree").data,
             )
             .expect("parse root tree");
-            root.push(TreeEntry {
-                mode: 0o100644,
-                name: b"zz-extra".to_vec(),
-                oid: blob,
-            });
+            root.push(TreeEntry::new(b"zz-extra", FileMode::REGULAR, blob));
             tree = self
                 .repo
                 .odb()

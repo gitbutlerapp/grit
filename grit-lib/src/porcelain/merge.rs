@@ -132,9 +132,9 @@ fn tree_to_index_entries_with_protect(
 
     for te in entries {
         let path_bytes = crate::repo_relpath::join_rel(prefix, &te.name);
-        validate_tree_walk_entry(prefix, &te.name, te.mode, protect)?;
+        validate_tree_walk_entry(prefix, &te.name, te.mode.bits(), protect)?;
 
-        if crate::index::is_tree_mode(te.mode) {
+        if crate::index::is_tree_mode(te.mode.bits()) {
             let sub = tree_to_index_entries_with_protect(repo, &te.oid, &path_bytes, protect)?;
             result.extend(sub);
         } else {
@@ -145,7 +145,7 @@ fn tree_to_index_entries_with_protect(
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: crate::index::canon_mode(te.mode),
+                mode: crate::index::canon_mode(te.mode.bits()),
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -1814,7 +1814,6 @@ fn merge_abort_append_unmerged_tree_checkouts(
     changes: &mut Vec<crate::diff::DiffEntry>,
 ) -> Result<()> {
     use crate::diff::{zero_oid, DiffEntry, DiffStatus};
-    use crate::objects::FileMode;
     let mut seen: HashSet<String> = changes
         .iter()
         .filter_map(|change| change.new_path.clone())
@@ -1831,8 +1830,8 @@ fn merge_abort_append_unmerged_tree_checkouts(
             status: DiffStatus::Modified,
             old_path: Some(path_str.clone()),
             new_path: Some(path_str),
-            old_mode: FileMode::new(entry.mode),
-            new_mode: FileMode::new(entry.mode),
+            old_mode: entry.mode,
+            new_mode: entry.mode,
             old_oid: zero_oid(),
             new_oid: entry.oid,
             score: None,

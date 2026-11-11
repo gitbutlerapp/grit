@@ -1,5 +1,6 @@
 //! Commit-graph and Bloom filter round-trips with system `git` (t5318/t5324/t5328 scenarios).
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use std::collections::HashMap;
@@ -529,23 +530,7 @@ fn root_commit_and_grit_only_write_without_generation_chunk() {
     let mut index = Index::new();
     index.hash_algo = repo.odb().hash_algo();
     let blob = repo.odb().write(ObjectKind::Blob, b"x\n").expect("blob");
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 2,
-        oid: blob,
-        flags: 4,
-        flags_extended: None,
-        path: b"f.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(IndexEntry::new(b"f.txt".to_vec(), blob, FileMode::REGULAR).with_size(2));
     let tree =
         grit_lib::index::write_tree::write_tree_from_index(repo.odb(), &index, "").expect("tree");
     let raw = serialize_commit(&CommitData::new(

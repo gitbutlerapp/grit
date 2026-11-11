@@ -3,6 +3,7 @@
 //! These mirror the subset of Git's combine-diff output needed for porcelain
 //! commands (`git show`, `git diff` during conflicts, `git diff-tree -c`).
 
+use crate::objects::FileMode;
 use std::ffi::OsString;
 use std::io::Write;
 use std::path::Path;
@@ -175,7 +176,7 @@ pub fn enrich_combined_path_renames(
         };
         side.status = CombinedParentStatus::Renamed;
         side.oid = entry.oid;
-        side.mode = entry.mode;
+        side.mode = entry.mode.bits();
         side.rename_from = Some(src.clone());
     }
 }
@@ -205,7 +206,7 @@ fn all_blob_paths_dfs(odb: &Odb, tree_oid: &ObjectId, prefix: &str) -> Vec<Strin
         } else {
             format!("{prefix}/{name}")
         };
-        if e.mode == 0o040000 {
+        if e.mode == FileMode::TREE {
             out.extend(all_blob_paths_dfs(odb, &e.oid, &path));
         } else {
             out.push(path);
@@ -239,7 +240,7 @@ fn paths_in_tree_order(
         } else {
             format!("{prefix}/{name}")
         };
-        if e.mode == 0o040000 {
+        if e.mode == FileMode::TREE {
             out.extend(paths_in_tree_order(odb, &e.oid, &path, want));
         } else if want.contains(&path) {
             out.push(path);

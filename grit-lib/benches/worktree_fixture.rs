@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::objects::FileMode;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
@@ -28,22 +29,16 @@ fn bench_oid(seed: u32) -> ObjectId {
 
 fn make_index_entry(path: &str, seed: u32) -> IndexEntry {
     let path_bytes = path.as_bytes().to_vec();
-    IndexEntry {
-        ctime_sec: 1_700_000_000,
-        ctime_nsec: 0,
-        mtime_sec: 1_700_000_000,
-        mtime_nsec: 0,
-        dev: 1,
-        ino: seed,
-        mode: MODE_REGULAR,
-        uid: 1000,
-        gid: 1000,
-        size: 64,
-        oid: bench_oid(seed),
-        flags: path_bytes.len().min(0xFFF) as u16,
-        flags_extended: None,
-        path: path_bytes,
-        base_index_pos: 0,
+    {
+        let mut entry = IndexEntry::new(path_bytes, bench_oid(seed), FileMode::REGULAR)
+            .with_ctime(1_700_000_000, 0)
+            .with_mtime(1_700_000_000, 0)
+            .with_size(64);
+        entry.dev = 1;
+        entry.ino = seed;
+        entry.uid = 1000;
+        entry.gid = 1000;
+        entry
     }
 }
 

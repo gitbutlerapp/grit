@@ -5,6 +5,7 @@
 //! under every [`grit_lib::objects::index_pack::IngestPackOptions`] variant, and cross-checks installed
 //! packs with `git verify-pack -v` and `git fsck --strict`.
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use grit_lib::error::ObjectError;
@@ -1166,11 +1167,7 @@ fn make_single_tree_pack(tree_body: &[u8], algo: HashAlgo) -> Vec<u8> {
 #[test]
 fn unpack_strict_rejects_missing_tree_reference() {
     let missing = ObjectId::from_hex(&"ab".repeat(20)).expect("oid");
-    let tree = serialize_tree(&[TreeEntry {
-        mode: MODE_REGULAR,
-        name: b"missing".to_vec(),
-        oid: missing,
-    }]);
+    let tree = serialize_tree(&[TreeEntry::new(b"missing", FileMode::REGULAR, missing)]);
     let pack = make_single_tree_pack(&tree, HashAlgo::Sha1);
     let tmp = tempfile::tempdir().expect("odb");
     let odb = Odb::new(tmp.path());

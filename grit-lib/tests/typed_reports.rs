@@ -1,5 +1,6 @@
 //! Typed operation reports (reflog expire, prune-packed, rerere) replace println status.
 
+use grit_lib::objects::FileMode;
 use std::fs;
 use std::process::Command;
 
@@ -225,23 +226,7 @@ fn prune_packed_reports_removed_paths_dry_run_and_real() {
 
 fn index_conflict_entry(path: &str, stage: u16, oid: ObjectId) -> IndexEntry {
     let path_b = path.as_bytes().to_vec();
-    IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid,
-        flags: (stage << 12) | (path_b.len().min(0x0fff) as u16),
-        flags_extended: None,
-        path: path_b,
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path_b, oid, FileMode::REGULAR).with_stage(stage as u8)
 }
 
 #[test]

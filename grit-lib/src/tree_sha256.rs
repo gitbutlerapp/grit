@@ -307,7 +307,7 @@ impl ComputeCtx<'_> {
             const S_IFREG: u32 = 0o100000;
             const S_IFLNK: u32 = 0o120000;
             const S_IFGITLINK: u32 = 0o160000;
-            match mode & S_IFMT {
+            match mode.bits() & S_IFMT {
                 S_IFDIR => {
                     let mut child_prefix = path;
                     child_prefix.push(b'/');

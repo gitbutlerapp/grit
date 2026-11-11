@@ -262,7 +262,7 @@ mod tests {
             let mut entries: Vec<TreeEntry> = entries
                 .iter()
                 .map(|&(mode, name, oid)| TreeEntry {
-                    mode,
+                    mode: crate::objects::FileMode::new(mode),
                     name: name.as_bytes().to_vec(),
                     oid,
                 })

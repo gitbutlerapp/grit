@@ -2,6 +2,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::objects::FileMode;
 use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
@@ -19,10 +20,12 @@ const MODE_DIR: u32 = 0o040000;
 
 fn file_entries(files: usize, blobs: &[ObjectId]) -> Vec<TreeEntry> {
     (0..files)
-        .map(|f| TreeEntry {
-            mode: MODE_REGULAR,
-            name: format!("file{f:04}.c").into_bytes(),
-            oid: blobs[f],
+        .map(|f| {
+            TreeEntry::new(
+                format!("file{f:04}.c").into_bytes(),
+                FileMode::REGULAR,
+                blobs[f],
+            )
         })
         .collect()
 }
@@ -40,17 +43,12 @@ fn driver_subtree(
 ) -> ObjectId {
     let impl_oid = write_tree(odb, &file_entries(files, blobs));
     let sub_entries: Vec<TreeEntry> = (0..subs)
-        .map(|s| TreeEntry {
-            mode: MODE_DIR,
-            name: format!("sub{s:03}").into_bytes(),
-            oid: write_tree(
-                odb,
-                &[TreeEntry {
-                    mode: MODE_DIR,
-                    name: b"impl".to_vec(),
-                    oid: impl_oid,
-                }],
-            ),
+        .map(|s| {
+            TreeEntry::new(
+                format!("sub{s:03}").into_bytes(),
+                FileMode::TREE,
+                write_tree(odb, &[TreeEntry::new(b"impl", FileMode::TREE, impl_oid)]),
+            )
         })
         .collect();
     write_tree(odb, &sub_entries)
@@ -78,10 +76,12 @@ fn exact_rename_merge_fixture(
         .collect();
 
     let base_roots: Vec<TreeEntry> = (0..total_dirs)
-        .map(|d| TreeEntry {
-            mode: MODE_DIR,
-            name: format!("drivers{d:03}").into_bytes(),
-            oid: driver_oids[d],
+        .map(|d| {
+            TreeEntry::new(
+                format!("drivers{d:03}").into_bytes(),
+                FileMode::TREE,
+                driver_oids[d],
+            )
         })
         .collect();
     let base = write_tree(odb, &base_roots);
@@ -99,35 +99,37 @@ fn exact_rename_merge_fixture(
     ours_driver_oids[moved_dirs] = ours_driver0;
 
     let ours_roots: Vec<TreeEntry> = (0..total_dirs)
-        .map(|d| TreeEntry {
-            mode: MODE_DIR,
-            name: format!("drivers{d:03}").into_bytes(),
-            oid: ours_driver_oids[d],
+        .map(|d| {
+            TreeEntry::new(
+                format!("drivers{d:03}").into_bytes(),
+                FileMode::TREE,
+                ours_driver_oids[d],
+            )
         })
         .collect();
     let ours = write_tree(odb, &ours_roots);
 
     let arch: Vec<TreeEntry> = (0..moved_dirs)
-        .map(|d| TreeEntry {
-            mode: MODE_DIR,
-            name: format!("drivers{d:03}").into_bytes(),
-            oid: driver_oids[d],
+        .map(|d| {
+            TreeEntry::new(
+                format!("drivers{d:03}").into_bytes(),
+                FileMode::TREE,
+                driver_oids[d],
+            )
         })
         .collect();
     let arch_oid = write_tree(odb, &arch);
 
     let mut ren_roots: Vec<TreeEntry> = (moved_dirs..total_dirs)
-        .map(|d| TreeEntry {
-            mode: MODE_DIR,
-            name: format!("drivers{d:03}").into_bytes(),
-            oid: driver_oids[d],
+        .map(|d| {
+            TreeEntry::new(
+                format!("drivers{d:03}").into_bytes(),
+                FileMode::TREE,
+                driver_oids[d],
+            )
         })
         .collect();
-    ren_roots.push(TreeEntry {
-        mode: MODE_DIR,
-        name: b"arch".to_vec(),
-        oid: arch_oid,
-    });
+    ren_roots.push(TreeEntry::new(b"arch", FileMode::TREE, arch_oid));
     let theirs = write_tree(odb, &ren_roots);
 
     (dir, repo, [base, ours, theirs])

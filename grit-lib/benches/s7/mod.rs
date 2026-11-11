@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used, dead_code)]
 
+use grit_lib::objects::FileMode;
 use std::path::Path;
 use std::process::Command;
 use std::sync::OnceLock;
@@ -66,23 +67,10 @@ fn write_grit_commit_graph(_objects_dir: &Path, odb: &Odb) -> std::result::Resul
 }
 
 fn index_entry(path: &[u8], oid: ObjectId, size: usize, mode: u32) -> IndexEntry {
-    IndexEntry {
-        ctime_sec: 1_700_000_000,
-        ctime_nsec: 0,
-        mtime_sec: 1_700_000_000,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode,
-        uid: 0,
-        gid: 0,
-        size: size as u32,
-        oid,
-        flags: (path.len().min(0xfff)) as u16,
-        flags_extended: None,
-        path: path.to_vec(),
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path.to_vec(), oid, FileMode::new(mode))
+        .with_ctime(1_700_000_000, 0)
+        .with_mtime(1_700_000_000, 0)
+        .with_size(size as u32)
 }
 
 fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {

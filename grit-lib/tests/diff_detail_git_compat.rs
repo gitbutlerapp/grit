@@ -1,6 +1,7 @@
 //! `--stat` / `--name-only` / `--name-status` compatibility with system `git`.
 
 use grit_lib::error::ObjectError;
+use grit_lib::objects::FileMode;
 use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
@@ -29,11 +30,11 @@ fn tree_with(repo: &Repository, entries: &[(&str, &[u8])]) -> grit_lib::objects:
     let mut tes = Vec::new();
     for (name, data) in entries {
         let oid = write_blob(repo, data);
-        tes.push(TreeEntry {
-            mode: 0o100644,
-            name: name.as_bytes().to_vec(),
+        tes.push(TreeEntry::new(
+            name.as_bytes().to_vec(),
+            FileMode::REGULAR,
             oid,
-        });
+        ));
     }
     let data = grit_lib::objects::serialize_tree(&tes);
     repo.odb()
@@ -184,10 +185,8 @@ fn tree_metadata_matrix_matches_git_without_reading_blobs() {
                 .expect("init");
         let a = write_blob(&repo, b"before\n");
         let b = write_blob(&repo, b"after\n");
-        let entry = |name: &[u8], mode, oid: ObjectId| TreeEntry {
-            name: name.to_vec(),
-            mode,
-            oid,
+        let entry = |name: &[u8], mode, oid: ObjectId| {
+            TreeEntry::new(name.to_vec(), FileMode::new(mode), oid)
         };
         let child_a = metadata_tree(&repo, vec![entry(b"leaf", 0o100644, a)]);
         let child_b = metadata_tree(&repo, vec![entry(b"leaf", 0o100644, b)]);

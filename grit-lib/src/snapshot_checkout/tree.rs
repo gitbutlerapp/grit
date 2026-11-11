@@ -52,10 +52,10 @@ fn diff_into(
     }
     let mut by_name: BTreeMap<Vec<u8>, (Option<Entry>, Option<Entry>)> = BTreeMap::new();
     for e in entries(odb, old)? {
-        by_name.entry(e.name).or_default().0 = Some((e.mode, e.oid));
+        by_name.entry(e.name).or_default().0 = Some((e.mode.bits(), e.oid));
     }
     for e in entries(odb, new)? {
-        by_name.entry(e.name).or_default().1 = Some((e.mode, e.oid));
+        by_name.entry(e.name).or_default().1 = Some((e.mode.bits(), e.oid));
     }
     for (name, (a, b)) in by_name {
         if a == b {
@@ -88,7 +88,7 @@ fn diff_into(
 pub(crate) fn lookup(odb: &Odb, tree: ObjectId, path: &[u8]) -> Result<Option<Entry>> {
     Ok(odb
         .tree_entry_at_path(&tree, path)?
-        .map(|e| (e.mode, e.oid)))
+        .map(|e| (e.mode.bits(), e.oid)))
 }
 
 /// `base` (or an empty tree) with each `(path, entry)` set, or removed when
@@ -117,7 +117,7 @@ pub(crate) fn edit(
     }
     let mut current: BTreeMap<Vec<u8>, Entry> = entries(odb, base)?
         .into_iter()
-        .map(|e| (e.name, (e.mode, e.oid)))
+        .map(|e| (e.name, (e.mode.bits(), e.oid)))
         .collect();
     for (name, entry) in here {
         match entry {
@@ -145,9 +145,9 @@ pub(crate) fn edit(
     }
     let mut list: Vec<TreeEntry> = current
         .into_iter()
-        .map(|(name, (mode, oid))| TreeEntry { mode, name, oid })
+        .map(|(name, (mode, oid))| TreeEntry::new(name, crate::objects::FileMode::new(mode), oid))
         .collect();
-    list.sort_by(|a, b| tree_name_cmp(&a.name, a.mode == TREE_MODE, &b.name, b.mode == TREE_MODE));
+    list.sort_by(|a, b| tree_name_cmp(&a.name, a.is_tree(), &b.name, b.is_tree()));
     odb.write(ObjectKind::Tree, &serialize_tree(&list))
 }
 

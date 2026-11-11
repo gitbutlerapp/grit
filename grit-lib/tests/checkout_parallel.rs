@@ -356,23 +356,7 @@ fn parallel_matches_serial_gitlink_and_replacements() {
         )
         .unwrap(),
     );
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_GITLINK,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: gitlink,
-        flags: 3,
-        flags_extended: None,
-        path: b"sub".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(IndexEntry::new(b"sub".to_vec(), gitlink, FileMode::GITLINK));
     index.sort();
     let base_tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
         .expect("tree");

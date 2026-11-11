@@ -267,6 +267,8 @@ mod diff_w_rename;
 #[cfg(feature = "full-tests")]
 #[path = "error_next_steps.rs"]
 mod error_next_steps;
+#[path = "error_wording_pins.rs"]
+mod error_wording_pins;
 #[path = "exit_status_contract.rs"]
 mod exit_status_contract;
 #[cfg(feature = "full-tests")]

@@ -5,6 +5,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::ObjectError;
 use grit_lib::ident::Signature;
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{parse_commit, parse_tree, NewCommit, ObjectKind, TreeEntry, TreeRefIter};
 use grit_lib::repo::{InitOptions, Repository};
 use std::path::{Path, PathBuf};
@@ -23,11 +24,9 @@ fn write_demo_objects(
     let blob_data = b"hello from the library guide\n";
     let blob_oid = repo.objects().write(ObjectKind::Blob, blob_data)?;
 
-    let tree_oid = repo.objects().write_tree([TreeEntry {
-        mode: 0o100644,
-        name: b"README".to_vec(),
-        oid: blob_oid,
-    }])?;
+    let tree_oid =
+        repo.objects()
+            .write_tree([TreeEntry::new(b"README", FileMode::REGULAR, blob_oid)])?;
 
     let epoch = OffsetDateTime::UNIX_EPOCH;
     let ada = Signature::new("Ada Lovelace", "ada@example.com", epoch)?;

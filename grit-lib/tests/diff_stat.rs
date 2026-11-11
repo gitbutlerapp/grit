@@ -4,16 +4,19 @@ use grit_lib::diff::{
     DiffDetail, DiffOptions, DiffStat, DiffStatus, DiffTotals, FileStat, LineStat, ListedFileDiff,
     StatBar, TreeDiffOptions,
 };
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::repo::{InitOptions, Repository};
 
 fn tree_with(repo: &Repository, entries: &[(&str, &[u8])]) -> ObjectId {
     let entries: Vec<TreeEntry> = entries
         .iter()
-        .map(|(name, data)| TreeEntry {
-            mode: 0o100644,
-            name: name.as_bytes().to_vec(),
-            oid: repo.odb().write(ObjectKind::Blob, data).expect("blob"),
+        .map(|(name, data)| {
+            TreeEntry::new(
+                name.as_bytes().to_vec(),
+                FileMode::REGULAR,
+                repo.odb().write(ObjectKind::Blob, data).expect("blob"),
+            )
         })
         .collect();
     repo.odb()

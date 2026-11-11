@@ -499,8 +499,8 @@ fn sparse_candidate_subtrees(
         }));
     }
     for entry in parse_tree(&obj.data)? {
-        validate_tree_walk_entry(prefix, &entry.name, entry.mode, protect)?;
-        if entry.mode != MODE_TREE {
+        validate_tree_walk_entry(prefix, &entry.name, entry.mode.bits(), protect)?;
+        if entry.mode != crate::objects::FileMode::TREE {
             continue;
         }
         let mut path = join_rel(prefix, &entry.name);
@@ -630,16 +630,19 @@ impl TreeIndexWalk<'_> {
         let mut entry_count: i32 = 0;
         let mut children = Vec::new();
         for te in parse_tree(&obj.data)? {
-            validate_tree_walk_entry(prefix, &te.name, te.mode, self.protect)?;
+            validate_tree_walk_entry(prefix, &te.name, te.mode.bits(), self.protect)?;
             let path = join_rel(prefix, &te.name);
-            if crate::index::is_tree_mode(te.mode) {
+            if crate::index::is_tree_mode(te.mode.bits()) {
                 let child_seed = seed_node.and_then(|n| find_child(n, &te.name));
                 let child = self.walk(&te.oid, &path, te.name, child_seed)?;
                 entry_count = entry_count.saturating_add(child.entry_count.max(0));
                 children.push(child);
             } else {
-                self.entries
-                    .push(tree_entry(path, crate::index::canon_mode(te.mode), te.oid));
+                self.entries.push(tree_entry(
+                    path,
+                    crate::index::canon_mode(te.mode.bits()),
+                    te.oid,
+                ));
                 entry_count = entry_count.saturating_add(1);
             }
         }

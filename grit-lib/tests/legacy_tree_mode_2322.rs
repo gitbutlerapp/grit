@@ -2,6 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::NullProgress;
 use grit_lib::worktree::WorktreeError;
 use std::io::Write;
@@ -279,7 +280,7 @@ fn grit_checkout_writes_canonical_index_modes() {
     assert!(
         entries
             .iter()
-            .any(|e| e.name == b"a.txt" && e.mode == 0o100664),
+            .any(|e| e.name == b"a.txt" && e.mode == FileMode::new(0o100664)),
         "tree object must still record legacy 100664"
     );
 }

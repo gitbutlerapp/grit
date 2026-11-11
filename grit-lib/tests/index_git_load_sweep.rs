@@ -25,8 +25,6 @@ fn exercise_index_public_api(repo: &Repository, index: &mut Index) {
     let _ = index.entries_are_sorted();
     let _ = index.has_unmerged_entries();
     let _ = index.has_sparse_directory_placeholders();
-    let _ = index.format_cache_tree_dump();
-    let _ = index.dump_cache_tree(repo.odb());
     let _ = index.split_index_base_oid();
     index.invalidate_cache_tree_for_path(b"a");
     index.invalidate_untracked_cache_for_path("a/f0.txt");

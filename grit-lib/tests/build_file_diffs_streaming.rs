@@ -4,6 +4,7 @@
 
 use grit_lib::diff::{DiffDetail, DiffOptions, TreeDiffOptions};
 use grit_lib::error::Error;
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_tree, ObjectKind, TreeEntry};
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -23,11 +24,7 @@ fn tree_with_files(repo: &Repository, version: &str) -> grit_lib::objects::Objec
                     format!("{version} file {i}\nline two\n").as_bytes(),
                 )
                 .expect("blob");
-            TreeEntry {
-                mode: 0o100644,
-                name: format!("f/{i:02}.txt").into_bytes(),
-                oid,
-            }
+            TreeEntry::new(format!("f/{i:02}.txt").into_bytes(), FileMode::REGULAR, oid)
         })
         .collect();
     odb.write(ObjectKind::Tree, &serialize_tree(&entries))

@@ -16,6 +16,7 @@
 //! the authoritative format specification.
 
 use crate::error::ObjectError;
+use crate::objects::FileMode;
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
@@ -274,7 +275,31 @@ pub(crate) const INDEX_EXT_RESOLVE_UNDO: u32 = u32::from_be_bytes(*b"REUC");
 pub(crate) const INDEX_EXT_LINK: u32 = u32::from_be_bytes(*b"link");
 
 /// A single entry in the Git index.
-#[derive(Debug, Clone, PartialEq, Eq)]
+///
+/// Build one with [`IndexEntry::new`] (stat data zeroed, as for an entry read from a tree),
+/// or from the file on disk with [`entry_from_stat`] / [`entry_from_metadata`]. The stat and
+/// object fields are public; the on-disk flag words are reached through typed accessors such
+/// as [`Self::stage`], [`Self::skip_worktree`] and [`Self::intent_to_add`].
+///
+/// Equality ignores the bits of the flag word that the writer recomputes (the name-length
+/// bits and the "extended flags follow" bit), so an entry built in memory compares equal to
+/// the same entry read back from an index file.
+///
+/// # Examples
+///
+/// ```
+/// use grit_lib::index::IndexEntry;
+/// use grit_lib::objects::{FileMode, ObjectId};
+///
+/// let oid = ObjectId::from_hex("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")?;
+/// let ours = IndexEntry::new("src/lib.rs", oid, FileMode::REGULAR).with_stage(2);
+/// assert_eq!(ours.stage(), 2);
+/// assert_eq!(ours.path, b"src/lib.rs");
+/// assert!(ours.stat_cache_unset());
+/// # Ok::<(), grit_lib::error::Error>(())
+/// ```
+#[derive(Debug, Clone, Eq)]
+#[non_exhaustive]
 pub struct IndexEntry {
     /// Time the file metadata last changed (seconds since epoch).
     pub ctime_sec: u32,
@@ -298,14 +323,38 @@ pub struct IndexEntry {
     pub size: u32,
     /// SHA-1 of the blob object.
     pub oid: ObjectId,
-    /// Entry flags (stage, assume-valid, extended, …).
-    pub flags: u16,
-    /// Extended flags (v3+ only).
-    pub flags_extended: Option<u16>,
+    /// On-disk flag word: assume-valid, extended, stage and name-length bits.
+    pub(crate) flags: u16,
+    /// Extended flags (v3+ only), plus in-memory-only bits.
+    pub(crate) flags_extended: Option<u16>,
     /// Path relative to the repository root.  May contain `/` separators.
     pub path: Vec<u8>,
     /// Split index: position in shared base (1-based), or 0 if not from shared index.
-    pub base_index_pos: u32,
+    pub(crate) base_index_pos: u32,
+}
+
+/// Bits of [`IndexEntry::flags`] that carry meaning in memory: assume-valid and the stage.
+/// The name-length bits and the extended bit are recomputed by the index writer.
+const ENTRY_FLAGS_SIGNIFICANT: u16 = 0x8000 | 0x3000;
+
+impl PartialEq for IndexEntry {
+    fn eq(&self, other: &Self) -> bool {
+        self.ctime_sec == other.ctime_sec
+            && self.ctime_nsec == other.ctime_nsec
+            && self.mtime_sec == other.mtime_sec
+            && self.mtime_nsec == other.mtime_nsec
+            && self.dev == other.dev
+            && self.ino == other.ino
+            && self.mode == other.mode
+            && self.uid == other.uid
+            && self.gid == other.gid
+            && self.size == other.size
+            && self.oid == other.oid
+            && (self.flags & ENTRY_FLAGS_SIGNIFICANT) == (other.flags & ENTRY_FLAGS_SIGNIFICANT)
+            && self.flags_extended == other.flags_extended
+            && self.path == other.path
+            && self.base_index_pos == other.base_index_pos
+    }
 }
 
 #[cfg(feature = "serde-models")]
@@ -316,7 +365,7 @@ impl serde::Serialize for IndexEntry {
     {
         use serde::ser::SerializeStruct;
 
-        let mode = crate::objects::FileMode::new(self.mode);
+        let mode = FileMode::new(self.mode);
         let mut out = serializer.serialize_struct("IndexEntry", 14)?;
         out.serialize_field("ctime_sec", &self.ctime_sec)?;
         out.serialize_field("ctime_nsec", &self.ctime_nsec)?;
@@ -342,6 +391,71 @@ impl serde::Serialize for IndexEntry {
 }
 
 impl IndexEntry {
+    /// An entry for `path` pointing at `oid` with `mode`, at stage 0, with no flags set and
+    /// zeroed stat data (like an entry read from a tree: the next status refresh hashes the
+    /// file instead of trusting the cached stat data).
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: repository-relative path with `/` separators.
+    /// - `oid`: the blob (or gitlink commit, or sparse-directory tree) the entry records.
+    /// - `mode`: the entry mode ([`FileMode::REGULAR`](FileMode::REGULAR),
+    ///   [`FileMode::EXECUTABLE`](FileMode::EXECUTABLE), …).
+    #[must_use]
+    pub fn new(path: impl Into<Vec<u8>>, oid: ObjectId, mode: FileMode) -> Self {
+        let path = path.into();
+        Self {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: mode.bits(),
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid,
+            flags: path.len().min(0xFFF) as u16,
+            flags_extended: None,
+            path,
+            base_index_pos: 0,
+        }
+    }
+
+    /// This entry at merge `stage` (0 = normal, 1 = common base, 2 = ours, 3 = theirs).
+    ///
+    /// Only the low two bits of `stage` are used.
+    #[must_use]
+    pub fn with_stage(mut self, stage: u8) -> Self {
+        self.set_stage(stage);
+        self
+    }
+
+    /// This entry with cached `ctime` set to `sec` seconds and `nsec` nanoseconds.
+    #[must_use]
+    pub const fn with_ctime(mut self, sec: u32, nsec: u32) -> Self {
+        self.ctime_sec = sec;
+        self.ctime_nsec = nsec;
+        self
+    }
+
+    /// This entry with cached `mtime` set to `sec` seconds and `nsec` nanoseconds.
+    #[must_use]
+    pub const fn with_mtime(mut self, sec: u32, nsec: u32) -> Self {
+        self.mtime_sec = sec;
+        self.mtime_nsec = nsec;
+        self
+    }
+
+    /// This entry with the cached file size set to `size` bytes (truncated to 32 bits, as the
+    /// index stores it).
+    #[must_use]
+    pub const fn with_size(mut self, size: u32) -> Self {
+        self.size = size;
+        self
+    }
+
     /// Merge stage (0 = normal, 1–3 = conflict stages).
     #[must_use]
     pub fn stage(&self) -> u8 {
@@ -354,7 +468,11 @@ impl IndexEntry {
         self.size == 0 && self.mtime_sec == 0 && self.mtime_nsec == 0
     }
 
-    pub(crate) fn set_stage(&mut self, stage: u8) {
+    /// Set the merge stage (0 = normal, 1 = common base, 2 = ours, 3 = theirs).
+    ///
+    /// Only the low two bits of `stage` are used. Changing the stage of an entry already in an
+    /// [`Index`] can break its sort order; remove and re-add it instead.
+    pub fn set_stage(&mut self, stage: u8) {
         self.flags = (self.flags & 0x0FFF) | ((stage as u16 & 0x3) << 12);
     }
 
@@ -802,6 +920,7 @@ fn serialize_cache_tree_node(node: &CacheTreeNode, out: &mut Vec<u8>) {
     }
 }
 
+#[cfg(test)]
 fn format_cache_tree_node(node: &CacheTreeNode, parent_path: &str, out: &mut String) {
     let path = if node.name.is_empty() {
         String::new()
@@ -833,6 +952,7 @@ fn format_cache_tree_node(node: &CacheTreeNode, parent_path: &str, out: &mut Str
 }
 
 /// Emit a single cache-tree node line in `test-tool dump-cache-tree` format.
+#[cfg(test)]
 fn dump_one_line(node: &CacheTreeNode, pfx: &str, out: &mut String) {
     if node.entry_count < 0 {
         out.push_str(&format!(
@@ -855,6 +975,7 @@ fn dump_one_line(node: &CacheTreeNode, pfx: &str, out: &mut String) {
 
 /// Walk the stored cache-tree (`it`) against a freshly built reference (`ref`),
 /// emitting only the nodes that exist in both — matching Git's `dump_cache_tree`.
+#[cfg(test)]
 fn dump_cache_tree_pair(
     it: &CacheTreeNode,
     reference: &CacheTreeNode,
@@ -1722,10 +1843,10 @@ impl Index {
         Ok(())
     }
 
-    #[cfg(test)]
     /// Serialise the index body (without trailing checksum) into `out`.
     ///
     /// Callers must have sorted entries when using format 4 (path compression depends on order).
+    #[cfg(test)]
     pub(crate) fn serialize_into(&self, out: &mut Vec<u8>) -> crate::error::Result<()> {
         let mut body = IndexBodyOut {
             buf: std::mem::take(out),
@@ -3141,8 +3262,9 @@ impl Index {
     }
 
     /// Format the parsed cache-tree extension like Git's `test-tool dump-cache-tree`.
+    #[cfg(test)]
     #[must_use]
-    pub fn format_cache_tree_dump(&self) -> String {
+    pub(crate) fn format_cache_tree_dump(&self) -> String {
         let Some(root) = self.cache_tree.as_ref() else {
             return String::new();
         };
@@ -3166,7 +3288,8 @@ impl Index {
     ///
     /// Returns an error if the reference cache-tree cannot be built (for example,
     /// if a tree object cannot be written to the object database).
-    pub fn dump_cache_tree(&self, odb: &Odb) -> crate::error::Result<String> {
+    #[cfg(test)]
+    pub(crate) fn dump_cache_tree(&self, odb: &Odb) -> crate::error::Result<String> {
         let Some(it_root) = self.cache_tree.as_ref() else {
             return Ok(String::new());
         };
@@ -3361,15 +3484,15 @@ fn read_tree_into_overlay(
         if !prefix_under_or_equal(prefix, &path) {
             continue;
         }
-        crate::path_population::validate_tree_walk_entry(rel_base, &name, mode, protect)?;
-        if mode == MODE_TREE {
+        crate::path_population::validate_tree_walk_entry(rel_base, &name, mode.bits(), protect)?;
+        if mode == FileMode::TREE {
             read_tree_into_overlay(repo, &oid, prefix, &path, use_replace_path, protect, out)?;
             continue;
         }
-        if mode == MODE_GITLINK {
+        if mode == FileMode::GITLINK {
             continue;
         }
-        let entry = synthetic_stage1_index_entry(mode, &path, oid);
+        let entry = synthetic_stage1_index_entry(mode.bits(), &path, oid);
         if use_replace_path {
             if let Some(pos) = out.iter().position(|e| e.path == path && e.stage() == 1) {
                 out[pos] = entry;
@@ -3840,7 +3963,7 @@ impl PrefixTreeResolver {
                 entries
                     .as_ref()
                     .and_then(|entries| entries.iter().find(|e| e.name == name))
-                    .filter(|e| e.mode == MODE_TREE)
+                    .filter(|e| e.mode == FileMode::TREE)
                     .map(|e| e.oid)
             }
             // An empty component (`a//b`) is skipped, as when splitting on `/`.
@@ -3875,7 +3998,7 @@ fn try_collapse_directory_of_sparse_placeholders(
         return Ok(false);
     }
     for te in &tree_entries {
-        if te.mode != MODE_TREE {
+        if te.mode != FileMode::TREE {
             return Ok(false);
         }
         let mut path = directory.to_vec();
@@ -3963,7 +4086,7 @@ fn walk_sparse_aware(
     match &tree {
         crate::odb::SessionTree::Parsed(entries) => {
             for te in entries.iter() {
-                visit(&te.name, te.mode, te.oid)?;
+                visit(&te.name, te.mode.bits(), te.oid)?;
             }
         }
         crate::odb::SessionTree::Raw(data) => {
@@ -4006,8 +4129,13 @@ fn flatten_tree_blobs(
             p.extend_from_slice(&te.name);
             p
         };
-        crate::path_population::validate_tree_walk_entry(prefix, &te.name, te.mode, protect)?;
-        if is_tree_mode(te.mode) {
+        crate::path_population::validate_tree_walk_entry(
+            prefix,
+            &te.name,
+            te.mode.bits(),
+            protect,
+        )?;
+        if is_tree_mode(te.mode.bits()) {
             let sub = flatten_tree_blobs(odb, &te.oid, &path, protect)?;
             out.extend(sub);
         } else {
@@ -4019,7 +4147,7 @@ fn flatten_tree_blobs(
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: canon_mode(te.mode),
+                mode: canon_mode(te.mode.bits()),
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -7032,14 +7160,18 @@ mod tests {
             }
             let mut entries: Vec<TreeEntry> = here
                 .into_iter()
-                .map(|(name, (mode, oid))| TreeEntry { mode, name, oid })
+                .map(|(name, (mode, oid))| TreeEntry {
+                    mode: FileMode::new(mode),
+                    name,
+                    oid,
+                })
                 .collect();
             entries.sort_by(|a, b| {
                 crate::objects::tree_name_cmp(
                     &a.name,
-                    a.mode == MODE_TREE,
+                    a.mode == FileMode::TREE,
                     &b.name,
-                    b.mode == MODE_TREE,
+                    b.mode == FileMode::TREE,
                 )
             });
             odb.write(ObjectKind::Tree, &crate::objects::serialize_tree(&entries))

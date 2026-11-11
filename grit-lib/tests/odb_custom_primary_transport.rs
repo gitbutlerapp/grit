@@ -5,6 +5,7 @@
 //! of the bundle's pack into the custom primary. Staging writes go through the custom primary,
 //! and fsck validates the objects the primary lists.
 
+use grit_lib::objects::FileMode;
 use grit_test_support::{git, rev_parse};
 use std::fs;
 use std::path::Path;
@@ -117,11 +118,11 @@ fn commit_into(repo: &Repository, content: &[u8]) -> ObjectId {
         .odb()
         .write(
             ObjectKind::Tree,
-            &grit_lib::objects::serialize_tree(&[grit_lib::objects::TreeEntry {
-                mode: 0o100644,
-                name: b"f.txt".to_vec(),
-                oid: blob,
-            }]),
+            &grit_lib::objects::serialize_tree(&[grit_lib::objects::TreeEntry::new(
+                b"f.txt",
+                FileMode::REGULAR,
+                blob,
+            )]),
         )
         .expect("tree");
     let body = format!(

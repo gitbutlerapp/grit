@@ -688,6 +688,8 @@ mod embedded_gitlink_warnings_issue_2360;
 mod embedded_repo_gitlink_git_compat;
 #[path = "embedder_errors_1685.rs"]
 mod embedder_errors_1685;
+#[path = "entry_constructors.rs"]
+mod entry_constructors;
 #[cfg(feature = "full-tests")]
 #[path = "environment_discover.rs"]
 mod environment_discover;

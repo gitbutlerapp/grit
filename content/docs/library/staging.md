@@ -9,7 +9,7 @@ See also the [Repository](../repository/) and [Objects](../objects/) pages for o
 
 ## Reading the index
 
-[`IndexFile::load`](rustdoc:grit_lib::index::IndexFile::load) reads the index (`GIT_INDEX_FILE` or `.git/index`), resolves a split index, and by default expands every sparse-directory placeholder (full in-memory materialization). [`IndexLoadOptions`](rustdoc:grit_lib::index::IndexLoadOptions) selects another file (`with_path`), keeps placeholders for read-mostly work such as `status` and `diff` on cone sparse-index checkouts (`with_sparse(SparseIndexLoad::Preserve)`), or sets the entry-loading thread policy (`with_parse_context`). Entries are `IndexEntry` values with path, mode, object id, and stage.
+[`IndexFile::load`](rustdoc:grit_lib::index::IndexFile::load) reads the index (`GIT_INDEX_FILE` or `.git/index`), resolves a split index, and by default expands every sparse-directory placeholder (full in-memory materialization). [`IndexLoadOptions`](rustdoc:grit_lib::index::IndexLoadOptions) selects another file (`with_path`), keeps placeholders for read-mostly work such as `status` and `diff` on cone sparse-index checkouts (`with_sparse(SparseIndexLoad::Preserve)`), or sets the entry-loading thread policy (`with_parse_context`). Entries are [`IndexEntry`](rustdoc:grit_lib::index::IndexEntry) values with path, mode, object id, and stage; build one in memory with [`IndexEntry::new`](rustdoc:grit_lib::index::IndexEntry::new) (stage 0, zeroed stat data) and [`with_stage`](rustdoc:grit_lib::index::IndexEntry::with_stage) for a conflict stage.
 
 ```rust
 use grit_lib::index::{IndexLoadOptions, IndexWriteOptions, SparseIndexLoad};

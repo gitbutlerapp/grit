@@ -10,7 +10,7 @@ use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;
 
 use crate::hot_path_test_metrics::HotPathMetricsScope;
-use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR, MODE_TREE};
+use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::porcelain::add::{stage, StageOptions};
@@ -174,11 +174,21 @@ fn grit_tree_catfile_dump(odb: &Odb, tree_oid: &ObjectId, out: &mut String) {
     let entries = parse_tree(&obj.data).expect("parse tree");
     for entry in entries {
         let name = String::from_utf8_lossy(&entry.name);
-        if entry.mode == MODE_TREE {
-            out.push_str(&catfile_tree_line(entry.mode, "tree", &entry.oid, &name));
+        if entry.mode == crate::objects::FileMode::TREE {
+            out.push_str(&catfile_tree_line(
+                entry.mode.bits(),
+                "tree",
+                &entry.oid,
+                &name,
+            ));
             grit_tree_catfile_dump(odb, &entry.oid, out);
         } else {
-            out.push_str(&catfile_tree_line(entry.mode, "blob", &entry.oid, &name));
+            out.push_str(&catfile_tree_line(
+                entry.mode.bits(),
+                "blob",
+                &entry.oid,
+                &name,
+            ));
         }
     }
 }

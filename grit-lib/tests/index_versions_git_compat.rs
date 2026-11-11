@@ -1,6 +1,7 @@
 //! Index format versions, bogus inputs, unmerged stages, and resolve-undo (t1600/t1601/t1015/t2030/t2107).
 
 use crate::support;
+use grit_lib::objects::FileMode;
 
 use std::fs;
 use std::process::Command;
@@ -112,23 +113,9 @@ fn t1601_bogus_index_typed_errors() {
     ));
 
     let mut good = Index::new();
-    good.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 1,
-        oid: ObjectId::zero(),
-        flags: 1,
-        flags_extended: None,
-        path: b"f".to_vec(),
-        base_index_pos: 0,
-    });
+    good.add_or_replace(
+        IndexEntry::new(b"f".to_vec(), ObjectId::zero(), FileMode::REGULAR).with_size(1),
+    );
     good.write(&path).expect("write index");
     let loaded_null = Index::load(&path).expect("load index with null oid entry");
     assert_eq!(loaded_null.entries()[0].oid, ObjectId::zero());
@@ -173,24 +160,11 @@ fn t1015_read_index_unmerged_stages_roundtrip() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("load");
     for stage in 1u8..=3 {
-        let mut e = IndexEntry {
-            ctime_sec: 1,
-            ctime_nsec: 0,
-            mtime_sec: 1,
-            mtime_nsec: 0,
-            dev: 0,
-            ino: 0,
-            mode: MODE_REGULAR,
-            uid: 0,
-            gid: 0,
-            size: 5,
-            oid: blob,
-            flags: 4,
-            flags_extended: None,
-            path: b"conflict.txt".to_vec(),
-            base_index_pos: 0,
-        };
-        e.flags = (e.flags & 0x0FFF) | ((stage as u16) << 12);
+        let mut e = IndexEntry::new(b"conflict.txt".to_vec(), blob, FileMode::REGULAR)
+            .with_ctime(1, 0)
+            .with_mtime(1, 0)
+            .with_size(5);
+        e.set_stage(stage);
         index.add_or_replace(e);
     }
     grit.index()
@@ -257,23 +231,10 @@ fn t2107_intent_to_add_forces_index_version_three() {
         .expect("load");
     assert_eq!(index.version, 2);
     let blob = grit.odb().write(ObjectKind::Blob, b"n\n").expect("blob");
-    let mut e = IndexEntry {
-        ctime_sec: 1,
-        ctime_nsec: 0,
-        mtime_sec: 1,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 2,
-        oid: blob,
-        flags: 7,
-        flags_extended: None,
-        path: b"new.txt".to_vec(),
-        base_index_pos: 0,
-    };
+    let mut e = IndexEntry::new(b"new.txt".to_vec(), blob, FileMode::REGULAR)
+        .with_ctime(1, 0)
+        .with_mtime(1, 0)
+        .with_size(2);
     e.set_intent_to_add(true);
     index.add_or_replace(e);
     assert!(index.entries().iter().any(|e| e.intent_to_add()));

@@ -209,12 +209,12 @@ impl<'repo> Objects<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
-    /// use grit_lib::objects::{ObjectKind, TreeEntry};
+    /// use grit_lib::objects::{FileMode, ObjectKind, TreeEntry};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true))?;
     /// let blob = repo.objects().write(ObjectKind::Blob, b"hello\n")?;
-    /// let entry = |name: &str| TreeEntry { mode: 0o100644, name: name.into(), oid: blob };
+    /// let entry = |name: &str| TreeEntry::new(name, FileMode::REGULAR, blob);
     /// let tree = repo.objects().write_tree([entry("b"), entry("a")])?;
     /// let names: Vec<_> = grit_lib::objects::parse_tree(&repo.objects().read(&tree)?.data)?
     ///     .into_iter()

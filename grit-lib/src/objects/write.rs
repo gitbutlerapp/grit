@@ -5,6 +5,7 @@
 //! produce objects that pass `git fsck --strict`, including checks on referenced oids.
 
 use crate::error::ObjectError;
+use crate::objects::FileMode;
 use std::collections::HashSet;
 
 use crate::change_id::ChangeId;
@@ -46,12 +47,16 @@ pub enum TreeEntryError {
         max: usize,
     },
     /// The mode is not one of `100644`, `100755`, `120000`, `40000` or `160000`.
-    #[error("tree entry '{}' has unsupported mode {mode:o}", String::from_utf8_lossy(.name))]
+    #[error(
+        "tree entry '{}' has unsupported mode {:o}",
+        String::from_utf8_lossy(.name),
+        .mode.bits()
+    )]
     InvalidMode {
         /// Entry name.
         name: Vec<u8>,
         /// Mode as given.
-        mode: u32,
+        mode: FileMode,
     },
     /// The entry points at the all-zero object id.
     #[error("tree entry '{}' points at the null object id", String::from_utf8_lossy(.name))]
@@ -118,8 +123,14 @@ pub(crate) fn canonical_tree_entries(
     for entry in &entries {
         validate_tree_entry(entry, algo)?;
     }
-    entries
-        .sort_by(|a, b| tree_name_cmp(&a.name, a.mode == MODE_TREE, &b.name, b.mode == MODE_TREE));
+    entries.sort_by(|a, b| {
+        tree_name_cmp(
+            &a.name,
+            a.mode == FileMode::TREE,
+            &b.name,
+            b.mode == FileMode::TREE,
+        )
+    });
     let mut seen = HashSet::with_capacity(entries.len());
     if let Some(dup) = entries.iter().find(|e| !seen.insert(e.name.as_slice())) {
         return Err(TreeEntryError::DuplicateName {
@@ -159,9 +170,9 @@ fn validate_one_tree_entry_stored_kind(
     entry: &TreeEntry,
     allow_missing: bool,
 ) -> Result<(), Error> {
-    let expected = expected_kind_for_tree_mode(entry.mode);
+    let expected = expected_kind_for_tree_mode(entry.mode.bits());
     let stored = odb.stored_object_kind(&entry.oid)?;
-    if entry.mode == MODE_GITLINK {
+    if entry.mode == FileMode::GITLINK {
         if let Some(actual) = stored {
             if actual != ObjectKind::Commit {
                 return Err(Error::Object(ObjectError::UnexpectedKind {
@@ -202,7 +213,7 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
             max: MAX_TREE_ENTRY_LEN,
         });
     }
-    if !tree_entry_mode_allowed(entry.mode) {
+    if !tree_entry_mode_allowed(entry.mode.bits()) {
         return Err(TreeEntryError::InvalidMode {
             name: entry.name.clone(),
             mode: entry.mode,
@@ -220,7 +231,7 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
             name: entry.name.clone(),
         });
     }
-    if let Some(reserved_file) = tree_entry_reserved_dot_symlink(entry.mode, &entry.name) {
+    if let Some(reserved_file) = tree_entry_reserved_dot_symlink(entry.mode.bits(), &entry.name) {
         return Err(TreeEntryError::ForbiddenDotSymlink {
             name: entry.name.clone(),
             reserved_file,
@@ -239,18 +250,16 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
 /// ```
 /// # fn main() -> grit_lib::error::Result<()> {
 /// use grit_lib::ident::Signature;
-/// use grit_lib::objects::{NewCommit, ObjectKind, TreeEntry};
+/// use grit_lib::objects::{FileMode, NewCommit, ObjectKind, TreeEntry};
 /// use grit_lib::repo::{InitOptions, Repository};
 /// use time::OffsetDateTime;
 ///
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::new().with_bare(true))?;
 /// let blob = repo.objects().write(ObjectKind::Blob, b"hello\n")?;
-/// let tree = repo.objects().write_tree([TreeEntry {
-///     mode: 0o100644,
-///     name: b"README".to_vec(),
-///     oid: blob,
-/// }])?;
+/// let tree = repo
+///     .objects()
+///     .write_tree([TreeEntry::new("README", FileMode::REGULAR, blob)])?;
 /// let when = OffsetDateTime::from_unix_timestamp(1_700_000_000)
 ///     .map_err(|e| std::io::Error::other(e.to_string()))?;
 /// let ada = Signature::new("Ada Lovelace", "ada@example.com", when)?;
@@ -362,7 +371,7 @@ mod tests {
 
     fn entry(mode: u32, name: &[u8], byte: u8) -> TreeEntry {
         TreeEntry {
-            mode,
+            mode: FileMode::new(mode),
             name: name.to_vec(),
             oid: oid(byte),
         }
@@ -448,7 +457,7 @@ mod tests {
                 entry(0o100664, b"a", 1),
                 TreeEntryError::InvalidMode {
                     name: b"a".to_vec(),
-                    mode: 0o100664,
+                    mode: FileMode::new(0o100664),
                 },
             ),
             (

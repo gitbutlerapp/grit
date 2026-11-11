@@ -590,10 +590,10 @@ impl<'a> PopulatedTreeWalk<'a> {
             validate_tree_walk_entry(
                 frame.prefix.as_bytes(),
                 &entry.name,
-                entry.mode,
+                entry.mode.bits(),
                 self.protect,
             )?;
-            if crate::index::is_tree_mode(entry.mode) {
+            if crate::index::is_tree_mode(entry.mode.bits()) {
                 let entries = (*self.odb.cached_tree_entries(&entry.oid)?).clone();
                 self.stack.push(PopulatedTreeWalkFrame {
                     prefix: path,
@@ -604,7 +604,7 @@ impl<'a> PopulatedTreeWalk<'a> {
             }
             return Ok(Some(PopulatedTreeBlob {
                 path,
-                mode: crate::index::canon_mode(entry.mode),
+                mode: crate::index::canon_mode(entry.mode.bits()),
                 oid: entry.oid,
             }));
         }
@@ -631,11 +631,11 @@ fn tree_contains_dot_gitattributes(
 ) -> Result<bool> {
     let entries = (*odb.cached_tree_entries(tree_oid)?).clone();
     for entry in entries {
-        if entry.name == b".gitattributes" && entry.mode != MODE_TREE {
+        if entry.name == b".gitattributes" && entry.mode != FileMode::TREE {
             return Ok(true);
         }
-        if entry.mode == MODE_TREE {
-            validate_tree_walk_entry(prefix.as_bytes(), &entry.name, entry.mode, protect)?;
+        if entry.mode == FileMode::TREE {
+            validate_tree_walk_entry(prefix.as_bytes(), &entry.name, entry.mode.bits(), protect)?;
             let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
             if tree_contains_dot_gitattributes(odb, &entry.oid, &path, protect)? {
                 return Ok(true);

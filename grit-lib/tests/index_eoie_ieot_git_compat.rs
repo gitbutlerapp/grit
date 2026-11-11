@@ -1,5 +1,6 @@
 //! EOIE/IEOT index extensions: round-trip with system `git` and parallel grit load.
 
+use grit_lib::objects::FileMode;
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -84,8 +85,11 @@ fn assert_entries_match(a: &Index, b: &Index) {
         assert_eq!(ea.path, eb.path);
         assert_eq!(ea.oid, eb.oid);
         assert_eq!(ea.mode, eb.mode);
-        assert_eq!(ea.flags, eb.flags);
-        assert_eq!(ea.flags_extended, eb.flags_extended);
+        assert_eq!(ea.stage(), eb.stage());
+        assert_eq!(ea.assume_unchanged(), eb.assume_unchanged());
+        assert_eq!(ea.skip_worktree(), eb.skip_worktree());
+        assert_eq!(ea.intent_to_add(), eb.intent_to_add());
+        assert_eq!(ea.fsmonitor_valid(), eb.fsmonitor_valid());
     }
 }
 
@@ -177,22 +181,17 @@ fn grit_write_git_accepts(version: u32) {
         repo.odb()
             .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
             .expect("write blob");
-        idx.add_or_replace(grit_lib::index::IndexEntry {
-            ctime_sec: 1_700_000_000,
-            ctime_nsec: 0,
-            mtime_sec: 1_700_000_000,
-            mtime_nsec: 0,
-            dev: 1,
-            ino: i as u32,
-            mode: grit_lib::index::MODE_REGULAR,
-            uid: 1000,
-            gid: 1000,
-            size: data.len() as u32,
-            oid,
-            flags: path.len().min(0xFFF) as u16,
-            flags_extended: None,
-            path: path.into_bytes(),
-            base_index_pos: 0,
+        idx.add_or_replace({
+            let mut entry =
+                grit_lib::index::IndexEntry::new(path.into_bytes(), oid, FileMode::REGULAR)
+                    .with_ctime(1_700_000_000, 0)
+                    .with_mtime(1_700_000_000, 0)
+                    .with_size(data.len() as u32);
+            entry.dev = 1;
+            entry.ino = i as u32;
+            entry.uid = 1000;
+            entry.gid = 1000;
+            entry
         });
     }
 
@@ -241,22 +240,17 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
         repo.odb()
             .write_loose_materialize(ObjectKind::Blob, data.as_bytes())
             .expect("write blob");
-        idx.add_or_replace(grit_lib::index::IndexEntry {
-            ctime_sec: 1_700_000_000,
-            ctime_nsec: 0,
-            mtime_sec: 1_700_000_000,
-            mtime_nsec: 0,
-            dev: 1,
-            ino: i as u32,
-            mode: grit_lib::index::MODE_REGULAR,
-            uid: 1000,
-            gid: 1000,
-            size: data.len() as u32,
-            oid,
-            flags: path.len().min(0xFFF) as u16,
-            flags_extended: None,
-            path: path.into_bytes(),
-            base_index_pos: 0,
+        idx.add_or_replace({
+            let mut entry =
+                grit_lib::index::IndexEntry::new(path.into_bytes(), oid, FileMode::REGULAR)
+                    .with_ctime(1_700_000_000, 0)
+                    .with_mtime(1_700_000_000, 0)
+                    .with_size(data.len() as u32);
+            entry.dev = 1;
+            entry.ino = i as u32;
+            entry.uid = 1000;
+            entry.gid = 1000;
+            entry
         });
     }
 
@@ -305,22 +299,17 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
             .expect("blob");
         let oid =
             hash_object(repo.odb().hash_algo(), ObjectKind::Blob, data.as_bytes()).expect("hash");
-        let mut entry = grit_lib::index::IndexEntry {
-            ctime_sec: 1_700_000_000,
-            ctime_nsec: 0,
-            mtime_sec: 1_700_000_000,
-            mtime_nsec: 0,
-            dev: 1,
-            ino: i as u32,
-            mode: grit_lib::index::MODE_REGULAR,
-            uid: 1000,
-            gid: 1000,
-            size: data.len() as u32,
-            oid,
-            flags: path.len().min(0xFFF) as u16,
-            flags_extended: None,
-            path: path.into_bytes(),
-            base_index_pos: 0,
+        let mut entry = {
+            let mut entry =
+                grit_lib::index::IndexEntry::new(path.into_bytes(), oid, FileMode::REGULAR)
+                    .with_ctime(1_700_000_000, 0)
+                    .with_mtime(1_700_000_000, 0)
+                    .with_size(data.len() as u32);
+            entry.dev = 1;
+            entry.ino = i as u32;
+            entry.uid = 1000;
+            entry.gid = 1000;
+            entry
         };
         entry.set_fsmonitor_valid(i != 1_000 && i != 9_000);
         idx.add_or_replace(entry);

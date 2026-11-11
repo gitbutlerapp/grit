@@ -1,5 +1,6 @@
 //! Tree metadata retained by a public diff must stay bounded across sibling trees.
 
+use grit_lib::objects::FileMode;
 use std::alloc::{GlobalAlloc, Layout, System};
 use std::cell::Cell;
 
@@ -89,10 +90,12 @@ fn metadata_fixture(
     for d in 0..DIRS {
         // Distinct OIDs prevent repeated-subtree caching from hiding retention.
         let mut entries: Vec<_> = (0..width)
-            .map(|f| TreeEntry {
-                mode: 0o100644,
-                name: format!("f{d:03}-{f:05}.txt").into_bytes(),
-                oid: old_blob,
+            .map(|f| {
+                TreeEntry::new(
+                    format!("f{d:03}-{f:05}.txt").into_bytes(),
+                    FileMode::REGULAR,
+                    old_blob,
+                )
             })
             .collect();
         let old = write_tree(&repo, &entries);
@@ -100,15 +103,14 @@ fn metadata_fixture(
             entry.oid = new_blob;
         }
         let new = write_tree(&repo, &entries);
-        old_root.push(TreeEntry {
-            mode: 0o040000,
-            name: format!("d{d:03}").into_bytes(),
-            oid: old,
-        });
-        new_root.push(TreeEntry {
-            oid: new,
-            ..old_root.last().expect("directory").clone()
-        });
+        old_root.push(TreeEntry::new(
+            format!("d{d:03}").into_bytes(),
+            FileMode::TREE,
+            old,
+        ));
+        let mut changed_dir = old_root.last().expect("directory").clone();
+        changed_dir.oid = new;
+        new_root.push(changed_dir);
     }
     let old = write_tree(&repo, &old_root);
     let new = write_tree(&repo, &new_root);

@@ -1,6 +1,7 @@
 //! Switching away from a branch must not fail because the current index lists a hostile path.
 
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::switch::SwitchOptions;
 use grit_lib::progress::{CancelToken, NullProgress};
@@ -33,23 +34,11 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
     let blob = write_blob(git_dir, b"hostile");
     let blob_oid: ObjectId = blob.parse().expect("oid");
     let mut index = Index::load(&repo.index().path()).expect("index");
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: blob_oid,
-        flags: 4,
-        flags_extended: None,
-        path: b".git".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(IndexEntry::new(
+        b".git".to_vec(),
+        blob_oid,
+        FileMode::REGULAR,
+    ));
     let index_path = repo.index().path();
     index.write(&index_path).expect("write index");
 

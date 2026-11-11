@@ -949,7 +949,7 @@ pub(super) fn diff_index_to_tree_for_paths(
         let (idx_oid, idx_mode) = index_entry
             .map(|e| (e.oid, e.mode))
             .unwrap_or((ObjectId::zero(), 0));
-        let (tree_oid, tree_mode) = tree_side.unwrap_or((ObjectId::zero(), 0));
+        let (tree_oid, tree_mode) = tree_side.unwrap_or((ObjectId::zero(), FileMode::new(0)));
         if index_entry.is_none() && tree_side.is_none() {
             continue;
         }
@@ -971,7 +971,7 @@ pub(super) fn diff_index_to_tree_for_paths(
                 status: DiffStatus::Deleted,
                 old_path: Some(path.clone()),
                 new_path: None,
-                old_mode: FileMode::new(tree_mode),
+                old_mode: tree_mode,
                 new_mode: FileMode::ABSENT,
                 old_oid: tree_oid,
                 new_oid: ObjectId::zero(),
@@ -979,12 +979,12 @@ pub(super) fn diff_index_to_tree_for_paths(
             });
             continue;
         }
-        if idx_oid != tree_oid || idx_mode != tree_mode {
+        if idx_oid != tree_oid || idx_mode != tree_mode.bits() {
             result.push(DiffEntry {
-                status: DiffStatus::for_content_change(tree_mode, idx_mode),
+                status: DiffStatus::for_content_change(tree_mode.bits(), idx_mode),
                 old_path: Some(path.clone()),
                 new_path: Some(path.clone()),
-                old_mode: FileMode::new(tree_mode),
+                old_mode: tree_mode,
                 new_mode: FileMode::new(idx_mode),
                 old_oid: tree_oid,
                 new_oid: idx_oid,

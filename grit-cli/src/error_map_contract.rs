@@ -23,8 +23,9 @@ use grit_lib::repo::error::FilesOnlyOperation;
 
 use crate::error_kind::ErrorKind;
 use crate::error_map::{
-    classify, human_message_for_lib, identity_error, map_branch_error, map_remote_error,
-    map_stage_lib_error, pathspec_ignored_human, stage_conflict_markers_human,
+    classify, human_message_for_lib, identity_error, map_branch_error, map_merge_source_error,
+    map_remote_error, map_stage_lib_error, map_switch_start_point_error, pathspec_ignored_human,
+    stage_conflict_markers_human,
 };
 use crate::exit_status::ExitStatus;
 use crate::json_error::{
@@ -677,7 +678,31 @@ static CONTRACT: &[ContractRow] = &[
         build: || map_lib_error(LibError::Revision(RevisionError::NotFound { spec: "missing".into() })),
         kind: Some(ErrorKind::RevisionNotFound),
         exit: ExitStatus::Failure,
+        human: || "revision 'missing' not found".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "lib_revision_not_found_bare",
+        build: || Error::new(LibError::Revision(RevisionError::NotFound { spec: "missing".into() })),
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || "revision 'missing' not found".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "merge_source_not_found",
+        build: || map_merge_source_error(LibError::Revision(RevisionError::NotFound { spec: "missing".into() })),
+        kind: Some(ErrorKind::RevisionNotFound),
+        exit: ExitStatus::Failure,
         human: || "no branch, tag or commit named 'missing'".to_owned(),
+        hint: None,
+    },
+    ContractRow {
+        label: "switch_start_point_not_found",
+        build: || map_switch_start_point_error(LibError::Revision(RevisionError::NotFound { spec: "missing".into() })),
+        kind: None,
+        exit: ExitStatus::Failure,
+        human: || "unknown revision 'missing'".to_owned(),
         hint: None,
     },
     ContractRow {

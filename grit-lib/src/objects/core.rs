@@ -982,10 +982,29 @@ impl Object {
 }
 
 /// A single entry in a Git tree object.
+///
+/// Build one with [`TreeEntry::new`]; [`parse_tree`] returns them for a stored tree.
+/// `mode` is a [`FileMode`], which holds any mode a tree can contain, including legacy
+/// modes such as `100664` that `git fsck` reports; [`Objects::write_tree`] rejects those.
+///
+/// [`Objects::write_tree`]: crate::objects::Objects::write_tree
+///
+/// # Examples
+///
+/// ```
+/// use grit_lib::objects::{serialize_tree, FileMode, ObjectId, TreeEntry};
+///
+/// let blob = ObjectId::from_hex("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")?;
+/// let entry = TreeEntry::new("README", FileMode::REGULAR, blob);
+/// assert_eq!(entry.mode_str(), "100644");
+/// assert!(serialize_tree(&[entry]).starts_with(b"100644 README\0"));
+/// # Ok::<(), grit_lib::error::Error>(())
+/// ```
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TreeEntry {
-    /// Unix file mode (e.g. `0o100644` for a regular file, `0o040000` for a tree).
-    pub mode: u32,
+    /// Entry mode (e.g. [`FileMode::REGULAR`] for a file, [`FileMode::TREE`] for a subtree).
+    pub mode: FileMode,
     /// Entry name (file or directory name only, no path separators).
     pub name: Vec<u8>,
     /// The object ID of the blob or sub-tree.
@@ -1012,17 +1031,34 @@ impl serde::Serialize for TreeEntry {
 }
 
 impl TreeEntry {
+    /// An entry named `name` with `mode`, pointing at `oid`.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: one path component (no `/`); tree names need not be UTF-8.
+    /// - `mode`: the entry mode ([`FileMode::REGULAR`], [`FileMode::TREE`], …).
+    /// - `oid`: the blob, subtree or (for a gitlink) commit the entry names.
+    #[must_use]
+    pub fn new(name: impl Into<Vec<u8>>, mode: FileMode, oid: ObjectId) -> Self {
+        Self {
+            mode,
+            name: name.into(),
+            oid,
+        }
+    }
+
+    /// Whether the entry is a subtree ([`FileMode::TREE`]).
+    #[must_use]
+    pub const fn is_tree(&self) -> bool {
+        self.mode.bits() == FileMode::TREE.bits()
+    }
+
     /// Format the mode as Git does: no leading zero, minimal digits.
     ///
     /// Git uses `"40000"` for trees (not `"040000"`), and `"100644"` for blobs.
     #[must_use]
     pub fn mode_str(&self) -> String {
-        // Git omits the leading zero for tree mode
-        if self.mode == 0o040000 {
-            "40000".to_owned()
-        } else {
-            format!("{:o}", self.mode)
-        }
+        format!("{:o}", self.mode.bits())
     }
 }
 
@@ -1042,7 +1078,7 @@ impl TreeEntryRef<'_> {
     #[must_use]
     pub fn to_owned(&self) -> TreeEntry {
         TreeEntry {
-            mode: self.mode,
+            mode: FileMode::new(self.mode),
             name: self.name.to_vec(),
             oid: self.oid,
         }
@@ -1234,7 +1270,7 @@ pub(crate) fn collect_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<V
     let mut entries = Vec::with_capacity(data.len() / 32);
     while let Some(entry) = parse_tree_entry_at(data, &mut pos, oid_len)? {
         entries.push(TreeEntry {
-            mode: entry.mode,
+            mode: FileMode::new(entry.mode),
             name: entry.name.to_vec(),
             oid: entry.oid,
         });
@@ -1287,7 +1323,7 @@ pub fn serialize_tree(entries: &[TreeEntry]) -> Vec<u8> {
         .sum();
     let mut out = Vec::with_capacity(len);
     for e in entries {
-        push_tree_mode(&mut out, e.mode);
+        push_tree_mode(&mut out, e.mode.bits());
         out.push(b' ');
         out.extend_from_slice(&e.name);
         out.push(0);
@@ -1411,7 +1447,7 @@ pub(crate) fn find_tree_entry_by_name_in_data(
         }
         if entry_name == name {
             return Ok(Some(TreeEntry {
-                mode,
+                mode: FileMode::new(mode),
                 name: entry_name.to_vec(),
                 oid: ObjectId::from_bytes(&rest[oid_start..oid_end])?,
             }));
@@ -1433,7 +1469,7 @@ pub(crate) fn find_tree_entry_by_name_dir_or_file_in_data(
     name: &[u8],
 ) -> Result<Option<TreeEntry>> {
     if let Some(entry) = find_tree_entry_by_name_in_data(data, oid_len, name, true)? {
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             return Ok(Some(entry));
         }
     }
@@ -2235,7 +2271,7 @@ mod commit_parse_tests {
             let mut out = Vec::new();
             push_tree_mode(&mut out, mode);
             let entry = TreeEntry {
-                mode,
+                mode: FileMode::new(mode),
                 name: Vec::new(),
                 oid: ObjectId::empty_tree(),
             };
@@ -2402,7 +2438,7 @@ mod commit_parse_tests {
     fn tree_entry_mode_str_and_tag_object_line_oid() {
         let oid = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").unwrap();
         let entry = TreeEntry {
-            mode: 0o040000,
+            mode: FileMode::TREE,
             name: b"dir".to_vec(),
             oid,
         };
@@ -2555,7 +2591,7 @@ mod commit_parse_tests {
     #[test]
     fn tree_ref_iter_public_api_smoke() {
         let data = serialize_tree(&[TreeEntry {
-            mode: 0o100644,
+            mode: FileMode::REGULAR,
             name: b"a".to_vec(),
             oid: ObjectId::from_hex("0123456789012345678901234567890123456789").unwrap(),
         }]);
@@ -2572,31 +2608,41 @@ mod commit_parse_tests {
         let dummy = ObjectId::from_hex("0123456789012345678901234567890123456789")?;
         let mut entries: Vec<TreeEntry> = (1..=60)
             .map(|i| TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: format!("f{i}.txt").into_bytes(),
                 oid: dummy,
             })
             .collect();
         entries.push(TreeEntry {
-            mode: 0o040000,
+            mode: FileMode::TREE,
             name: b"sub".to_vec(),
             oid: dummy,
         });
         entries.sort_by(|a, b| {
-            tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+            tree_name_cmp(
+                &a.name,
+                a.mode == FileMode::TREE,
+                &b.name,
+                b.mode == FileMode::TREE,
+            )
         });
         let data = serialize_tree(&entries);
         assert!(entries.len() >= 48);
         let found = find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"sub", true)?
             .expect("sub directory in wide tree");
-        assert_eq!(found.mode, 0o040000);
+        assert_eq!(found.mode, FileMode::TREE);
         assert_eq!(found.name, b"sub");
         Ok(())
     }
 
     fn sorted_tree_data(entries: &mut [TreeEntry]) -> Vec<u8> {
         entries.sort_by(|a, b| {
-            tree_name_cmp(&a.name, a.mode == 0o040000, &b.name, b.mode == 0o040000)
+            tree_name_cmp(
+                &a.name,
+                a.mode == FileMode::TREE,
+                &b.name,
+                b.mode == FileMode::TREE,
+            )
         });
         serialize_tree(entries)
     }
@@ -2607,39 +2653,39 @@ mod commit_parse_tests {
         let oid_b = ObjectId::from_hex("2222222222222222222222222222222222222222")?;
         let mut entries = vec![
             TreeEntry {
-                mode: 0o040000,
+                mode: FileMode::TREE,
                 name: b"foo".to_vec(),
                 oid: oid_a,
             },
             TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: b"foo.c".to_vec(),
                 oid: oid_b,
             },
             TreeEntry {
-                mode: 0o100755,
+                mode: FileMode::EXECUTABLE,
                 name: b"foo-bar".to_vec(),
                 oid: oid_b,
             },
             TreeEntry {
-                mode: 0o120000,
+                mode: FileMode::SYMLINK,
                 name: b"link".to_vec(),
                 oid: oid_a,
             },
             TreeEntry {
-                mode: 0o160000,
+                mode: FileMode::GITLINK,
                 name: b"sub".to_vec(),
                 oid: oid_b,
             },
             TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: b"README".to_vec(),
                 oid: oid_a,
             },
         ];
         let data = sorted_tree_data(&mut entries);
         for expected in parse_tree(&data)? {
-            let name_is_tree = expected.mode == 0o040000;
+            let name_is_tree = expected.mode == FileMode::TREE;
             let found = find_tree_entry_by_name_in_data(
                 &data,
                 HashAlgo::Sha1.len(),
@@ -2665,12 +2711,12 @@ mod commit_parse_tests {
         let oid = ObjectId::from_hex("3333333333333333333333333333333333333333")?;
         let mut entries = vec![
             TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: b"a".to_vec(),
                 oid,
             },
             TreeEntry {
-                mode: 0o100644,
+                mode: FileMode::REGULAR,
                 name: b"c".to_vec(),
                 oid,
             },
@@ -2711,7 +2757,7 @@ mod commit_parse_tests {
         let found = find_tree_entry_by_name_in_data(&raw, HashAlgo::Sha256.len(), b"file", false)?
             .expect("file");
         assert_eq!(found.oid, oid);
-        assert_eq!(found.mode, 0o100644);
+        assert_eq!(found.mode, FileMode::REGULAR);
         Ok(())
     }
 

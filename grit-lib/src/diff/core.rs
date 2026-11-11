@@ -3210,7 +3210,7 @@ impl<'a> WalkEntries<'a> {
     fn next_entry(&mut self) -> Result<Option<TreeEntryRef<'a>>> {
         match self {
             Self::Parsed(entries) => Ok(entries.next().map(|entry| TreeEntryRef {
-                mode: entry.mode,
+                mode: entry.mode.bits(),
                 name: &entry.name,
                 oid: entry.oid,
             })),
@@ -3288,9 +3288,9 @@ fn diff_tree_entries_count(
             (Some(o), Some(n)) => {
                 let cmp = crate::objects::tree_name_cmp(
                     &o.name,
-                    is_tree_mode(o.mode),
+                    is_tree_mode(o.mode.bits()),
                     &n.name,
-                    is_tree_mode(n.mode),
+                    is_tree_mode(n.mode.bits()),
                 );
                 match cmp {
                     std::cmp::Ordering::Less => {
@@ -3303,10 +3303,11 @@ fn diff_tree_entries_count(
                     }
                     std::cmp::Ordering::Equal => {
                         if o.oid != n.oid
-                            || crate::index::canon_mode(o.mode) != crate::index::canon_mode(n.mode)
+                            || crate::index::canon_mode(o.mode.bits())
+                                != crate::index::canon_mode(n.mode.bits())
                         {
                             let path = crate::repo_relpath::format_path_stored(prefix, &o.name);
-                            if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
+                            if is_tree_mode(o.mode.bits()) && is_tree_mode(n.mode.bits()) {
                                 if show_trees {
                                     *count += 1;
                                 }
@@ -3316,7 +3317,7 @@ fn diff_tree_entries_count(
                                     Some(&n.oid),
                                     &path,
                                 )?;
-                            } else if is_tree_mode(o.mode) != is_tree_mode(n.mode) {
+                            } else if is_tree_mode(o.mode.bits()) != is_tree_mode(n.mode.bits()) {
                                 emit_deleted_count(odb, o, prefix, show_trees, count)?;
                                 emit_added_count(odb, n, prefix, show_trees, count)?;
                             } else {
@@ -3351,7 +3352,7 @@ fn emit_deleted_count(
     count: &mut usize,
 ) -> Result<()> {
     let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
-    if is_tree_mode(entry.mode) {
+    if is_tree_mode(entry.mode.bits()) {
         if show_trees {
             *count += 1;
         }
@@ -3370,7 +3371,7 @@ fn emit_added_count(
     count: &mut usize,
 ) -> Result<()> {
     let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
-    if is_tree_mode(entry.mode) {
+    if is_tree_mode(entry.mode.bits()) {
         if show_trees {
             *count += 1;
         }
@@ -4290,7 +4291,7 @@ fn diff_index_tree_at(
                     IndexLevelKind::Blob { name, .. } => (*name, false),
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
-                let t_is_tree = is_tree_mode(t_entry.mode);
+                let t_is_tree = is_tree_mode(t_entry.mode.bits());
                 let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 match cmp {
                     std::cmp::Ordering::Less => {
@@ -4338,11 +4339,11 @@ fn diff_index_tree_at(
                             };
                             *walk.idx_cursor += 1;
                             if t_entry.oid != ie.oid
-                                || crate::index::canon_mode(t_entry.mode)
+                                || crate::index::canon_mode(t_entry.mode.bits())
                                     != crate::index::canon_mode(ie.mode)
                             {
                                 let path = String::from_utf8_lossy(&ie.path).into_owned();
-                                let tree_mode = crate::index::canon_mode(t_entry.mode);
+                                let tree_mode = crate::index::canon_mode(t_entry.mode.bits());
                                 let index_mode = crate::index::canon_mode(ie.mode);
                                 walk.result.push(DiffEntry {
                                     status: DiffStatus::for_content_change(tree_mode, index_mode),
@@ -4409,11 +4410,11 @@ fn emit_index_tree_deleted(
     ignore_submodules: bool,
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
-    if ignore_submodules && entry.mode == 0o160000 {
+    if ignore_submodules && entry.mode == FileMode::GITLINK {
         return Ok(());
     }
     let path = String::from_utf8_lossy(&join_index_path(dir_prefix, &entry.name)).into_owned();
-    if is_tree_mode(entry.mode) {
+    if is_tree_mode(entry.mode.bits()) {
         for fe in flatten_tree(odb, &entry.oid, &path)? {
             if ignore_submodules && fe.mode == 0o160000 {
                 continue;
@@ -4434,7 +4435,7 @@ fn emit_index_tree_deleted(
             status: DiffStatus::Deleted,
             old_path: Some(path),
             new_path: None,
-            old_mode: FileMode::new(entry.mode),
+            old_mode: entry.mode,
             new_mode: FileMode::ABSENT,
             old_oid: entry.oid,
             new_oid: zero_oid(),
@@ -4700,7 +4701,7 @@ fn rebuild_hard_reset_cache_tree_at(
                     IndexLevelKind::Blob { name, .. } => (*name, false),
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
-                let t_is_tree = is_tree_mode(t_entry.mode);
+                let t_is_tree = is_tree_mode(t_entry.mode.bits());
                 let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 if cmp != std::cmp::Ordering::Equal {
                     return Err(IndexError::corrupt(IndexCorrupt::new(
@@ -4825,7 +4826,7 @@ fn hard_reset_align_index_tree_at(
                     IndexLevelKind::Blob { name, .. } => (*name, false),
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
-                let t_is_tree = is_tree_mode(t_entry.mode);
+                let t_is_tree = is_tree_mode(t_entry.mode.bits());
                 let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 match cmp {
                     std::cmp::Ordering::Less => {
@@ -4866,12 +4867,12 @@ fn hard_reset_align_index_tree_at(
                             };
                             *walk.idx_cursor += 1;
                             if t_entry.oid != ie.oid
-                                || crate::index::canon_mode(t_entry.mode)
+                                || crate::index::canon_mode(t_entry.mode.bits())
                                     != crate::index::canon_mode(ie.mode)
                             {
                                 walk.plan.updates.push((
                                     ie.path.clone(),
-                                    crate::index::canon_mode(t_entry.mode),
+                                    crate::index::canon_mode(t_entry.mode.bits()),
                                     t_entry.oid,
                                 ));
                             }
@@ -4955,11 +4956,11 @@ fn hard_reset_plan_tree_only(
     entry: &TreeEntry,
     dir_prefix: &[u8],
 ) -> Result<()> {
-    if walk.ignore_submodules && entry.mode == 0o160000 {
+    if walk.ignore_submodules && entry.mode == FileMode::GITLINK {
         return Ok(());
     }
     let path = join_index_path(dir_prefix, &entry.name);
-    if is_tree_mode(entry.mode) {
+    if is_tree_mode(entry.mode.bits()) {
         if hard_reset_sparse_excludes_tree(walk, &path) {
             walk.plan
                 .insert_entries
@@ -4973,9 +4974,11 @@ fn hard_reset_plan_tree_only(
             )?;
         }
     } else {
-        walk.plan
-            .insert_entries
-            .push(hard_reset_index_tree_row(path, entry.mode, entry.oid));
+        walk.plan.insert_entries.push(hard_reset_index_tree_row(
+            path,
+            entry.mode.bits(),
+            entry.oid,
+        ));
     }
     Ok(())
 }
@@ -5035,10 +5038,10 @@ fn hard_reset_append_entries_from_tree(
             path.push(b'/');
         }
         path.extend_from_slice(&te.name);
-        if is_tree_mode(te.mode) {
+        if is_tree_mode(te.mode.bits()) {
             hard_reset_append_entries_from_tree(odb, &te.oid, &path, out)?;
         } else {
-            out.push(hard_reset_index_tree_row(path, te.mode, te.oid));
+            out.push(hard_reset_index_tree_row(path, te.mode.bits(), te.oid));
         }
     }
     Ok(())
@@ -11354,7 +11357,7 @@ fn subtree_oid_at_path(odb: &Odb, root: &ObjectId, path: &str) -> Result<Option<
         else {
             return Ok(None);
         };
-        if !is_tree_mode(entry.mode) {
+        if !is_tree_mode(entry.mode.bits()) {
             return Ok(None);
         }
         oid = entry.oid;
@@ -11462,7 +11465,7 @@ fn flatten_tree_with_index(
 
     for entry in entries {
         let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
-        if is_tree_mode(entry.mode) {
+        if is_tree_mode(entry.mode.bits()) {
             if index.is_some_and(|idx| sparse_index_skips_tree_descent(idx, &path, &entry.oid)) {
                 continue;
             }
@@ -11471,7 +11474,7 @@ fn flatten_tree_with_index(
         } else {
             result.push(FlatEntry {
                 path,
-                mode: entry.mode,
+                mode: entry.mode.bits(),
                 oid: entry.oid,
             });
         }

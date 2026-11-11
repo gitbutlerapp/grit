@@ -5,6 +5,7 @@
 
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
+use grit_lib::objects::FileMode;
 use std::hint::black_box;
 use std::sync::OnceLock;
 
@@ -41,16 +42,16 @@ fn fixture() -> &'static CommitRangeFixture {
                 .write(ObjectKind::Blob, format!("new payload {i}\n").as_bytes())
                 .expect("new blob");
             let name = format!("src/file_{i:04}.rs");
-            old_entries.push(TreeEntry {
-                mode: 0o100644,
-                name: name.as_bytes().to_vec(),
-                oid: old_blob,
-            });
-            new_entries.push(TreeEntry {
-                mode: 0o100644,
-                name: name.into_bytes(),
-                oid: new_blob,
-            });
+            old_entries.push(TreeEntry::new(
+                name.as_bytes().to_vec(),
+                FileMode::REGULAR,
+                old_blob,
+            ));
+            new_entries.push(TreeEntry::new(
+                name.into_bytes(),
+                FileMode::REGULAR,
+                new_blob,
+            ));
         }
         let old_tree = odb
             .write(ObjectKind::Tree, &serialize_tree(&old_entries))

@@ -2,6 +2,7 @@
 
 use crate::support;
 use grit_lib::error::ObjectError;
+use grit_lib::objects::FileMode;
 
 use std::fs;
 use std::process::Command;
@@ -25,23 +26,10 @@ fn index_stat_helpers_and_normalize_mode() {
     assert_eq!(normalize_mode(0o100755), 0o100755);
     assert_eq!(normalize_mode(0o120000), 0o120000);
 
-    let a = IndexEntry {
-        ctime_sec: 1,
-        ctime_nsec: 2,
-        mtime_sec: 3,
-        mtime_nsec: 4,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 10,
-        oid: ObjectId::zero(),
-        flags: 1,
-        flags_extended: None,
-        path: b"p".to_vec(),
-        base_index_pos: 0,
-    };
+    let a = IndexEntry::new(b"p".to_vec(), ObjectId::zero(), FileMode::REGULAR)
+        .with_ctime(1, 2)
+        .with_mtime(3, 4)
+        .with_size(10);
     let mut b = a.clone();
     assert!(index_entries_stat_equivalent(
         &a,
@@ -61,22 +49,6 @@ fn index_stat_helpers_and_normalize_mode() {
     let _ = entry_from_metadata(&meta, b"f", ObjectId::zero(), MODE_REGULAR);
     let wt = tmp.path();
     assert!(worktree_path_from_index_rel(wt, b"a/b").ends_with("a/b"));
-}
-
-#[test]
-fn dump_cache_tree_and_format_dump() {
-    let repo = HistoryRepo::init();
-    seed_multidir_repo(&repo);
-    let wt = repo.worktree();
-    let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
-    let index = grit
-        .index()
-        .load(&grit_lib::index::IndexLoadOptions::default())
-        .expect("load");
-    assert!(index.cache_tree.is_some());
-    let _ = index.format_cache_tree_dump();
-    let dump = index.dump_cache_tree(&grit.odb()).expect("dump");
-    assert!(!dump.is_empty());
 }
 
 #[test]

@@ -1,5 +1,6 @@
 //! FSMN index extension compatibility with the system `git` binary and fsmonitor hook v2.
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::CancelToken;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -145,23 +146,10 @@ fn make_replacement_entry(path: &[u8], content: &[u8]) -> IndexEntry {
     let oid = HashAlgo::Sha1
         .hash_object(ObjectKind::Blob, content)
         .expect("hash");
-    IndexEntry {
-        ctime_sec: 1,
-        ctime_nsec: 0,
-        mtime_sec: 1,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: content.len() as u32,
-        oid,
-        flags: path.len().min(0xFFF) as u16,
-        flags_extended: None,
-        path: path.to_vec(),
-        base_index_pos: 0,
-    }
+    IndexEntry::new(path.to_vec(), oid, FileMode::REGULAR)
+        .with_ctime(1, 0)
+        .with_mtime(1, 0)
+        .with_size(content.len() as u32)
 }
 
 #[test]

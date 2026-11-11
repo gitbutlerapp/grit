@@ -5,6 +5,7 @@ use grit_lib::change_id::{change_id, ChangeId};
 use grit_lib::error::Error;
 use grit_lib::error::ObjectError;
 use grit_lib::ident::{parse_signature, Signature, SignatureError, SignatureField};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{
     serialize_commit, serialize_tree, CommitData, HashAlgo, NewCommit, ObjectId, ObjectKind,
     TreeEntry, TreeEntryError,
@@ -53,11 +54,7 @@ fn blob(repo: &Repository, data: &[u8]) -> ObjectId {
 }
 
 fn file(name: &[u8], oid: ObjectId) -> TreeEntry {
-    TreeEntry {
-        mode: 0o100644,
-        name: name.to_vec(),
-        oid,
-    }
+    TreeEntry::new(name.to_vec(), FileMode::REGULAR, oid)
 }
 
 fn hand_rolled_commit(tree: ObjectId, ident: &str) -> CommitData {
@@ -156,21 +153,9 @@ fn write_tree_sorts_entries_and_passes_git_fsck() {
         .objects()
         .write_tree([
             file(b"foo.c", b),
-            TreeEntry {
-                mode: 0o040000,
-                name: b"foo".to_vec(),
-                oid: sub,
-            },
-            TreeEntry {
-                mode: 0o100755,
-                name: b"foo-bar".to_vec(),
-                oid: a,
-            },
-            TreeEntry {
-                mode: 0o120000,
-                name: b"link".to_vec(),
-                oid: b,
-            },
+            TreeEntry::new(b"foo", FileMode::TREE, sub),
+            TreeEntry::new(b"foo-bar", FileMode::EXECUTABLE, a),
+            TreeEntry::new(b"link", FileMode::SYMLINK, b),
         ])
         .expect("tree");
 
@@ -194,11 +179,9 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
     let blob = blob(&repo, b"x\n");
     let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").expect("oid");
 
-    let blob_as_tree = repo.objects().write_tree([TreeEntry {
-        mode: 0o040000,
-        name: b"d".to_vec(),
-        oid: blob,
-    }]);
+    let blob_as_tree = repo
+        .objects()
+        .write_tree([TreeEntry::new(b"d", FileMode::TREE, blob)]);
     assert!(
         matches!(
             blob_as_tree,
@@ -211,11 +194,9 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         "{blob_as_tree:?}"
     );
 
-    let missing_file = repo.objects().write_tree([TreeEntry {
-        mode: 0o100644,
-        name: b"m".to_vec(),
-        oid: missing,
-    }]);
+    let missing_file =
+        repo.objects()
+            .write_tree([TreeEntry::new(b"m", FileMode::REGULAR, missing)]);
     assert!(
         matches!(
             missing_file,
@@ -224,11 +205,9 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         "{missing_file:?}"
     );
 
-    let gitmodules_link = repo.objects().write_tree([TreeEntry {
-        mode: 0o120000,
-        name: b".gitmodules".to_vec(),
-        oid: blob,
-    }]);
+    let gitmodules_link =
+        repo.objects()
+            .write_tree([TreeEntry::new(b".gitmodules", FileMode::SYMLINK, blob)]);
     assert!(
         matches!(
             gitmodules_link,
@@ -240,11 +219,9 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         "{gitmodules_link:?}"
     );
 
-    let ntfs_gitmodules_link = repo.objects().write_tree([TreeEntry {
-        mode: 0o120000,
-        name: b"foo\\.gitmodules".to_vec(),
-        oid: blob,
-    }]);
+    let ntfs_gitmodules_link =
+        repo.objects()
+            .write_tree([TreeEntry::new(b"foo\\.gitmodules", FileMode::SYMLINK, blob)]);
     assert!(
         matches!(
             ntfs_gitmodules_link,
@@ -259,11 +236,7 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         .objects()
         .hash(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: 0o120000,
-                name: b"foo\\.gitmodules".to_vec(),
-                oid: blob,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"foo\\.gitmodules", FileMode::SYMLINK, blob)]),
         )
         .expect("hash");
     assert!(!repo.objects().contains(&ntfs_would_be).unwrap());
@@ -272,22 +245,14 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         .objects()
         .hash(
             ObjectKind::Tree,
-            &serialize_tree(&[TreeEntry {
-                mode: 0o100644,
-                name: b"m".to_vec(),
-                oid: missing,
-            }]),
+            &serialize_tree(&[TreeEntry::new(b"m", FileMode::REGULAR, missing)]),
         )
         .expect("hash");
     assert!(!repo.objects().contains(&would_be).unwrap());
 
     let dangling_gitlink = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o160000,
-            name: b"sub".to_vec(),
-            oid: missing,
-        }])
+        .write_tree([TreeEntry::new(b"sub", FileMode::GITLINK, missing)])
         .expect("missing gitlink is allowed");
     git_fsck_strict(dir.path());
     assert!(repo.objects().contains(&dangling_gitlink).unwrap());
@@ -303,11 +268,7 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         .expect("gitlink commit");
     let gitlink = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o160000,
-            name: b"sub".to_vec(),
-            oid: root,
-        }])
+        .write_tree([TreeEntry::new(b"sub", FileMode::GITLINK, root)])
         .expect("present gitlink");
     assert_ne!(gitlink, dangling_gitlink);
     git_fsck_strict(dir.path());
@@ -325,11 +286,7 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
     git_fsck_strict(dir.path());
 
     let still_wrong = repo.objects().write_tree_with(
-        [TreeEntry {
-            mode: 0o040000,
-            name: b"d".to_vec(),
-            oid: blob,
-        }],
+        [TreeEntry::new(b"d", FileMode::TREE, blob)],
         grit_lib::objects::WriteTreeOptions {
             allow_missing: true,
         },
@@ -352,11 +309,7 @@ fn write_tree_rejects_ntfs_backslash_gitmodules_symlink_git_fsck() {
     let dir = tempfile::tempdir().expect("tempdir");
     let repo = init_bare(dir.path(), HashAlgo::Sha1);
     let blob = blob(&repo, b"x\n");
-    let entry = TreeEntry {
-        mode: 0o120000,
-        name: b"foo\\.gitmodules".to_vec(),
-        oid: blob,
-    };
+    let entry = TreeEntry::new(b"foo\\.gitmodules", FileMode::SYMLINK, blob);
     assert!(
         matches!(
             repo.objects().write_tree([entry.clone()]),
@@ -408,16 +361,12 @@ fn write_tree_returns_typed_errors() {
     ));
     let err = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o100600,
-            name: b"a".to_vec(),
-            oid: a,
-        }])
+        .write_tree([TreeEntry::new(b"a", FileMode::new(0o100600), a)])
         .expect_err("mode");
     assert!(matches!(
         err,
         Error::Object(ObjectError::InvalidTreeEntry(TreeEntryError::InvalidMode {
-            mode: 0o100600,
+            mode: FileMode::new(0o100600),
             ..
         }))
     ));

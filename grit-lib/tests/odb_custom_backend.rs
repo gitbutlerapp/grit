@@ -1,6 +1,7 @@
 //! Public custom [`Odb`](grit_lib::objects::odb::Odb) backends via
 //! [`RepositoryOptions::with_object_store`].
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use grit_lib::diff::TreeDiffOptions;
@@ -227,11 +228,7 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
         .odb()
         .write(ObjectKind::Blob, b"payload\n")
         .expect("blob");
-    let tree_body = serialize_tree(&[TreeEntry {
-        mode: 0o100644,
-        name: b"f".to_vec(),
-        oid: blob,
-    }]);
+    let tree_body = serialize_tree(&[TreeEntry::new(b"f", FileMode::REGULAR, blob)]);
     let tree = repo
         .odb()
         .write(ObjectKind::Tree, &tree_body)
@@ -269,11 +266,7 @@ fn memory_primary_revwalk_diff_without_loose_objects() {
         .odb()
         .write(ObjectKind::Blob, b"other\n")
         .expect("blob2");
-    let tree2_body = serialize_tree(&[TreeEntry {
-        mode: 0o100644,
-        name: b"g".to_vec(),
-        oid: blob2,
-    }]);
+    let tree2_body = serialize_tree(&[TreeEntry::new(b"g", FileMode::REGULAR, blob2)]);
     let tree2 = repo
         .odb()
         .write(ObjectKind::Tree, &tree2_body)
@@ -356,11 +349,7 @@ fn files_primary_gc_prunes_unreachable_loose() {
     )
     .expect("init");
     let kept_blob = repo.odb().write(ObjectKind::Blob, b"keep\n").expect("keep");
-    let tree_body = serialize_tree(&[TreeEntry {
-        mode: 0o100644,
-        name: b"f".to_vec(),
-        oid: kept_blob,
-    }]);
+    let tree_body = serialize_tree(&[TreeEntry::new(b"f", FileMode::REGULAR, kept_blob)]);
     let tree = repo
         .odb()
         .write(ObjectKind::Tree, &tree_body)
@@ -454,11 +443,7 @@ fn gc_keeps_blob_tree_and_annotated_tag_ref_targets() {
         .expect("blob");
     grit_test_support::refs::set_ref(&repo, "refs/tags/blob-tip", &blob).expect("blob ref");
 
-    let tree_body = serialize_tree(&[TreeEntry {
-        mode: 0o100644,
-        name: b"t".to_vec(),
-        oid: blob,
-    }]);
+    let tree_body = serialize_tree(&[TreeEntry::new(b"t", FileMode::REGULAR, blob)]);
     let tree = repo
         .odb()
         .write(ObjectKind::Tree, &tree_body)

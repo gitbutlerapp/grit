@@ -12,6 +12,7 @@
 #![allow(dead_code)]
 
 use crate::error::ObjectError;
+use crate::objects::FileMode;
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::io::{self, Read};
@@ -19,7 +20,6 @@ use std::io::{self, Read};
 use crate::error::{Error, Result};
 use crate::gitmodules::{self, DotFsckTracker};
 use crate::hash::{ChecksumHasher, ObjectPayloadHasher};
-use crate::index::MODE_GITLINK;
 use crate::index_pack::ObjectKindCounts;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
 use crate::odb::store::{ObjectStore, WritableObjectStore};
@@ -1125,7 +1125,7 @@ fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
                     // in the submodule repository, not the superproject's
                     // pack/ODB. Skip them in the connectivity walk, matching
                     // upstream git (git/fsck.c:374 `if (S_ISGITLINK) continue;`).
-                    if e.mode == MODE_GITLINK {
+                    if e.mode == FileMode::GITLINK {
                         continue;
                     }
                     if !resolves(&e.oid, oid)? {
@@ -1229,7 +1229,7 @@ pub fn strict_verify_packed_references(
                     // the submodule repository, not this pack/ODB. Skip them in
                     // the connectivity walk, matching upstream git
                     // (git/fsck.c:374 `if (S_ISGITLINK) continue;`).
-                    if e.mode == MODE_GITLINK {
+                    if e.mode == FileMode::GITLINK {
                         continue;
                     }
                     if !strict_ref_resolves(&e.oid, pack, odb)? {
@@ -2730,7 +2730,6 @@ mod tests {
     )]
     #[test]
     fn test_strict_skips_gitlink_tree_entries() {
-        use crate::index::{MODE_GITLINK, MODE_REGULAR};
         use crate::objects::{serialize_tree, TreeEntry};
 
         // A submodule commit oid that is NOT in the pack/ODB (lives in the
@@ -2739,7 +2738,7 @@ mod tests {
 
         // Superproject tree referencing the submodule via a gitlink entry.
         let tree_data = serialize_tree(&[TreeEntry {
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             name: b"sub".to_vec(),
             oid: submodule_oid,
         }]);
@@ -2756,7 +2755,7 @@ mod tests {
         // Regression guard: a non-gitlink (regular file) entry pointing at an
         // absent blob must still be reported as a strict connectivity error.
         let bad_tree = serialize_tree(&[TreeEntry {
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             name: b"file".to_vec(),
             oid: ObjectId::from_hex(&"ab".repeat(20)).unwrap(),
         }]);
@@ -3357,7 +3356,7 @@ mod tests {
             .expect("hash");
         let missing = ObjectId::from_hex(&"ee".repeat(20)).unwrap();
         let bad_tree = crate::objects::serialize_tree(&[crate::objects::TreeEntry {
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             name: b"f".to_vec(),
             oid: missing,
         }]);
@@ -3493,7 +3492,6 @@ mod tests {
     fn strict_verify_does_not_reload_streamed_blobs() {
         use std::cell::Cell;
 
-        use crate::index::MODE_REGULAR;
         use crate::objects::{serialize_commit, serialize_tree, CommitData, TreeEntry};
 
         let tmp = tempfile::tempdir().unwrap();
@@ -3502,7 +3500,7 @@ mod tests {
         let big_oid = odb.write(ObjectKind::Blob, &big).expect("write blob");
 
         let tree_data = serialize_tree(&[TreeEntry {
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             name: b"big.bin".to_vec(),
             oid: big_oid,
         }]);
@@ -3597,7 +3595,7 @@ mod tests {
 
         let missing = ObjectId::from_hex(&"ab".repeat(20)).unwrap();
         let bad_tree = serialize_tree(&[TreeEntry {
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             name: b"missing".to_vec(),
             oid: missing,
         }]);

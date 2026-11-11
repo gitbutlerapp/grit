@@ -5,6 +5,7 @@
 //! matches `git write-tree` on the same index bytes. Objects are validated with
 //! `git fsck` and `git cat-file`.
 
+use grit_lib::objects::FileMode;
 use std::path::Path;
 use std::process::Command;
 
@@ -121,23 +122,10 @@ fn grit_written_tree_round_trips_through_git_read() {
     let blob = odb
         .write(grit_lib::objects::ObjectKind::Blob, b"payload")
         .unwrap();
-    index.add_or_replace(grit_lib::index::IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: grit_lib::index::MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 7,
-        oid: blob,
-        flags: 4,
-        flags_extended: None,
-        path: b"file.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(
+        grit_lib::index::IndexEntry::new(b"file.txt".to_vec(), blob, FileMode::REGULAR)
+            .with_size(7),
+    );
 
     let tree_oid =
         write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();

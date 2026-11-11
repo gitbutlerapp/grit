@@ -1,5 +1,6 @@
 //! Git-oracle repo exercises to nudge total and revwalk floors over committed gates.
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use crate::support;
@@ -201,23 +202,11 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
         }
         let mut index = Index::new();
         let blob = repo.odb().write(ObjectKind::Blob, b"idx\n")?;
-        index.entries_mut().push(IndexEntry {
-            ctime_sec: 0,
-            ctime_nsec: 0,
-            mtime_sec: 0,
-            mtime_nsec: 0,
-            dev: 0,
-            ino: 0,
-            mode: MODE_REGULAR,
-            uid: 0,
-            gid: 0,
-            size: 0,
-            oid: blob,
-            flags: 5,
-            flags_extended: None,
-            path: b"deep/layer0.txt".to_vec(),
-            base_index_pos: 0,
-        });
+        index.entries_mut().push(IndexEntry::new(
+            b"deep/layer0.txt".to_vec(),
+            blob,
+            FileMode::REGULAR,
+        ));
         let idx_tree = write_tree_from_index(repo.odb(), &index, "")?;
         let _ = repo
             .diff()

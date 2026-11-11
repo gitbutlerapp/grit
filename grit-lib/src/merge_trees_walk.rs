@@ -1,5 +1,6 @@
 //! Recursive three-tree merge: skip identical subtrees and compose the result tree in the ODB.
 
+use crate::objects::FileMode;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::merge_tree_cache::{
@@ -71,7 +72,7 @@ pub(crate) fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> IndexEntry {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: te.mode,
+        mode: te.mode.bits(),
         uid: 0,
         gid: 0,
         size: 0,
@@ -182,28 +183,28 @@ fn fill_sparse_maps_walk(
 
         if touched.contains(&fp) {
             if let Some(te) = b_te {
-                if te.mode != MODE_DIR {
+                if te.mode != FileMode::TREE {
                     base.insert(fp.clone(), tree_entry_to_index(&fp, te));
                     cache.note_file_path(MergeTreeSide::Base, &fp);
                 }
             }
             if let Some(te) = o_te {
-                if te.mode != MODE_DIR {
+                if te.mode != FileMode::TREE {
                     ours.insert(fp.clone(), tree_entry_to_index(&fp, te));
                     cache.note_file_path(MergeTreeSide::Ours, &fp);
                 }
             }
             if let Some(te) = t_te {
-                if te.mode != MODE_DIR {
+                if te.mode != FileMode::TREE {
                     theirs.insert(fp.clone(), tree_entry_to_index(&fp, te));
                     cache.note_file_path(MergeTreeSide::Theirs, &fp);
                 }
             }
         }
 
-        let b_sub = b_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
-        let o_sub = o_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
-        let t_sub = t_te.filter(|e| e.mode == MODE_DIR).map(|e| e.oid);
+        let b_sub = b_te.filter(|e| e.mode == FileMode::TREE).map(|e| e.oid);
+        let o_sub = o_te.filter(|e| e.mode == FileMode::TREE).map(|e| e.oid);
+        let t_sub = t_te.filter(|e| e.mode == FileMode::TREE).map(|e| e.oid);
         if !touched.subtree_touched(&fp) {
             continue;
         }
@@ -320,7 +321,7 @@ pub(crate) fn compose_merged_tree_oid(
 
         if !touched.subtree_touched(&fp) {
             if let Some(te) = o_te {
-                if te.mode == MODE_DIR && is_empty_tree_oid(odb, &te.oid) {
+                if te.mode == FileMode::TREE && is_empty_tree_oid(odb, &te.oid) {
                     continue;
                 }
                 out_entries.push(te.clone());
@@ -330,7 +331,7 @@ pub(crate) fn compose_merged_tree_oid(
 
         if let Some(entry) = stage0_by_path.get(fp.as_slice()) {
             out_entries.push(TreeEntry {
-                mode: entry.mode,
+                mode: FileMode::new(entry.mode),
                 name,
                 oid: entry.oid,
             });
@@ -342,19 +343,22 @@ pub(crate) fn compose_merged_tree_oid(
         let mode = if has_rows_under(stage0_by_path, &fp) {
             MODE_DIR
         } else {
-            o_te.or(t_te).or(b_te).map(|e| e.mode).unwrap_or(MODE_DIR)
+            o_te.or(t_te)
+                .or(b_te)
+                .map(|e| e.mode.bits())
+                .unwrap_or(MODE_DIR)
         };
         if mode == MODE_DIR {
             let b_sub = b_te
-                .filter(|e| e.mode == MODE_DIR)
+                .filter(|e| e.mode == FileMode::TREE)
                 .map(|e| e.oid)
                 .unwrap_or(*empty_tree);
             let o_sub = o_te
-                .filter(|e| e.mode == MODE_DIR)
+                .filter(|e| e.mode == FileMode::TREE)
                 .map(|e| e.oid)
                 .unwrap_or(*empty_tree);
             let t_sub = t_te
-                .filter(|e| e.mode == MODE_DIR)
+                .filter(|e| e.mode == FileMode::TREE)
                 .map(|e| e.oid)
                 .unwrap_or(*empty_tree);
             let sub = compose_merged_tree_oid(
@@ -373,7 +377,7 @@ pub(crate) fn compose_merged_tree_oid(
                 continue;
             }
             out_entries.push(TreeEntry {
-                mode: MODE_DIR,
+                mode: FileMode::TREE,
                 name,
                 oid: sub,
             });
@@ -396,7 +400,12 @@ pub(crate) fn compose_merged_tree_oid(
     }
 
     out_entries.sort_by(|a, b| {
-        crate::objects::tree_name_cmp(&a.name, a.mode == MODE_DIR, &b.name, b.mode == MODE_DIR)
+        crate::objects::tree_name_cmp(
+            &a.name,
+            a.mode == FileMode::TREE,
+            &b.name,
+            b.mode == FileMode::TREE,
+        )
     });
 
     if out_entries.is_empty() {

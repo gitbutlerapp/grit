@@ -4510,7 +4510,7 @@ impl DenseWalkCache {
         )? {
             Some(entry) => CachedTreeChild::Found {
                 oid: entry.oid,
-                mode: entry.mode,
+                mode: entry.mode.bits(),
             },
             None => CachedTreeChild::Missing,
         };
@@ -5478,16 +5478,20 @@ fn trees_differ_tree_entries(
             (Some(o), Some(n)) => {
                 let cmp = crate::objects::tree_name_cmp(
                     &o.name,
-                    is_tree_mode(o.mode),
+                    is_tree_mode(o.mode.bits()),
                     &n.name,
-                    is_tree_mode(n.mode),
+                    is_tree_mode(n.mode.bits()),
                 );
                 match cmp {
                     Ordering::Less => {
                         let name = String::from_utf8_lossy(&o.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        if paths.entry_is_relevant(&path, is_tree_mode(o.mode), o.mode) {
-                            if is_tree_mode(o.mode) {
+                        if paths.entry_is_relevant(
+                            &path,
+                            is_tree_mode(o.mode.bits()),
+                            o.mode.bits(),
+                        ) {
+                            if is_tree_mode(o.mode.bits()) {
                                 if tree_has_pathspec_match_cached(repo, o.oid, &path, paths, None)?
                                 {
                                     return Ok(true);
@@ -5501,8 +5505,12 @@ fn trees_differ_tree_entries(
                     Ordering::Greater => {
                         let name = String::from_utf8_lossy(&n.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        if paths.entry_is_relevant(&path, is_tree_mode(n.mode), n.mode) {
-                            if is_tree_mode(n.mode) {
+                        if paths.entry_is_relevant(
+                            &path,
+                            is_tree_mode(n.mode.bits()),
+                            n.mode.bits(),
+                        ) {
+                            if is_tree_mode(n.mode.bits()) {
                                 if tree_has_pathspec_match_cached(repo, n.oid, &path, paths, None)?
                                 {
                                     return Ok(true);
@@ -5516,14 +5524,15 @@ fn trees_differ_tree_entries(
                     Ordering::Equal => {
                         let name = String::from_utf8_lossy(&o.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        let o_is_tree = is_tree_mode(o.mode);
-                        let n_is_tree = is_tree_mode(n.mode);
+                        let o_is_tree = is_tree_mode(o.mode.bits());
+                        let n_is_tree = is_tree_mode(n.mode.bits());
                         let mode = if o_is_tree { o.mode } else { n.mode };
-                        let relevant = paths.entry_is_relevant(&path, o_is_tree || n_is_tree, mode);
+                        let relevant =
+                            paths.entry_is_relevant(&path, o_is_tree || n_is_tree, mode.bits());
                         if relevant {
                             if o.oid != n.oid
-                                || crate::index::canon_mode(o.mode)
-                                    != crate::index::canon_mode(n.mode)
+                                || crate::index::canon_mode(o.mode.bits())
+                                    != crate::index::canon_mode(n.mode.bits())
                             {
                                 if o_is_tree && n_is_tree {
                                     if trees_differ_for_pathspecs_optional(
@@ -5565,8 +5574,8 @@ fn trees_differ_tree_entries(
             (Some(o), None) => {
                 let name = String::from_utf8_lossy(&o.name);
                 let path = format_path_for_tree_diff(prefix, &name);
-                if paths.entry_is_relevant(&path, is_tree_mode(o.mode), o.mode) {
-                    if is_tree_mode(o.mode) {
+                if paths.entry_is_relevant(&path, is_tree_mode(o.mode.bits()), o.mode.bits()) {
+                    if is_tree_mode(o.mode.bits()) {
                         if tree_has_pathspec_match_cached(repo, o.oid, &path, paths, None)? {
                             return Ok(true);
                         }
@@ -5579,8 +5588,8 @@ fn trees_differ_tree_entries(
             (None, Some(n)) => {
                 let name = String::from_utf8_lossy(&n.name);
                 let path = format_path_for_tree_diff(prefix, &name);
-                if paths.entry_is_relevant(&path, is_tree_mode(n.mode), n.mode) {
-                    if is_tree_mode(n.mode) {
+                if paths.entry_is_relevant(&path, is_tree_mode(n.mode.bits()), n.mode.bits()) {
+                    if is_tree_mode(n.mode.bits()) {
                         if tree_has_pathspec_match_cached(repo, n.oid, &path, paths, None)? {
                             return Ok(true);
                         }

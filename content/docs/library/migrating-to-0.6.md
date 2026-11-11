@@ -102,7 +102,7 @@ let head = repo.references().symbolic(RefNameRef::HEAD)?;
 
 ### `ObjectError::NotFound` names an object id
 
-`ObjectError::NotFound { name: String }` was used for missing objects, revision expressions that matched nothing and assorted prose. It is now `NotFound { oid: ObjectId }` and means only that the object store lacks `oid`. A revision expression that names nothing (an unknown name, an abbreviated id with no match, `:/<text>` with no match, a missing `FETCH_HEAD`) is [`RevisionError::NotFound { spec }`](rustdoc:grit_lib::error::RevisionError::NotFound); `~`/`^` past a root commit is `RevParseError::RevisionOutOfRange`; `A...B` with no common ancestor is [`RevisionError::NoMergeBase`](rustdoc:grit_lib::error::RevisionError::NoMergeBase); an object that cannot be peeled to the kind asked for is [`ObjectError::UnexpectedKind`](rustdoc:grit_lib::error::ObjectError::UnexpectedKind). `BundleError::ObjectNotFound` carries an `oid: ObjectId` too.
+`ObjectError::NotFound { name: String }` was used for missing objects, revision expressions that matched nothing and assorted prose. It is now `NotFound { oid: ObjectId }` and means only that the object store lacks `oid`. A revision expression that names nothing (an unknown name, an abbreviated id with no match, `:/<text>` with no match, a missing `FETCH_HEAD`) is [`RevisionError::NotFound { spec }`](rustdoc:grit_lib::error::RevisionError::NotFound); `~`/`^` past a root commit is `RevParseError::RevisionOutOfRange`; `A...B` with no common ancestor is [`RevisionError::NoMergeBase`](rustdoc:grit_lib::error::RevisionError::NoMergeBase); an object that cannot be peeled to the kind asked for is [`ObjectError::UnexpectedKind`](rustdoc:grit_lib::error::ObjectError::UnexpectedKind). `BundleError::ObjectNotFound` carries an `oid: ObjectId` too. Two writes that used to fold context into the name have their own variants: an index entry whose object is missing when a tree is written from the index is [`ObjectError::MissingTreeMember { path, mode, oid }`](rustdoc:grit_lib::error::ObjectError::MissingTreeMember), and a push whose source object is missing locally is [`RemoteError::PushSourceMissing { dst, oid }`](rustdoc:grit_lib::remote::RemoteError::PushSourceMissing).
 
 ```rust
 // 0.5.x
@@ -157,7 +157,22 @@ commit.encoding = Some("ISO-8859-1".into());
 let bytes = serialize_commit(&commit);
 ```
 
-Records fixed by a Git format (`TreeEntry`, `ReflogEntry`, `ObjectKindCounts`, `LeftRightCounts`, …) stay exhaustive.
+Records fixed by a Git format (`ReflogEntry`, `ObjectKindCounts`, `LeftRightCounts`, …) stay exhaustive.
+
+### `TreeEntry` and `IndexEntry` are built with `new`
+
+[`TreeEntry`](rustdoc:grit_lib::objects::TreeEntry) and [`IndexEntry`](rustdoc:grit_lib::index::IndexEntry) are `#[non_exhaustive]`; build them with [`TreeEntry::new(name, mode, oid)`](rustdoc:grit_lib::objects::TreeEntry::new) and [`IndexEntry::new(path, oid, mode)`](rustdoc:grit_lib::index::IndexEntry::new). `TreeEntry::mode` is a [`FileMode`](rustdoc:grit_lib::objects::FileMode) instead of a `u32` (it still holds any mode a stored tree contains; `FileMode::bits()` gives the raw value), and so is `TreeEntryError::InvalidMode::mode`. `IndexEntry::new` zeroes the stat data and fills the flag word itself; set a conflict stage with [`with_stage`](rustdoc:grit_lib::index::IndexEntry::with_stage) or [`set_stage`](rustdoc:grit_lib::index::IndexEntry::set_stage), and stat data with `with_size`, `with_mtime`, `with_ctime` or by assigning the public fields. The raw `flags`, `flags_extended` and `base_index_pos` fields are no longer public: read them through `stage()`, `assume_unchanged()`, `skip_worktree()`, `intent_to_add()` and `fsmonitor_valid()`. `IndexEntry` equality now ignores the name-length and extended bits the index writer recomputes. `Index::dump_cache_tree` and `Index::format_cache_tree_dump` (Git test-tool output) are no longer public.
+
+```rust
+use grit_lib::index::IndexEntry;
+use grit_lib::objects::{FileMode, ObjectId, TreeEntry};
+
+let blob = ObjectId::from_hex("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")?;
+// 0.5.x: TreeEntry { mode: 0o100644, name: b"README".to_vec(), oid: blob }
+let entry = TreeEntry::new("README", FileMode::REGULAR, blob);
+// 0.5.x: IndexEntry { ctime_sec: 0, …, flags: 6 | (2 << 12), …, base_index_pos: 0 }
+let ours = IndexEntry::new("README", blob, FileMode::REGULAR).with_stage(2);
+```
 
 ### Options and request structs are `#[non_exhaustive]`
 
@@ -415,6 +430,11 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::ident::prepare_commit_identity_line` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::ident::replace_identity_date_suffix` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::ident::signature_timestamp_for_pretty` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
+| `grit_lib::index::Index::dump_cache_tree` | `removed (Git test-tool output; crate-internal and test-only in 0.6)` |  |
+| `grit_lib::index::Index::format_cache_tree_dump` | `removed (Git test-tool output; crate-internal and test-only in 0.6)` |  |
+| `grit_lib::index::IndexEntry::base_index_pos` | `removed (split-index bookkeeping, crate-internal in 0.6)` |  |
+| `grit_lib::index::IndexEntry::flags` | `removed (raw on-disk flag word, crate-internal in 0.6: use IndexEntry::new, stage, with_stage, set_stage and assume_unchanged)` |  |
+| `grit_lib::index::IndexEntry::flags_extended` | `removed (raw extended flags, crate-internal in 0.6: use skip_worktree, intent_to_add, fsmonitor_valid and their setters)` |  |
 | `grit_lib::index::IndexStatFields` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::index::IndexStatFields::clone` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::index::IndexStatFields::fmt` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |

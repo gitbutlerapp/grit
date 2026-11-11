@@ -1860,7 +1860,7 @@ pub(crate) fn tree_has_high_bit_paths(odb: &Odb, tree_oid: ObjectId) -> bool {
         if e.name.iter().any(|&b| b & 0x80 != 0) {
             return true;
         }
-        if e.mode == 0o040000 && tree_has_high_bit_paths(odb, e.oid) {
+        if e.mode == crate::objects::FileMode::TREE && tree_has_high_bit_paths(odb, e.oid) {
             return true;
         }
     }

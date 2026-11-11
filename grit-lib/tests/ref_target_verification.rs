@@ -3,6 +3,7 @@
 //! `prepare` before any lock, so a refused batch leaves every ref unchanged.
 
 use grit_lib::error::RefError;
+use grit_lib::objects::FileMode;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -96,11 +97,7 @@ fn write_commit(repo: &Repository, message: &str, content: &[u8]) -> (ObjectId, 
         .expect("blob");
     let tree = repo
         .objects()
-        .write_tree([TreeEntry {
-            mode: 0o100644,
-            name: b"file".to_vec(),
-            oid: blob,
-        }])
+        .write_tree([TreeEntry::new(b"file", FileMode::REGULAR, blob)])
         .expect("tree");
     let commit = repo
         .objects()

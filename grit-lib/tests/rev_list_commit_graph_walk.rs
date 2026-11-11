@@ -3,6 +3,7 @@
 //! Full-history walks answer parents and dates from a commit-graph written by system `git`,
 //! without reading commit objects (issue #1745).
 
+use grit_lib::objects::FileMode;
 use grit_lib::progress::{CancelToken, NullProgress};
 
 use crate::support;
@@ -23,23 +24,7 @@ fn write_linear_commits(repo: &Repository, count: usize) -> grit_lib::objects::O
     let mut index = Index::new();
     index.hash_algo = repo.odb().hash_algo();
     let blob = repo.odb().write(ObjectKind::Blob, b"seed\n").expect("blob");
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: 5,
-        oid: blob,
-        flags: 4,
-        flags_extended: None,
-        path: b"f.txt".to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(IndexEntry::new(b"f.txt".to_vec(), blob, FileMode::REGULAR).with_size(5));
     let mut parent = None;
     let mut tip = blob;
     for i in 0..count {

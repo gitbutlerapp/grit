@@ -83,7 +83,7 @@ pub fn run(
     let source = repo
         .merge()
         .resolve_source(branch)
-        .map_err(crate::json_error::map_lib_error)?;
+        .map_err(crate::error_map::map_merge_source_error)?;
     let other_oid = source.oid;
     let merge_options = build_merge_options(&options)?;
 

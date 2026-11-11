@@ -212,7 +212,7 @@ pub(crate) fn loose_reachable_from_roots(
             }
             ObjectKind::Tree => {
                 for entry in parse_tree(&obj.data)? {
-                    if entry.mode == 0o160000 {
+                    if entry.mode == crate::objects::FileMode::GITLINK {
                         continue;
                     }
                     if visited.insert(entry.oid) {

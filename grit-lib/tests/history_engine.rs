@@ -3,6 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use crate::support;
+use grit_lib::objects::FileMode;
 
 use std::collections::BTreeMap;
 use std::process::Command;
@@ -44,44 +45,19 @@ fn tree_plus_file(
         let name = String::from_utf8_lossy(&entry.name).into_owned();
         index.add_or_replace(index_entry_from_tree(&entry, &name));
     }
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: content.len() as u32,
-        oid: blob,
-        flags: path.len().min(0xfff) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(
+        IndexEntry::new(path.as_bytes().to_vec(), blob, FileMode::REGULAR)
+            .with_size(content.len() as u32),
+    );
     write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
 fn index_entry_from_tree(entry: &grit_lib::objects::TreeEntry, name: &str) -> IndexEntry {
-    IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: entry.mode,
-        uid: 0,
-        gid: 0,
-        size: 0,
-        oid: entry.oid,
-        flags: name.len().min(0xfff) as u16,
-        flags_extended: None,
-        path: name.as_bytes().to_vec(),
-        base_index_pos: 0,
-    }
+    IndexEntry::new(
+        name.as_bytes().to_vec(),
+        entry.oid,
+        FileMode::new(entry.mode.bits()),
+    )
 }
 
 fn write_tree_with_blob(
@@ -92,23 +68,10 @@ fn write_tree_with_blob(
     let blob = repo.odb().write(ObjectKind::Blob, content)?;
     let mut index = Index::new();
     index.hash_algo = repo.odb().hash_algo();
-    index.add_or_replace(IndexEntry {
-        ctime_sec: 0,
-        ctime_nsec: 0,
-        mtime_sec: 0,
-        mtime_nsec: 0,
-        dev: 0,
-        ino: 0,
-        mode: MODE_REGULAR,
-        uid: 0,
-        gid: 0,
-        size: content.len() as u32,
-        oid: blob,
-        flags: path.len().min(0xfff) as u16,
-        flags_extended: None,
-        path: path.as_bytes().to_vec(),
-        base_index_pos: 0,
-    });
+    index.add_or_replace(
+        IndexEntry::new(path.as_bytes().to_vec(), blob, FileMode::REGULAR)
+            .with_size(content.len() as u32),
+    );
     write_tree_from_index(repo.odb(), &index, "").map_err(Into::into)
 }
 
