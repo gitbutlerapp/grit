@@ -20,7 +20,7 @@ fn push_fast_hide_window_is_incremental_not_full_history() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open client");
     let tip = grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main");
     let base = ObjectId::from_hex(FETCH_BASE).expect("base hex");
     let (_, commits) = repo

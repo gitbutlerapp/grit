@@ -2,6 +2,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{parse_commit, parse_tree, tag_object_line_oid, ObjectId, ObjectKind};
+use grit_lib::refs::store::RefName;
 use grit_lib::remote::{ListRefsOptions, Remote};
 use grit_lib::repo::Repository;
 use std::collections::HashSet;
@@ -32,7 +33,9 @@ fn main() -> grit_lib::error::Result<()> {
         copy_reachable(&remote_odb, &local_odb, remote_ref.oid)?;
         if let Some(branch) = remote_ref.name.strip_prefix("refs/heads/") {
             let tracking_ref = format!("refs/remotes/origin/{branch}");
-            local.references().update(&tracking_ref, &remote_ref.oid)?;
+            local
+                .references()
+                .update(&RefName::new(&tracking_ref)?, &remote_ref.oid)?;
             println!("fetched {} -> {}", remote_ref.name, tracking_ref);
         }
     }

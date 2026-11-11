@@ -464,7 +464,12 @@ mod tests {
 
         let _ = ref_update_flags("refs/heads/main");
         let oid = ObjectId::from_bytes(&[1u8; 20]).expect("oid");
-        verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("cas");
+        verify_branch_commit_cas(
+            Some(oid),
+            Some(oid),
+            crate::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
+        .expect("cas");
 
         let git_dir = tempfile::tempdir().expect("t").path().join(".git");
         std::fs::create_dir_all(&git_dir).expect("mkdir");

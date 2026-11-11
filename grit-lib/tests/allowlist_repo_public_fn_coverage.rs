@@ -275,7 +275,10 @@ fn gitmodules_verify_for_commit() {
         .status()
         .expect("git commit");
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let head = repo.references().resolve("HEAD").expect("head");
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
     let _ = verify_gitmodules_for_commit(repo.odb(), head);
 }
 

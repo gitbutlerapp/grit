@@ -512,7 +512,7 @@ pub grit_lib::bundle::BundleError::ObjectFormatMismatch
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::bundle_name: &'static str
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::repo_name: &'static str
 pub grit_lib::bundle::BundleError::ObjectNotFound
-pub grit_lib::bundle::BundleError::ObjectNotFound::name: alloc::string::String
+pub grit_lib::bundle::BundleError::ObjectNotFound::oid: grit_lib::objects::ObjectId
 pub grit_lib::bundle::BundleError::PrerequisitesNotConnected
 pub grit_lib::bundle::BundleError::UnsupportedCapability
 pub grit_lib::bundle::BundleError::UnsupportedCapability::capability: alloc::string::String
@@ -5998,6 +5998,7 @@ pub grit_lib::error::DiffError::BlameIgnoreRevsFileOpen::source: core::io::error
 pub grit_lib::error::DiffError::BlameWorktreeBareRepository
 pub grit_lib::error::DiffError::FuncnamePattern(grit_lib::diff::userdiff::FuncnamePatternError)
 pub grit_lib::error::DiffError::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
+pub grit_lib::error::DiffError::MissingWorktreePath
 pub grit_lib::error::DiffError::NoIndex(grit_lib::diff::NoIndexError)
 pub grit_lib::error::DiffError::Pickaxe(grit_lib::revwalk::PickaxeError)
 pub grit_lib::error::DiffError::TextconvFailed
@@ -6156,6 +6157,8 @@ impl core::convert::From<grit_lib::porcelain::pull::PullError> for grit_lib::err
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::pull::PullError) -> Self
 impl core::convert::From<grit_lib::porcelain::tag::TagError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::tag::TagError) -> Self
+impl core::convert::From<grit_lib::refs::check_ref_format::RefNameError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::refs::check_ref_format::RefNameError) -> Self
 impl core::convert::From<grit_lib::refs::reftable::ReftableError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::refs::reftable::ReftableError) -> Self
 impl core::convert::From<grit_lib::refs::store::RefStoreError> for grit_lib::error::Error
@@ -6478,7 +6481,7 @@ pub grit_lib::error::ObjectError::Midx(grit_lib::error::MidxError)
 pub grit_lib::error::ObjectError::NoPromisorRemote
 pub grit_lib::error::ObjectError::NoPromisorRemote::operation: &'static str
 pub grit_lib::error::ObjectError::NotFound
-pub grit_lib::error::ObjectError::NotFound::name: alloc::string::String
+pub grit_lib::error::ObjectError::NotFound::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::ObjectError::Offload(grit_lib::maintenance::OffloadError)
 pub grit_lib::error::ObjectError::PackDeltaBaseNotWritten
 pub grit_lib::error::ObjectError::PackDeltaBaseNotWritten::base: grit_lib::objects::ObjectId
@@ -6739,6 +6742,7 @@ pub grit_lib::error::RefError::HeadNotOnBranch::branch: alloc::string::String
 pub grit_lib::error::RefError::Invalid
 pub grit_lib::error::RefError::Invalid::detail: alloc::string::String
 pub grit_lib::error::RefError::InvalidHead
+pub grit_lib::error::RefError::InvalidName(grit_lib::refs::check_ref_format::RefNameError)
 pub grit_lib::error::RefError::InvalidReflogExpiry
 pub grit_lib::error::RefError::InvalidReflogExpiry::value: alloc::string::String
 pub grit_lib::error::RefError::Lock(grit_lib::error::RefLockError)
@@ -6769,6 +6773,8 @@ impl core::convert::From<grit_lib::error::RefError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::RefError
 pub fn grit_lib::error::RefError::from(grit_lib::error::RefLockError) -> Self
+impl core::convert::From<grit_lib::refs::check_ref_format::RefNameError> for grit_lib::error::RefError
+pub fn grit_lib::error::RefError::from(grit_lib::refs::check_ref_format::RefNameError) -> Self
 impl core::convert::From<grit_lib::refs::reftable::ReftableError> for grit_lib::error::RefError
 pub fn grit_lib::error::RefError::from(grit_lib::refs::reftable::ReftableError) -> Self
 impl core::error::Error for grit_lib::error::RefError
@@ -16888,6 +16894,8 @@ impl core::convert::From<grit_lib::porcelain::pull::PullError> for grit_lib::err
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::pull::PullError) -> Self
 impl core::convert::From<grit_lib::porcelain::tag::TagError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::tag::TagError) -> Self
+impl core::convert::From<grit_lib::refs::check_ref_format::RefNameError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::refs::check_ref_format::RefNameError) -> Self
 impl core::convert::From<grit_lib::refs::reftable::ReftableError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::refs::reftable::ReftableError) -> Self
 impl core::convert::From<grit_lib::refs::store::RefStoreError> for grit_lib::error::Error
@@ -18628,6 +18636,10 @@ pub grit_lib::refs::check_ref_format::RefNameError::UnsafeForFilesystem
 impl core::cmp::Eq for grit_lib::refs::check_ref_format::RefNameError
 impl core::cmp::PartialEq for grit_lib::refs::check_ref_format::RefNameError
 pub fn grit_lib::refs::check_ref_format::RefNameError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::refs::check_ref_format::RefNameError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::refs::check_ref_format::RefNameError) -> Self
+impl core::convert::From<grit_lib::refs::check_ref_format::RefNameError> for grit_lib::error::RefError
+pub fn grit_lib::error::RefError::from(grit_lib::refs::check_ref_format::RefNameError) -> Self
 impl core::error::Error for grit_lib::refs::check_ref_format::RefNameError
 impl core::fmt::Debug for grit_lib::refs::check_ref_format::RefNameError
 pub fn grit_lib::refs::check_ref_format::RefNameError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -18646,9 +18658,9 @@ impl grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::from_trusted(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::refs::store::RefName::new(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
-pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::clone::Clone for grit_lib::refs::store::RefName
@@ -18666,6 +18678,12 @@ impl core::convert::AsRef<str> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &str
 impl core::convert::From<grit_lib::refs::store::RefName> for alloc::string::String
 pub fn alloc::string::String::from(grit_lib::refs::store::RefName) -> Self
+impl core::convert::TryFrom<&str> for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Error = grit_lib::refs::check_ref_format::RefNameError
+pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, Self::Error>
+impl core::convert::TryFrom<alloc::string::String> for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Error = grit_lib::refs::check_ref_format::RefNameError
+pub fn grit_lib::refs::store::RefName::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
 impl core::fmt::Debug for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::refs::store::RefName
@@ -18676,6 +18694,9 @@ impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefName
 impl core::ops::deref::Deref for grit_lib::refs::store::RefName
 pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::str::traits::FromStr for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Err = grit_lib::refs::check_ref_format::RefNameError
+pub fn grit_lib::refs::store::RefName::from_str(&str) -> core::result::Result<Self, Self::Err>
 impl core::marker::Freeze for grit_lib::refs::store::RefName
 impl core::marker::Send for grit_lib::refs::store::RefName
 impl core::marker::Sync for grit_lib::refs::store::RefName
@@ -18710,8 +18731,10 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::check_ref_forma
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::check_ref_format::RefNamePolicy
 #[repr(transparent)] pub struct grit_lib::refs::check_ref_format::RefNameRef(_)
 impl grit_lib::refs::store::RefNameRef
+pub const grit_lib::refs::store::RefNameRef::HEAD: &'static grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefNameRef::from_trusted(&str) -> &Self
+pub fn grit_lib::refs::store::RefNameRef::new(&str) -> core::result::Result<&Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
 impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
@@ -18722,17 +18745,18 @@ impl core::cmp::PartialEq for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::eq(&self, &Self) -> bool
 impl core::cmp::PartialOrd for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for alloc::string::String
-pub fn alloc::string::String::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
-impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for str
-pub fn str::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<str> for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::as_ref(&self) -> &str
 impl core::fmt::Display for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefNameRef
+impl<'a> core::convert::TryFrom<&'a str> for &'a grit_lib::refs::store::RefNameRef
+pub type &'a grit_lib::refs::store::RefNameRef::Error = grit_lib::refs::check_ref_format::RefNameError
+pub fn &'a grit_lib::refs::store::RefNameRef::try_from(&'a str) -> core::result::Result<Self, Self::Error>
 impl core::marker::Freeze for grit_lib::refs::store::RefNameRef
 impl core::marker::Send for grit_lib::refs::store::RefNameRef
 impl !core::marker::Sized for grit_lib::refs::store::RefNameRef
@@ -19758,9 +19782,9 @@ impl grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefName::branch(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::from_trusted(impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::refs::store::RefName::new(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::parse(&str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefName::tag(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
-pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, grit_lib::refs::check_ref_format::RefNameError>
 impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::clone::Clone for grit_lib::refs::store::RefName
@@ -19778,6 +19802,12 @@ impl core::convert::AsRef<str> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &str
 impl core::convert::From<grit_lib::refs::store::RefName> for alloc::string::String
 pub fn alloc::string::String::from(grit_lib::refs::store::RefName) -> Self
+impl core::convert::TryFrom<&str> for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Error = grit_lib::refs::check_ref_format::RefNameError
+pub fn grit_lib::refs::store::RefName::try_from(&str) -> core::result::Result<Self, Self::Error>
+impl core::convert::TryFrom<alloc::string::String> for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Error = grit_lib::refs::check_ref_format::RefNameError
+pub fn grit_lib::refs::store::RefName::try_from(alloc::string::String) -> core::result::Result<Self, Self::Error>
 impl core::fmt::Debug for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::refs::store::RefName
@@ -19788,6 +19818,9 @@ impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefName
 impl core::ops::deref::Deref for grit_lib::refs::store::RefName
 pub type grit_lib::refs::store::RefName::Target = grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefName::deref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::str::traits::FromStr for grit_lib::refs::store::RefName
+pub type grit_lib::refs::store::RefName::Err = grit_lib::refs::check_ref_format::RefNameError
+pub fn grit_lib::refs::store::RefName::from_str(&str) -> core::result::Result<Self, Self::Err>
 impl core::marker::Freeze for grit_lib::refs::store::RefName
 impl core::marker::Send for grit_lib::refs::store::RefName
 impl core::marker::Sync for grit_lib::refs::store::RefName
@@ -19797,8 +19830,10 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefName
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefName
 #[repr(transparent)] pub struct grit_lib::refs::store::RefNameRef(_)
 impl grit_lib::refs::store::RefNameRef
+pub const grit_lib::refs::store::RefNameRef::HEAD: &'static grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::as_str(&self) -> &str
 pub fn grit_lib::refs::store::RefNameRef::from_trusted(&str) -> &Self
+pub fn grit_lib::refs::store::RefNameRef::new(&str) -> core::result::Result<&Self, grit_lib::refs::check_ref_format::RefNameError>
 pub fn grit_lib::refs::store::RefNameRef::parse<'a>(&'a str, &grit_lib::refs::check_ref_format::RefNamePolicy) -> core::result::Result<&'a Self, grit_lib::refs::check_ref_format::RefNameError>
 impl core::borrow::Borrow<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::borrow(&self) -> &grit_lib::refs::store::RefNameRef
@@ -19809,17 +19844,18 @@ impl core::cmp::PartialEq for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::eq(&self, &Self) -> bool
 impl core::cmp::PartialOrd for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::partial_cmp(&self, &Self) -> core::option::Option<core::cmp::Ordering>
-impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for alloc::string::String
-pub fn alloc::string::String::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefName
 pub fn grit_lib::refs::store::RefName::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
 impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
-impl core::convert::AsRef<grit_lib::refs::store::RefNameRef> for str
-pub fn str::as_ref(&self) -> &grit_lib::refs::store::RefNameRef
+impl core::convert::AsRef<str> for grit_lib::refs::store::RefNameRef
+pub fn grit_lib::refs::store::RefNameRef::as_ref(&self) -> &str
 impl core::fmt::Display for grit_lib::refs::store::RefNameRef
 pub fn grit_lib::refs::store::RefNameRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for grit_lib::refs::store::RefNameRef
+impl<'a> core::convert::TryFrom<&'a str> for &'a grit_lib::refs::store::RefNameRef
+pub type &'a grit_lib::refs::store::RefNameRef::Error = grit_lib::refs::check_ref_format::RefNameError
+pub fn &'a grit_lib::refs::store::RefNameRef::try_from(&'a str) -> core::result::Result<Self, Self::Error>
 impl core::marker::Freeze for grit_lib::refs::store::RefNameRef
 impl core::marker::Send for grit_lib::refs::store::RefNameRef
 impl !core::marker::Sized for grit_lib::refs::store::RefNameRef

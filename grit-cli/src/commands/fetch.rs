@@ -363,16 +363,13 @@ mod map_remote_error_tests {
 
     #[test]
     fn library_object_not_found_keeps_remote_display() {
-        let err = map_remote_error(
-            ObjectError::NotFound {
-                name: "deadbeef".into(),
-            }
-            .into(),
-        );
+        let oid = grit_lib::objects::ObjectId::from_hex("deadbeef00000000000000000000000000000000")
+            .expect("hex");
+        let err = map_remote_error(ObjectError::NotFound { oid }.into());
         assert!(err.downcast_ref::<LibError>().is_none());
         assert_eq!(
             human_error_message(&err),
-            "object not found: deadbeef",
+            "object not found: deadbeef00000000000000000000000000000000",
             "must not remap to revision-not-found wording"
         );
         assert!(structured_json_payload(&err).is_none());

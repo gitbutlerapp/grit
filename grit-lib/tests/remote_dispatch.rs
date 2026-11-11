@@ -445,7 +445,10 @@ fn remote_push_local_file_url_matches_git() {
     std::fs::write(local.join("push.txt"), "push\n").unwrap();
     git(Some(&local), &["add", "push.txt"]);
     git(Some(&local), &["commit", "-q", "-m", "push commit"]);
-    let tip = repo.references().resolve("refs/heads/main").unwrap();
+    let tip = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
 
     let push_spec = PushRefSpec::default()
         .with_src(Some(tip))
@@ -591,7 +594,10 @@ fn remote_fetch_git_daemon_matches_git() {
             .unwrap();
     let main_grit = repo
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .unwrap();
     assert_eq!(main_git, main_grit);
 }

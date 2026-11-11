@@ -238,7 +238,10 @@ fn grit_written_reftable_passes_git_fsck_and_refs_verify() {
     );
     let grit_logs = grit_test_support::refs::at(&git_dir)
         .references()
-        .reflog("refs/heads/grit-branch")
+        .reflog(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/grit-branch")
+                .expect("valid ref name"),
+        )
         .expect("grit reflog");
     assert!(
         grit_logs.iter().any(|e| e.message.contains("grit update")),
@@ -521,7 +524,9 @@ fn reftable_reflog_api_matches_git() {
         .expect("create reflog");
     assert!(grit_test_support::refs::at(&git_dir)
         .reflogs()
-        .exists("refs/heads/log-test")
+        .exists(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/log-test").expect("valid ref name")
+        )
         .unwrap_or(false));
 
     let null = ObjectId::null(HashAlgo::Sha1);
@@ -563,7 +568,9 @@ fn reftable_reflog_api_matches_git() {
 
     let grit_entries = grit_test_support::refs::at(&git_dir)
         .references()
-        .reflog("refs/heads/log-test")
+        .reflog(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/log-test").expect("valid ref name"),
+        )
         .expect("read");
     let git_lines = git_reflog_lines(root.path(), "refs/heads/log-test");
     assert_eq!(grit_entries.len(), git_lines.len());
@@ -585,12 +592,17 @@ fn reftable_reflog_api_matches_git() {
         .expect("delete reflog");
     assert!(!grit_test_support::refs::at(&git_dir)
         .reflogs()
-        .exists("refs/heads/log-test")
+        .exists(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/log-test").expect("valid ref name")
+        )
         .unwrap_or(false));
     assert!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .reflog("refs/heads/log-test")
+            .reflog(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/log-test")
+                    .expect("valid ref name")
+            )
             .expect("read after delete")
             .is_empty(),
         "grit should have no log lines after delete"
@@ -737,7 +749,9 @@ fn resolve_head_after_git_commit_tree_on_reftable() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );
@@ -750,7 +764,7 @@ fn resolve_head_after_git_commit_tree_on_reftable() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .symbolic("HEAD")
+            .symbolic(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .map(|t| t.map(String::from))
             .expect("read_head")
             .as_deref(),
@@ -907,7 +921,7 @@ fn resolve_detached_head_after_git_checkout_detach_on_reftable() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .symbolic("HEAD")
+            .symbolic(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .map(|t| t.map(String::from))
             .expect("sym"),
         None

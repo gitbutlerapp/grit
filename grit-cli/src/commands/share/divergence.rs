@@ -105,6 +105,9 @@ pub(crate) fn comparison(
             format!("refs/remotes/{remote}/{base}"),
             format!("refs/heads/{base}"),
         ] {
+            let Ok(name) = RefName::new(&name) else {
+                continue;
+            };
             if let Ok(oid) = repo.references().resolve(&name) {
                 if !floor.contains(&oid) {
                     floor.push(oid);
@@ -172,7 +175,7 @@ pub(crate) fn move_branch(repo: &Repository, branch: &str, head: ObjectId) -> Re
             .with_context(|| format!("moving {branch} (it is checked out)"))?;
     } else {
         repo.references()
-            .update(format!("refs/heads/{branch}"), &head)
+            .update(&RefName::branch(branch)?, &head)
             .with_context(|| format!("moving {branch}"))?;
     }
     Ok(())

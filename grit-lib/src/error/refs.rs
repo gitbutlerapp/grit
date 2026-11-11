@@ -20,6 +20,13 @@ pub enum RefError {
         detail: String,
     },
 
+    /// A ref name failed validation ([`RefName::new`](crate::refs::store::RefName::new),
+    /// [`RefNameRef::new`](crate::refs::store::RefNameRef::new) and the other
+    /// [`RefName`](crate::refs::store::RefName) constructors), so `?` works on them in
+    /// functions returning [`crate::error::Result`].
+    #[error("invalid ref name: {0}")]
+    InvalidName(#[from] crate::check_ref_format::RefNameError),
+
     /// A `packed-refs` line Git would reject when reading the ref database.
     #[error("unexpected line in {path}: {line}")]
     PackedRefsUnexpectedLine {
@@ -133,6 +140,7 @@ impl RefError {
     pub fn kind_name(&self) -> &'static str {
         match self {
             Self::Invalid { .. } => "invalid_ref",
+            Self::InvalidName(..) => "invalid_ref_name",
             Self::PackedRefsUnexpectedLine { .. } => "packed_refs_unexpected_line",
             Self::Lock(..) => "ref_lock",
             Self::Store(..) => "ref_store",

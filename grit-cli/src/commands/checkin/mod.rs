@@ -3,6 +3,7 @@
 
 use anyhow::{bail, Result};
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::store::RefName;
 use grit_lib::remote::{
     redact_url_for_display,
     snapshot_checkout::{
@@ -97,11 +98,10 @@ fn chosen_branches(co: &OpenCheckout, names: &[String]) -> Result<Vec<(String, O
     names
         .iter()
         .map(|name| {
-            let tip = co
-                .repo
-                .references()
-                .resolve(format!("refs/heads/{name}"))
-                .map_err(|_| anyhow::anyhow!("there is no branch {name} here"))?;
+            let tip = RefName::branch(name)
+                .ok()
+                .and_then(|branch| co.repo.references().resolve(&branch).ok())
+                .ok_or_else(|| anyhow::anyhow!("there is no branch {name} here"))?;
             Ok((name.clone(), tip))
         })
         .collect()

@@ -267,18 +267,27 @@ fn ref_lock_present_fails_and_preserves_ref() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/locked")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/locked")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid
         );
         assert!(grit_test_support::refs::at(&git_dir)
             .references()
-            .delete("refs/heads/locked")
+            .delete(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/locked")
+                    .expect("valid ref name")
+            )
             .is_err());
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/locked")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/locked")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid
         );
@@ -294,7 +303,10 @@ fn ref_lock_present_fails_and_preserves_ref() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/locked")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/locked")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             new_oid
         );
@@ -325,14 +337,21 @@ fn delete_ref_cas_failure_cleans_ref_lock_and_preserves_packed_ref() {
         assert!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .compare_and_delete("refs/heads/packed-cas", &oid)
+                .compare_and_delete(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/packed-cas")
+                        .expect("valid ref name"),
+                    &oid
+                )
                 .is_err(),
             "delete must fail when packed-refs is locked"
         );
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/packed-cas")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/packed-cas")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid,
             "packed ref must remain"
@@ -402,7 +421,10 @@ fn concurrent_cas_single_winner() {
             assert_eq!(
                 grit_test_support::refs::at(gd)
                     .references()
-                    .resolve("refs/heads/cas-race")
+                    .resolve(
+                        grit_lib::refs::store::RefNameRef::new("refs/heads/cas-race")
+                            .expect("valid ref name")
+                    )
                     .unwrap(),
                 c2
             );
@@ -434,7 +456,10 @@ fn concurrent_cas_delete_single_winner() {
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
             assert!(grit_test_support::refs::at(gd)
                 .references()
-                .resolve("refs/heads/cas-del")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/cas-del")
+                        .expect("valid ref name")
+                )
                 .is_err());
         });
         assert_fsck_when_git_interop(&repo);
@@ -469,7 +494,10 @@ fn concurrent_cas_delete_single_winner_packed_only() {
         concurrent_cas_winners(&git_dir, item, 1, |gd| {
             assert!(grit_test_support::refs::at(gd)
                 .references()
-                .resolve("refs/heads/cas-del-packed")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/cas-del-packed")
+                        .expect("valid ref name")
+                )
                 .is_err());
         });
         assert_fsck_when_git_interop(&repo);
@@ -505,7 +533,10 @@ fn concurrent_reftable_cas_single_winner() {
         assert_eq!(
             grit_test_support::refs::at(gd)
                 .references()
-                .resolve("refs/heads/cas-rt")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/cas-rt")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             c2
         );
@@ -545,7 +576,9 @@ fn duplicate_ref_updates_match_git_update_ref_stdin() {
         assert!(update_refs(&grit_repo.git_dir(), &items).is_err());
         assert!(grit_test_support::refs::at(grit_repo.git_dir())
             .references()
-            .resolve("refs/heads/dup")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/dup").expect("valid ref name")
+            )
             .is_err());
     });
 }
@@ -597,7 +630,10 @@ fn update_branch_for_commit_writes_head_and_branch_reflogs() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/main")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             c2
         );
@@ -653,7 +689,10 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/main")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             c2
         );
@@ -661,10 +700,20 @@ fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
     });
 
     let oid = ObjectId::from_bytes(&[7; 20]).expect("oid");
-    verify_branch_commit_cas(None, None, "refs/heads/unborn").expect("both absent");
-    verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("equal");
+    verify_branch_commit_cas(
+        None,
+        None,
+        grit_lib::refs::store::RefNameRef::new("refs/heads/unborn").expect("valid ref name"),
+    )
+    .expect("both absent");
+    verify_branch_commit_cas(
+        Some(oid),
+        Some(oid),
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+    )
+    .expect("equal");
     assert!(matches!(
-        verify_branch_commit_cas(Some(oid), None, "refs/heads/gone"),
+        verify_branch_commit_cas(Some(oid), None, grit_lib::refs::store::RefNameRef::new("refs/heads/gone").expect("valid ref name")),
         Err(Error::Ref(RefError::Store(RefStoreError::ExpectedMismatch {
             expected: Expected::Oid(want),
             actual: None,
@@ -750,7 +799,10 @@ fn non_atomic_batch_create_one_reftable_table() {
             assert_eq!(
                 grit_test_support::refs::at(&git_dir)
                     .references()
-                    .resolve(&format!("refs/heads/batch-{i}"))
+                    .resolve(
+                        &grit_lib::refs::store::RefNameRef::new(&format!("refs/heads/batch-{i}"))
+                            .expect("valid ref name")
+                    )
                     .ok(),
                 Some(tip)
             );
@@ -796,13 +848,19 @@ fn non_atomic_allow_failure_updates_siblings_in_one_table() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/parent")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/parent")
+                        .expect("valid ref name")
+                )
                 .ok(),
             Some(tip)
         );
         assert!(grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/parent/child")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/parent/child")
+                    .expect("valid ref name")
+            )
             .is_err());
         if backend == Backend::Reftable {
             let count_after = reftable_tables_snapshot(&git_dir).1;
@@ -839,12 +897,18 @@ fn non_atomic_delete_then_create_two_reftable_tables() {
             .expect("delete then create");
         assert!(grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/to-drop")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/to-drop")
+                    .expect("valid ref name")
+            )
             .is_err());
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/fresh")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/fresh")
+                        .expect("valid ref name")
+                )
                 .ok(),
             Some(tip)
         );

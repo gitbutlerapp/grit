@@ -82,7 +82,7 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
     grit_test_support::refs::at(&git_dir)
         .reflogs()
         .append(
-            refname,
+            grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: old,
                 new_oid: oid1,
@@ -95,7 +95,7 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
     grit_test_support::refs::at(&git_dir)
         .reflogs()
         .append(
-            refname,
+            grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: oid1,
                 new_oid: oid2,

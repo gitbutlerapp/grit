@@ -859,7 +859,7 @@ impl Drop for BranchRefRollback<'_> {
             Some(old) => refs::update_direct_ref_on_store(
                 self.repo.ref_store(),
                 self.repo.git_dir(),
-                &self.branch_ref,
+                crate::refs::store::RefNameRef::from_trusted(&self.branch_ref),
                 &old,
             ),
         };

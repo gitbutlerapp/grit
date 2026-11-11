@@ -379,7 +379,7 @@ fn reachable_closure(
         }
         let obj = odb
             .try_read_once(&oid)?
-            .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))?;
+            .ok_or_else(|| Error::Object(ObjectError::NotFound { oid }))?;
         match obj.kind {
             ObjectKind::Commit => {
                 let commit = parse_commit(&obj.data)?;
@@ -443,7 +443,7 @@ fn require_objects_exist(odb: &Odb, oids: &[ObjectId], promised: &HashSet<Object
         }
         let packed = indexes.iter().any(|idx| idx.find_position(oid).is_some());
         if !packed && !odb.contains(oid)? {
-            return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+            return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
         }
     }
     Ok(())

@@ -133,7 +133,7 @@ fn reflog_expire_dry_run() {
     grit_test_support::refs::at(git_dir)
         .reflogs()
         .append(
-            refname,
+            grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: ObjectId::zero(),
                 new_oid: oid1,
@@ -146,7 +146,7 @@ fn reflog_expire_dry_run() {
     grit_test_support::refs::at(git_dir)
         .reflogs()
         .append(
-            refname,
+            grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: oid1,
                 new_oid: oid2,

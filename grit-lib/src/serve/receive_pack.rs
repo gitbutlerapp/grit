@@ -118,7 +118,7 @@ impl ReceivePackIngest {
                     }
                     let Some(obj) = overlay.read(oid)? else {
                         return Err(crate::error::Error::Object(ObjectError::NotFound {
-                            name: oid.to_hex(),
+                            oid: *oid,
                         }));
                     };
                     primary.write(obj.kind, &obj.data, WriteOptions::default())?;

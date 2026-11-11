@@ -64,7 +64,10 @@ fn grit_pick(repo: &Repository, source_hex: &str) -> grit_lib::error::Result<()>
     let source_oid = ObjectId::from_hex(source_hex).expect("source");
     let source_obj = repo.odb().read(&source_oid)?;
     let source = grit_lib::objects::parse_commit(&source_obj.data)?;
-    let head_oid = repo.references().resolve("HEAD").expect("head");
+    let head_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
     let head_obj = repo.odb().read(&head_oid)?;
     let head_commit = grit_lib::objects::parse_commit(&head_obj.data)?;
     let head_tree = head_commit.tree;

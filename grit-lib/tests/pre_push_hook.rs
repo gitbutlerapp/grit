@@ -182,7 +182,9 @@ fn failing_pre_push_hook_blocks_local_push() {
 }
 
 fn resolve_ref_opt(repo: &Repository, name: &str) -> Option<ObjectId> {
-    repo.references().resolve(name).ok()
+    repo.references()
+        .resolve(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
+        .ok()
 }
 
 #[test]

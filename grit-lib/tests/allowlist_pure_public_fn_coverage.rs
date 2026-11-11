@@ -164,7 +164,12 @@ fn promisor_and_ref_store_helpers() {
 
     let _ = ref_update_flags("refs/heads/main");
     let oid = ObjectId::from_bytes(&[1u8; 20]).expect("oid");
-    verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("cas");
+    verify_branch_commit_cas(
+        Some(oid),
+        Some(oid),
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+    )
+    .expect("cas");
 
     let git_dir = tempdir().expect("t").path().join(".git");
     std::fs::create_dir_all(&git_dir).expect("mkdir");
@@ -195,7 +200,10 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
     );
     let _ = normalize_glob_ref("heads/*");
     let odb = repo.odb();
-    let head = repo.references().resolve("HEAD").expect("resolve");
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("resolve");
     let _ = peel_to_commit_hex(odb, &head.to_hex());
     let head_state = repo.references().head().expect("head");
     let _ = current_branch_decoration_index(&[], &head_state);

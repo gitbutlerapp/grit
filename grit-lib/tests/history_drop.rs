@@ -264,7 +264,7 @@ fn drop_conflict_changes_nothing() {
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
     let before = grit
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("resolve");
     let err = grit
         .history()
@@ -284,7 +284,7 @@ fn drop_conflict_changes_nothing() {
     assert!(refs.is_empty(), "a conflict on HEAD's history names no ref");
     let after = grit
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("resolve");
     assert_eq!(before, after);
 }

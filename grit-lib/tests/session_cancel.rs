@@ -158,12 +158,17 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
 }
 
 fn head(repo: &Repository) -> ObjectId {
-    repo.references().resolve("HEAD").expect("HEAD")
+    repo.references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("HEAD")
 }
 
 fn branch(repo: &Repository, name: &str) -> ObjectId {
     repo.references()
-        .resolve(&format!("refs/heads/{name}"))
+        .resolve(
+            &grit_lib::refs::store::RefNameRef::new(&format!("refs/heads/{name}"))
+                .expect("valid ref name"),
+        )
         .expect("branch")
 }
 
@@ -683,7 +688,10 @@ fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
 fn repo_for_rebase() -> (tempfile::TempDir, Repository, ObjectId, ObjectId) {
     let (tmp, repo, base, side) = repo_with_side_branch();
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/topic")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+        )
         .expect("HEAD");
     grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &base).expect("topic");
     fs::write(tmp.path().join("topic.txt"), "topic\n").expect("write");
@@ -701,7 +709,10 @@ fn repo_for_conflicting_rebase() -> (tempfile::TempDir, Repository, ObjectId, Ob
     let main = commit_all(&repo, "main");
     grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &base).expect("topic");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/topic")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+        )
         .expect("HEAD");
     repo.checkout()
         .reset(

@@ -51,7 +51,10 @@ fn make_initial_commit(repo: &Repository) -> grit_lib::error::Result<grit_lib::o
     let oid = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))?;
-    repo.references().update("refs/heads/main", &oid)?;
+    repo.references().update(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main")?,
+        &oid,
+    )?;
     Ok(oid)
 }
 

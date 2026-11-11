@@ -94,7 +94,7 @@ struct PackReadDamage {
 fn finish_pack_object_lookup(oid: &ObjectId, last: Option<PackReadDamage>) -> Error {
     match last {
         Some(d) => Error::wrap_packed_read_failure(*oid, d.pack, d.offset, d.err),
-        None => Error::Object(ObjectError::NotFound { name: oid.to_hex() }),
+        None => Error::Object(ObjectError::NotFound { oid: *oid }),
     }
 }
 
@@ -4392,9 +4392,7 @@ fn resolve_pack_object_at_body(
                         }
                         if let Some(other_idx) = find_other_pack_index(dir, idx_ref, &base_oid)? {
                             let Some(off) = other_idx.find_offset(&base_oid)? else {
-                                return Err(Error::Object(ObjectError::NotFound {
-                                    name: base_oid.to_hex(),
-                                }));
+                                return Err(Error::Object(ObjectError::NotFound { oid: base_oid }));
                             };
                             cur_idx = PackIndexHandle::Shared(other_idx);
                             cur_offset = off;
@@ -4514,9 +4512,7 @@ fn resolve_pack_object_info_at_body(
                     }
                     if let Some(other_idx) = find_other_pack_index(dir, idx_ref, &base_oid)? {
                         let Some(off) = other_idx.find_offset(&base_oid)? else {
-                            return Err(Error::Object(ObjectError::NotFound {
-                                name: base_oid.to_hex(),
-                            }));
+                            return Err(Error::Object(ObjectError::NotFound { oid: base_oid }));
                         };
                         let base_info = resolve_pack_object_info_at(
                             PackIndexHandle::Shared(other_idx),
@@ -4592,7 +4588,7 @@ pub fn read_object_from_pack_into(
     buf: &mut Vec<u8>,
 ) -> Result<ObjectKind> {
     let Some(offset) = idx.find_offset(oid)? else {
-        return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+        return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
     };
     if crate::pack_store::PackStore::has_context() {
         return read_object_at_depth_into(idx, offset, 0, false, buf);
@@ -4610,7 +4606,7 @@ pub fn read_object_from_pack_into(
 /// Same as [`read_object_from_pack`], except no hash verification is performed on the payload.
 pub fn read_object_info_from_pack(idx: &PackIndex, oid: &ObjectId) -> Result<ObjectInfo> {
     let Some(offset) = idx.find_offset(oid)? else {
-        return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+        return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
     };
     read_object_info_from_pack_at_offset(idx, offset)
 }
@@ -5233,7 +5229,7 @@ pub fn read_object_from_pack_at_offset(idx: &PackIndex, offset: u64) -> Result<O
 /// itself resolves a delta base from another pack (the chain budget must carry across packs).
 fn read_object_from_pack_at_depth(idx: &PackIndex, oid: &ObjectId, depth: usize) -> Result<Object> {
     let Some(offset) = idx.find_offset(oid)? else {
-        return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+        return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
     };
     read_object_at_depth(idx, offset, depth)
 }
@@ -5312,15 +5308,13 @@ pub fn read_object_from_pack_bytes(
 ) -> Result<Object> {
     validate_pack_index_object_count(pack_bytes, idx)?;
     let id = ObjectId::from_bytes(oid).map_err(|_| {
-        Error::Object(ObjectError::NotFound {
-            name: oid_bytes_to_hex(oid),
+        Error::Object(ObjectError::InvalidId {
+            input: oid_bytes_to_hex(oid),
         })
     })?;
-    let entry_offset = idx.find_offset(&id)?.ok_or_else(|| {
-        Error::Object(ObjectError::NotFound {
-            name: oid_bytes_to_hex(oid),
-        })
-    })?;
+    let entry_offset = idx
+        .find_offset(&id)?
+        .ok_or_else(|| Error::Object(ObjectError::NotFound { oid: id }))?;
     let store = crate::pack_store::PackStore::legacy_for_pack_path(&idx.pack_path);
     crate::pack_store::PackStore::with_context(store, || {
         let (kind, data) = read_pack_object_at(pack_bytes, entry_offset, idx, None, 0)?;
@@ -5917,9 +5911,7 @@ impl SingleLocalPackReader {
                     }
                     let base_oid = ObjectId::from_bytes(base_raw)?;
                     let Some(base_offset) = self.idx.find_offset(&base_oid)? else {
-                        return Err(Error::Object(ObjectError::NotFound {
-                            name: base_oid.to_hex(),
-                        }));
+                        return Err(Error::Object(ObjectError::NotFound { oid: base_oid }));
                     };
                     cur_offset = base_offset;
                 }
@@ -5934,7 +5926,7 @@ impl SingleLocalPackReader {
     /// Same as [`read_object_info_from_pack_at_offset`].
     pub fn read_info(&mut self, oid: &ObjectId) -> Result<ObjectInfo> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+            return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
         };
         if let Some(info) =
             read_whole_pack_entry_info_fast(&self.idx, offset, self.pack_bytes.as_ref())
@@ -5952,7 +5944,7 @@ impl SingleLocalPackReader {
     /// Same as [`read_object_from_pack_at_offset`].
     pub fn read_object(&mut self, oid: &ObjectId) -> Result<Object> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+            return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
         };
         if !self.pack_bytes.uses_positioned_reads() {
             if let Some(obj) =
@@ -6089,7 +6081,7 @@ impl SingleLocalPackReader {
         limit: u64,
     ) -> Result<BoundedRead> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+            return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
         };
         let mut pos = usize::try_from(offset).map_err(|_| {
             Error::Object(ObjectError::Corrupt {
@@ -6126,7 +6118,7 @@ impl SingleLocalPackReader {
         out: &mut Vec<u8>,
     ) -> Result<ObjectKind> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
-            return Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }));
+            return Err(Error::Object(ObjectError::NotFound { oid: *oid }));
         };
         if !self.pack_bytes.uses_positioned_reads() {
             if let Some(kind) =
@@ -6275,7 +6267,7 @@ pub(crate) fn try_read_object_info_from_packs_with_options(
             Err(err) => last_err = Some(err),
         }
     }
-    Err(last_err.unwrap_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() })))
+    Err(last_err.unwrap_or_else(|| Error::Object(ObjectError::NotFound { oid: *oid })))
 }
 
 /// Search local packs for `oid` without re-preparing the pack directory listing.
@@ -9931,9 +9923,7 @@ mod cached_lookup_tests {
         assert!(read_object_from_packs(&objects, &miss).is_err());
         assert!(
             try_read_object_from_local_packs_cached(&objects, &miss, || {
-                Err(Error::Object(ObjectError::NotFound {
-                    name: miss.to_hex(),
-                }))
+                Err(Error::Object(ObjectError::NotFound { oid: miss }))
             })
             .unwrap()
             .is_none()
@@ -9972,7 +9962,7 @@ mod cached_lookup_tests {
         let oid = ObjectId::from_hex(String::from_utf8(out.stdout).unwrap().trim()).unwrap();
         let objects = dir.path().join(".git").join("objects");
         assert!(try_read_object_from_local_packs_cached(&objects, &oid, || {
-            Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
+            Err(Error::Object(ObjectError::NotFound { oid }))
         })
         .unwrap()
         .is_none());

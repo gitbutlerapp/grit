@@ -3823,10 +3823,12 @@ pub(crate) fn reftable_list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(St
 /// (system/global/local), so a global `logAllRefUpdates=false` is honoured.
 fn reftable_should_write_log(git_dir: &Path, storage_refname: &str) -> bool {
     let mode = crate::refs::effective_log_refs_config(git_dir);
-    crate::refs::should_autocreate_reflog_for_mode(storage_refname, mode)
-        || crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
-            .and_then(|store| store.reflog_exists(RefNameRef::from_trusted(storage_refname)))
-            .unwrap_or(false)
+    crate::refs::should_autocreate_reflog_for_mode(
+        crate::refs::store::RefNameRef::from_trusted(storage_refname),
+        mode,
+    ) || crate::refs::store::ReftableRefStore::open(git_dir.to_path_buf())
+        .and_then(|store| store.reflog_exists(RefNameRef::from_trusted(storage_refname)))
+        .unwrap_or(false)
 }
 
 /// Append a reflog entry for a reftable repo.

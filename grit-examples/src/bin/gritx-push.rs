@@ -15,6 +15,7 @@ use grit_examples::remote;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::store::{RefName, RefNameRef};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::PushOptions;
 use grit_lib::remote::transfer::PushRefSpec;
@@ -107,7 +108,7 @@ fn run() -> Result<()> {
 fn current_branch_spec(repo: &Repository, force: bool) -> Result<PushRefSpec> {
     let head = repo
         .references()
-        .symbolic("HEAD")?
+        .symbolic(RefNameRef::HEAD)?
         .context("HEAD is detached; specify a refspec to push")?;
     let branch = head
         .as_str()
@@ -147,10 +148,10 @@ fn parse_refspec(repo: &Repository, spec: &str, force_flag: bool) -> Result<Push
     }
 
     let src_ref = normalize_ref(src);
-    let oid = repo
-        .references()
-        .resolve(&src_ref)
-        .or_else(|_| repo.references().resolve(src))
+    let by_name =
+        |name: &str| -> Result<ObjectId> { Ok(repo.references().resolve(&RefName::new(name)?)?) };
+    let oid = by_name(&src_ref)
+        .or_else(|_| by_name(src))
         .or_else(|_| src.parse::<ObjectId>().map_err(anyhow::Error::from))
         .with_context(|| format!("cannot resolve source '{src}'"))?;
     Ok(PushRefSpec::default()

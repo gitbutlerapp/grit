@@ -177,9 +177,7 @@ fn validate_one_tree_entry_stored_kind(
         if allow_missing {
             return Ok(());
         }
-        return Err(Error::Object(ObjectError::NotFound {
-            name: entry.oid.to_hex(),
-        }));
+        return Err(Error::Object(ObjectError::NotFound { oid: entry.oid }));
     };
     if actual != expected {
         return Err(Error::Object(ObjectError::UnexpectedKind {

@@ -154,7 +154,10 @@ fn apply_stash_succeeds_on_clean_tree_with_autocrlf() {
 
     ensure_crlf_worktree_lf_index(dir.path());
 
-    let stash_oid = repo.references().resolve("refs/stash").expect("stash ref");
+    let stash_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/stash").expect("valid ref name"))
+        .expect("stash ref");
 
     let grit_dir = tempfile::tempdir().expect("grit copy");
     std::process::Command::new("cp")
@@ -271,7 +274,10 @@ fn apply_stash_succeeds_with_system_inherited_autocrlf_only() {
 
     ensure_crlf_worktree_lf_index_with_system(dir.path(), &system_cfg);
 
-    let stash_oid = repo.references().resolve("refs/stash").expect("stash ref");
+    let stash_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/stash").expect("valid ref name"))
+        .expect("stash ref");
     repo.stash()
         .apply_commit(
             &stash_oid,
@@ -392,7 +398,10 @@ fn apply_stash_writes_crlf_worktree_bytes_matching_git_stash_apply() {
 
     ensure_stash_reset_f_txt_crlf_clean(dir.path());
 
-    let stash_oid = repo.references().resolve("refs/stash").expect("stash ref");
+    let stash_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/stash").expect("valid ref name"))
+        .expect("stash ref");
 
     let grit_dir = tempfile::tempdir().expect("grit copy");
     std::process::Command::new("cp")

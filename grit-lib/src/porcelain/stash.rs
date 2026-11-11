@@ -1783,7 +1783,12 @@ pub(crate) fn store_stash(
     let old_oid = repo
         .resolve_ref_oid(STASH_REF)
         .unwrap_or_else(|_| ObjectId::zero());
-    update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), STASH_REF, &oid)?;
+    update_direct_ref_on_store(
+        repo.ref_store(),
+        repo.git_dir(),
+        crate::refs::store::RefNameRef::from_trusted(STASH_REF),
+        &oid,
+    )?;
     append_reflog_on_store(
         repo.ref_store(),
         STASH_REF,
@@ -2014,7 +2019,12 @@ pub(crate) fn drop_stash(repo: &Repository, n: usize) -> crate::error::Result<Ob
     delete_reflog_entries_rechain_on_store(store, STASH_REF, &[n])?;
     let remaining = read_reflog_on_store(store, STASH_REF)?;
     if let Some(top_entry) = remaining.last() {
-        update_direct_ref_on_store(store, repo.git_dir(), STASH_REF, &top_entry.new_oid)?;
+        update_direct_ref_on_store(
+            store,
+            repo.git_dir(),
+            crate::refs::store::RefNameRef::from_trusted(STASH_REF),
+            &top_entry.new_oid,
+        )?;
     } else {
         delete_ref_on_store(store, STASH_REF)?;
     }

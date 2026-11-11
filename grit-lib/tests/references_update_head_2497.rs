@@ -168,7 +168,7 @@ fn update_head_with_only_head_reflog_does_not_touch_branch_log() {
     let repo = reopen(dir.path());
     repo.reflogs()
         .append(
-            "HEAD",
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: zero_oid(),
                 new_oid: c1,
@@ -202,7 +202,7 @@ fn update_head_with_only_branch_reflog_does_not_touch_head_log() {
     let repo = reopen(dir.path());
     repo.reflogs()
         .append(
-            "refs/heads/main",
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: zero_oid(),
                 new_oid: c1,

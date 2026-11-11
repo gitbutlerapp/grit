@@ -203,13 +203,19 @@ fn pull_refuses_when_configured_merge_ref_did_not_fetch() {
     assert!(
         grit_test_support::refs::at(grit_dir.join(".git").as_path())
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .is_ok(),
         "origin/main exists but configured upstream is missing"
     );
     assert!(grit_test_support::refs::at(grit_dir.join(".git").as_path())
         .references()
-        .resolve("refs/remotes/origin/missing")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/missing")
+                .expect("valid ref name")
+        )
         .is_err());
 
     let repo = open(&grit_dir);
@@ -415,7 +421,11 @@ fn pull_unborn_adoption_matches_git() {
     git_pull(&git_dir);
     assert_repo_matches_git(&grit_dir, &git_dir);
     assert_eq!(
-        repo.references().resolve("refs/heads/main").expect("main"),
+        repo.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .expect("main"),
         rev(&git_dir, "HEAD")
     );
 }

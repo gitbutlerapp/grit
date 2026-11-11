@@ -456,7 +456,7 @@ fn gc_per_ref_pattern_non_match_wildmatch_matches_git() {
         assert!(
             !grit_test_support::refs::at(&grit_git_dir)
                 .references()
-                .reflog(refname)
+                .reflog(grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
                 .expect("grit read")
                 .is_empty(),
             "pattern must not apply to refs/heads/main"
@@ -544,7 +544,7 @@ fn t1421_grit_written_entries_read_by_git_log_g() {
         grit_test_support::refs::at(&git_dir)
             .reflogs()
             .append(
-                refname,
+                grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: z,
                     new_oid: o1,
@@ -557,7 +557,7 @@ fn t1421_grit_written_entries_read_by_git_log_g() {
         grit_test_support::refs::at(&git_dir)
             .reflogs()
             .append(
-                refname,
+                grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: o1,
                     new_oid: o2,
@@ -669,13 +669,19 @@ fn log_all_ref_updates_modes_match_git() {
             let effective = effective_log_refs_config(&git_dir);
             let _ = read_log_refs_config(&git_dir);
             assert_eq!(
-                grit_lib::refs::should_autocreate_reflog_for_mode(tag, effective),
+                grit_lib::refs::should_autocreate_reflog_for_mode(
+                    grit_lib::refs::store::RefNameRef::new(&tag).expect("valid ref name"),
+                    effective
+                ),
                 mode.tag_expect,
                 "grit tag policy {}",
                 mode.key
             );
             assert_eq!(
-                grit_lib::refs::should_autocreate_reflog_for_mode(branch, effective),
+                grit_lib::refs::should_autocreate_reflog_for_mode(
+                    grit_lib::refs::store::RefNameRef::new(&branch).expect("valid ref name"),
+                    effective
+                ),
                 mode.branch_expect,
                 "grit branch policy {}",
                 mode.key
@@ -683,7 +689,7 @@ fn log_all_ref_updates_modes_match_git() {
 
             let tag_log_before = grit_test_support::refs::at(&git_dir)
                 .reflogs()
-                .exists(tag)
+                .exists(grit_lib::refs::store::RefNameRef::new(&tag).expect("valid ref name"))
                 .unwrap_or(false);
             append_reflog_with_config(
                 &git_dir,
@@ -698,7 +704,7 @@ fn log_all_ref_updates_modes_match_git() {
             .expect("tag append");
             let branch_log_before = grit_test_support::refs::at(&git_dir)
                 .reflogs()
-                .exists(branch)
+                .exists(grit_lib::refs::store::RefNameRef::new(&branch).expect("valid ref name"))
                 .unwrap_or(false);
             append_reflog_with_config(
                 &git_dir,
@@ -715,7 +721,7 @@ fn log_all_ref_updates_modes_match_git() {
             assert_eq!(
                 grit_test_support::refs::at(&git_dir)
                     .reflogs()
-                    .exists(tag)
+                    .exists(grit_lib::refs::store::RefNameRef::new(&tag).expect("valid ref name"))
                     .unwrap_or(false),
                 tag_log_before || mode.tag_expect,
                 "grit tag reflog create {}",
@@ -724,7 +730,9 @@ fn log_all_ref_updates_modes_match_git() {
             assert_eq!(
                 grit_test_support::refs::at(&git_dir)
                     .reflogs()
-                    .exists(branch)
+                    .exists(
+                        grit_lib::refs::store::RefNameRef::new(&branch).expect("valid ref name")
+                    )
                     .unwrap_or(false),
                 branch_log_before || mode.branch_expect,
                 "grit branch reflog create {}",
@@ -759,7 +767,7 @@ fn t0600_expire_on_symref_not_referent() {
         grit_test_support::refs::at(&gd)
             .reflogs()
             .append(
-                refname,
+                grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: z,
                     new_oid: o1,
@@ -772,7 +780,7 @@ fn t0600_expire_on_symref_not_referent() {
         grit_test_support::refs::at(&gd)
             .reflogs()
             .append(
-                refname,
+                grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: o1,
                     new_oid: o2,
@@ -785,7 +793,7 @@ fn t0600_expire_on_symref_not_referent() {
         grit_test_support::refs::at(&gd)
             .reflogs()
             .append(
-                refname,
+                grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: o2,
                     new_oid: o3,
@@ -799,12 +807,15 @@ fn t0600_expire_on_symref_not_referent() {
     seed_main_reflog(worktree);
     grit_test_support::refs::at(&git_dir)
         .references()
-        .update_symbolic(sym, refname)
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new(&sym).expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
+        )
         .expect("symref");
     grit_test_support::refs::at(&git_dir)
         .reflogs()
         .append(
-            sym,
+            grit_lib::refs::store::RefNameRef::new(&sym).expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: ObjectId::zero(),
                 new_oid: git_empty_commit_oid(worktree),
@@ -895,7 +906,7 @@ fn git_written_reflog_lines_parse_like_grit() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .reflog(refname)
+                .reflog(grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
                 .expect("read"),
             want
         );
@@ -914,7 +925,7 @@ fn reflog_exists_list_and_path_match_git() {
         grit_test_support::refs::at(&git_dir)
             .reflogs()
             .append(
-                nested,
+                grit_lib::refs::store::RefNameRef::new(&nested).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: ObjectId::zero(),
                     new_oid: oid,
@@ -946,11 +957,11 @@ fn reflog_exists_list_and_path_match_git() {
 
         assert!(grit_test_support::refs::at(&git_dir)
             .reflogs()
-            .exists(nested)
+            .exists(grit_lib::refs::store::RefNameRef::new(&nested).expect("valid ref name"))
             .unwrap_or(false));
         assert!(grit_test_support::refs::at(&git_dir)
             .reflogs()
-            .exists(sibling)
+            .exists(grit_lib::refs::store::RefNameRef::new(&sibling).expect("valid ref name"))
             .unwrap_or(false));
         assert_eq!(
             reflog_file_path(&git_dir, nested),
@@ -1045,7 +1056,7 @@ fn expire_unreachable_stalefix_and_mark_reachable() {
         grit_test_support::refs::at(&git_dir)
             .reflogs()
             .append(
-                refname,
+                grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: o3,
                     new_oid: ObjectId::from_hex("1111111111111111111111111111111111111111")
@@ -1113,7 +1124,7 @@ fn mirror_branch_reflog_to_head_and_detached() {
         grit_test_support::refs::at(&git_dir)
             .reflogs()
             .append(
-                "HEAD",
+                grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: oid,
                     new_oid: oid,
@@ -1125,11 +1136,11 @@ fn mirror_branch_reflog_to_head_and_detached() {
             .expect("detached head log");
         assert!(grit_test_support::refs::at(&git_dir)
             .reflogs()
-            .exists("HEAD")
+            .exists(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .unwrap_or(false));
         let head_entries = grit_test_support::refs::at(&git_dir)
             .references()
-            .reflog("HEAD")
+            .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("head read");
         assert!(
             head_entries.iter().any(|e| e.message.contains("detached")),
@@ -1172,7 +1183,7 @@ fn all_reflog_oids_and_ordered_match_git_walk() {
         grit_test_support::refs::at(repo.git_dir())
             .reflogs()
             .append(
-                "refs/heads/extra",
+                grit_lib::refs::store::RefNameRef::new("refs/heads/extra").expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: ObjectId::zero(),
                     new_oid: empty_commit_oid(repo),
@@ -1200,7 +1211,7 @@ fn all_reflog_oids_and_ordered_match_git_walk() {
         for name in names {
             for entry in grit_test_support::refs::at(&git_dir)
                 .references()
-                .reflog(&name)
+                .reflog(&grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
                 .expect("read")
             {
                 for oid in [entry.old_oid, entry.new_oid] {
@@ -1363,7 +1374,7 @@ fn typed_selectors_query_and_delete_across_git_and_grit() {
 
         repo.reflogs()
             .append(
-                refname,
+                grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: third,
                     new_oid: third,

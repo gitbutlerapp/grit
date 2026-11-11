@@ -472,7 +472,10 @@ mod tests {
         assert!(!text.contains("gpgsig"), "{text}");
         assert!(text.contains("\nchange-id "), "{text}");
         assert_eq!(
-            co.repo.references().symbolic("HEAD").expect("HEAD"),
+            co.repo
+                .references()
+                .symbolic(crate::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+                .expect("HEAD"),
             None,
             "still detached"
         );

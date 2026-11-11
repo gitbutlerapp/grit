@@ -113,7 +113,7 @@ fn main_spec(tip: ObjectId) -> PushRefSpec {
 fn remote_main(git_dir: &Path) -> Option<ObjectId> {
     grit_test_support::refs::at(git_dir)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .ok()
 }
 

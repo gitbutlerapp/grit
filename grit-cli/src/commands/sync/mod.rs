@@ -23,6 +23,7 @@ use anyhow::{bail, Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::config::{ConfigScope, ConfigWriteOptions};
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::store::RefName;
 use grit_lib::remote::grit_server_auth::{ServerAuthError, ServerUrl};
 use grit_lib::remote::grit_server_share::SHARED_REFS;
 use grit_lib::remote::grit_server_space::{fetch_space, hosted_project, Space};
@@ -371,7 +372,7 @@ fn fast_forward(repo: &Repository, name: &str, to: &str, oid: ObjectId) -> Resul
         Ok(())
     } else {
         repo.references()
-            .update(format!("refs/heads/{name}"), &oid)
+            .update(&RefName::branch(name)?, &oid)
             .with_context(|| format!("moving {name}"))
     }
 }
@@ -465,7 +466,7 @@ pub(crate) fn sync_target(
     let action = match ours {
         None => {
             repo.references()
-                .update(format!("refs/heads/{target}"), &theirs)?;
+                .update(&RefName::branch(target)?, &theirs)?;
             TargetAction::Created
         }
         Some(ours) if ours == theirs => TargetAction::UpToDate,
@@ -629,8 +630,7 @@ pub fn run(interaction: CommandInteraction) -> Result<SyncOutcome> {
                 SyncAction::Pushed
             }
             (None, Some(theirs)) => {
-                repo.references()
-                    .update(format!("refs/heads/{name}"), &theirs)?;
+                repo.references().update(&RefName::branch(name)?, &theirs)?;
                 set_tracking(&repo, name, &setup.remote)?;
                 SyncAction::Created
             }

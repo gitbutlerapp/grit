@@ -166,7 +166,10 @@ fn collision_loser_auto_stage_commit_is_noop_for_nfc() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     let nfd_oid = before.get(nfd.as_bytes(), 0).expect(nfd).oid;
-    let head_before = repo.references().resolve("HEAD").expect("head");
+    let head_before = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
 
     let mut req = CommitRequest::new("e".to_owned());
     req.author = Some(id.parse().expect("sig"));
@@ -190,7 +193,9 @@ fn collision_loser_auto_stage_commit_is_noop_for_nfc() {
     );
 
     assert_eq!(
-        repo.references().resolve("HEAD").expect("head"),
+        repo.references()
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+            .expect("head"),
         head_before
     );
     let after = repo

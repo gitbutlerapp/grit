@@ -113,7 +113,8 @@ fn bench_sparse_stash_pop(c: &mut Criterion) {
                 fx.repo
                     .reflogs()
                     .append(
-                        "refs/stash",
+                        grit_lib::refs::store::RefNameRef::new("refs/stash")
+                            .expect("valid ref name"),
                         &grit_lib::refs::reflog::ReflogEntry {
                             old_oid: grit_lib::objects::ObjectId::zero(),
                             new_oid: stash_oid,

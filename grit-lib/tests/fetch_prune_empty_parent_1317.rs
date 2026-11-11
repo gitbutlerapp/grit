@@ -60,7 +60,10 @@ fn fetch_prune_removes_empty_parent_then_fetch_succeeds() {
     .expect("initial fetch");
     grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/feature/x")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/feature/x")
+                .expect("valid ref name"),
+        )
         .expect("nested tracking ref");
 
     git(&work, &["push", "-q", "origin", "--delete", "feature/x"]);
@@ -85,7 +88,10 @@ fn fetch_prune_removes_empty_parent_then_fetch_succeeds() {
     assert!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/feature/x")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/feature/x")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "nested tracking ref must be gone"
     );
@@ -116,6 +122,9 @@ fn fetch_prune_removes_empty_parent_then_fetch_succeeds() {
     .expect("fetch after remote republished feature at former parent path");
     grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/feature")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/feature")
+                .expect("valid ref name"),
+        )
         .expect("new origin/feature tracking ref");
 }

@@ -144,7 +144,10 @@ fn bundles_write_verify_unbundle_and_fetch_between_repositories() {
     assert_eq!(
         fetcher
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .expect("tracking"),
         c2
     );
@@ -224,7 +227,10 @@ fn remotes_fetch_from_and_push_to_a_local_endpoint() {
     assert_eq!(
         local
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .expect("tracking"),
         base
     );
@@ -245,7 +251,9 @@ fn remotes_fetch_from_and_push_to_a_local_endpoint() {
     assert_eq!(
         upstream
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );
@@ -404,13 +412,18 @@ fn remotes_fetch_from_and_push_to_a_connection_served_in_process() {
     assert_eq!(
         grit_test_support::refs::at(&upstream_dir)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );
     assert!(grit_test_support::refs::at(&upstream_dir)
         .references()
-        .resolve("refs/heads/protected/x")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/protected/x")
+                .expect("valid ref name")
+        )
         .is_err());
 }
 
@@ -473,18 +486,30 @@ fn remotes_fetch_all_applies_the_prune_override_to_every_remote() {
     assert_eq!(
         local
             .references()
-            .resolve("refs/remotes/one/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/one/main")
+                    .expect("valid ref name")
+            )
             .expect("one"),
         one_tip
     );
     assert_eq!(
         local
             .references()
-            .resolve("refs/remotes/two/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/two/main")
+                    .expect("valid ref name")
+            )
             .expect("two"),
         two_tip
     );
-    assert!(local.references().resolve("refs/remotes/one/gone").is_err());
+    assert!(local
+        .references()
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/one/gone")
+                .expect("valid ref name")
+        )
+        .is_err());
 }
 
 #[test]

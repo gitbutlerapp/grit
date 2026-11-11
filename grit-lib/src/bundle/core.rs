@@ -213,11 +213,11 @@ pub enum BundleError {
         /// What failed, with the path when known.
         detail: String,
     },
-    /// A named object id is missing from the ODB.
-    #[error("object not found: {name}")]
+    /// An object the bundle needs is missing from the object database.
+    #[error("object not found: {oid}")]
     ObjectNotFound {
-        /// Object id (hex) that was looked up.
-        name: String,
+        /// The missing object.
+        oid: ObjectId,
     },
     /// A v3 `@filter=` capability is not a filter Git accepts.
     #[error(transparent)]
@@ -782,9 +782,7 @@ fn bundle_header_parts(
 fn map_pack_error(e: Error) -> BundleError {
     match e {
         Error::Cancelled => BundleError::Cancelled,
-        Error::Object(ObjectError::NotFound { name: id }) => {
-            BundleError::ObjectNotFound { name: id }
-        }
+        Error::Object(ObjectError::NotFound { oid }) => BundleError::ObjectNotFound { oid },
         other => BundleError::Io {
             detail: other.to_string(),
         },

@@ -183,7 +183,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
     // The remote ref now points at our main, and the objects are present.
     let remote_main = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main written");
     assert_eq!(remote_main, main_oid, "remote main oid mismatch");
 
@@ -268,7 +268,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
     // The remote ref must be unchanged by the rejected push.
     let remote_main_after = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main still set");
     assert_eq!(
         remote_main_after, main_oid,
@@ -312,7 +312,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
 
     let remote_main_forced = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main after force");
     assert_eq!(
         remote_main_forced, diverged,

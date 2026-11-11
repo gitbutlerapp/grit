@@ -72,7 +72,10 @@ fn commit_file(
         .expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("symhead");
     co
 }
@@ -182,7 +185,10 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
     two_commit_history(dir2.path());
     std::fs::write(dir2.path().join("a"), "edited\n").expect("edit a");
     let repo = open_grit_repo(dir2.path());
-    let head_before = repo.references().resolve("HEAD").expect("head");
+    let head_before = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
     let parent = repo
         .revwalk()
         .resolve(
@@ -210,7 +216,9 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
         "expected WouldOverwrite, got {err:?}"
     );
     assert_eq!(
-        repo.references().resolve("HEAD").expect("head"),
+        repo.references()
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+            .expect("head"),
         head_before
     );
     let git_lines = git_status_porcelain_v2_lines(dir.path());
@@ -230,10 +238,15 @@ fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
     .expect("init");
     let c1 = {
         commit_file(&repo, "a", "1\n", None);
-        repo.references().resolve("HEAD").expect("head")
+        repo.references()
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+            .expect("head")
     };
     commit_file(&repo, "a", "2\n", Some(c1));
-    let head_before = repo.references().resolve("HEAD").expect("head");
+    let head_before = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("a"), "dirty\n").expect("dirty");
 
@@ -255,7 +268,9 @@ fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
     assert!(outcome.dry_run);
     assert!(outcome.would_overwrite.iter().any(|p| p == "a"));
     assert_eq!(
-        repo.references().resolve("HEAD").expect("head"),
+        repo.references()
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+            .expect("head"),
         head_before
     );
     assert_eq!(std::fs::read(wt.join("a")).expect("disk"), b"dirty\n");
@@ -428,7 +443,10 @@ fn reset_keep_rejects_unmerged_index_like_git() {
         .with_status(128);
 
     let repo = open_grit_repo(dir.path());
-    let head = repo.references().resolve("HEAD").expect("head");
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
     let err = repo
         .checkout()
         .reset(
@@ -553,7 +571,7 @@ fn append_reflog_rejects_malformed_identity() {
         let err = repo
             .reflogs()
             .append(
-                "refs/heads/main",
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: zero,
                     new_oid: tip,

@@ -392,7 +392,7 @@ pub mod test_support;
 /// let dir = tempfile::tempdir()?;
 /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
 /// let _cfg = repo.config().snapshot()?;
-/// assert!(repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
+/// assert!(repo.ref_store().read_raw(RefNameRef::HEAD)?.is_some());
 /// # Ok(())
 /// # }
 /// ```

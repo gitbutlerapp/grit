@@ -16,6 +16,7 @@ use grit_lib::refs::branch_tracking::{
     status_ahead_behind_enabled, BranchStanding, StandingOptions, StatusHeader,
     StatusIntegrationHint, TrackedComparison,
 };
+use grit_lib::refs::store::RefName;
 use grit_lib::revwalk::AbbrevLength;
 use grit_lib::state::{HeadState, InProgressOperation, NextStep};
 use grit_lib::status::{
@@ -306,10 +307,9 @@ fn shared_status(repo: &grit_lib::repo::Repository, branch: &str) -> Option<Stat
     if !crate::commands::sync::is_shared(&config, branch) {
         return None;
     }
-    let ours = repo
-        .references()
-        .resolve(format!("refs/heads/{branch}"))
-        .ok();
+    let ours = RefName::branch(branch)
+        .ok()
+        .and_then(|name| repo.references().resolve(&name).ok());
     let mut remotes: Vec<String> =
         crate::context::config_string(&config, &format!("branch.{branch}.remote"))
             .into_iter()

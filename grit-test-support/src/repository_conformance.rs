@@ -434,7 +434,7 @@ fn expected_fetch_remote_refs_from_bare(bare: &Repository) -> BTreeMap<String, S
     let mut expected = remote_refs_for_bare_heads(bare);
     let default_branch = bare
         .references()
-        .symbolic("HEAD")
+        .symbolic(grit_lib::refs::store::RefNameRef::HEAD)
         .map(|t| t.map(String::from))
         .expect("read bare HEAD")
         .unwrap_or_else(|| "refs/heads/main".into());

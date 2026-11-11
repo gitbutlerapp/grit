@@ -23,6 +23,7 @@ pub use crate::render::push::{
     PushKind, PushOutcome, PushRefOutcomeStatus, PushRefResult, PushSharedBranch,
     PushedToIntegrated,
 };
+use grit_lib::refs::store::RefName;
 use grit_lib::remote::transfer::TransferStats;
 
 impl From<PushPlanKind> for PushKind {
@@ -331,7 +332,9 @@ pub fn run(
                         })
                         .collect()
                 };
-            let mut ours = repo.references().resolve(format!("refs/heads/{name}")).ok();
+            let mut ours = RefName::branch(name)
+                .ok()
+                .and_then(|branch| repo.references().resolve(&branch).ok());
             let mut heads = heads_now(ours);
             // Heads that go together with yours without losing anything:
             // combine them here, and push the result.
@@ -411,7 +414,7 @@ fn integrated_again(
     let (server, project) = grit_lib::remote::grit_server_space::hosted_project(&url)?;
     let tip = repo
         .references()
-        .resolve(format!("refs/heads/{branch}"))
+        .resolve(&RefName::branch(branch).ok()?)
         .ok()?;
     crate::commands::share::integrated_on(repo, config, &server, &project, branch, tip)
         .ok()

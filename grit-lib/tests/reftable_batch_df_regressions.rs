@@ -191,7 +191,9 @@ fn reftable_verify_batch_allows_parent_after_deleted_descendant() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/topic")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
             .expect("resolve"),
         oid(0x32)
     );

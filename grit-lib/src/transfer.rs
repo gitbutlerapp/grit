@@ -3551,12 +3551,7 @@ fn decide_push(
         }));
     };
     if !local_odb.contains(&src)? {
-        return Err(Error::Object(ObjectError::NotFound {
-            name: format!(
-                "source object {src} for '{}' is missing from the local object store",
-                spec.dst
-            ),
-        }));
+        return Err(Error::Object(ObjectError::NotFound { oid: src }));
     }
 
     // Unchanged: the remote is already at the source.

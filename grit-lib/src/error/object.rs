@@ -25,11 +25,23 @@ pub enum ObjectError {
         oid: crate::objects::ObjectId,
     },
 
-    /// The requested object does not exist in the object store.
-    #[error("object not found: {name}")]
+    /// The object `oid` is not in the object database (loose objects, packs, alternates).
+    ///
+    /// Returned only for a concrete object id: a read, peel or walk needed `oid` and the store
+    /// does not have it. A revision expression that names nothing (an unknown branch, an
+    /// abbreviated id that matches no object, `:/<text>` with no match) is
+    /// [`RevisionError::NotFound`] instead; the parser also reports
+    /// [`RevParseError::InvalidObjectName`] for an unresolvable `<rev>` in `<rev>:<path>` and
+    /// [`RevParseError::RevisionOutOfRange`] for `~`/`^` navigation past a root commit.
+    /// A partial-clone object a promisor remote should supply is [`Self::PromisedMissing`].
+    ///
+    /// [`RevParseError::InvalidObjectName`]: crate::revwalk::rev_parse_error::RevParseError::InvalidObjectName
+    /// [`RevParseError::RevisionOutOfRange`]: crate::revwalk::rev_parse_error::RevParseError::RevisionOutOfRange
+    /// [`RevisionError::NotFound`]: crate::error::RevisionError::NotFound
+    #[error("object not found: {oid}")]
     NotFound {
-        /// Object id (hex) or the name that was looked up.
-        name: String,
+        /// The missing object.
+        oid: crate::objects::ObjectId,
     },
 
     /// A partial-clone promisor object is not present locally and no fetcher ran.

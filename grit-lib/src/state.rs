@@ -1285,7 +1285,12 @@ pub(crate) fn read_orig_head_for_repository(repo: &Repository) -> Result<Option<
 ///
 /// Propagates ref store write failures (for example a held lock).
 pub(crate) fn write_orig_head(repo: &Repository, oid: ObjectId) -> Result<()> {
-    crate::refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "ORIG_HEAD", &oid)
+    crate::refs::update_direct_ref_on_store(
+        repo.ref_store(),
+        repo.git_dir(),
+        crate::refs::store::RefNameRef::from_trusted("ORIG_HEAD"),
+        &oid,
+    )
 }
 
 /// Read a file that contains a single OID on its first line.

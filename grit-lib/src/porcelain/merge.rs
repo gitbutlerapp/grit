@@ -768,6 +768,7 @@ pub(crate) fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<Merg
     // when peeling; that is still "names nothing", unlike a ref pointing at a missing object.
     let not_found = |err: Error| match err {
         Error::Object(ObjectError::NotFound { .. })
+        | Error::Revision(RevisionError::NotFound { .. })
         | Error::Revision(RevisionError::Parse(
             RevParseError::InvalidObjectName { .. }
             | RevParseError::RevisionOutOfRange { .. }
@@ -2155,7 +2156,11 @@ fn ensure_detached_head_tip(repo: &Repository, expected: ObjectId) -> Result<()>
         }
         None => None,
     };
-    refs::verify_branch_commit_cas(Some(expected), current, "HEAD")
+    refs::verify_branch_commit_cas(
+        Some(expected),
+        current,
+        crate::refs::store::RefNameRef::from_trusted("HEAD"),
+    )
 }
 
 /// Refuse to touch the work tree when `branch_ref` no longer points at `expected` (`None`:
@@ -2169,7 +2174,11 @@ pub(crate) fn ensure_branch_tip(
         .ref_store()
         .resolve(RefNameRef::from_trusted(branch_ref))
         .ok();
-    refs::verify_branch_commit_cas(expected, current, branch_ref)
+    refs::verify_branch_commit_cas(
+        expected,
+        current,
+        crate::refs::store::RefNameRef::from_trusted(branch_ref),
+    )
 }
 
 /// Point the checked-out branch `branch_ref` from `expected_old` (`None`: unborn) at `new`

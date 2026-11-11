@@ -474,7 +474,7 @@ fn rebuild_directory_node(
         };
 
         if oid.is_zero() {
-            return Err(missing_member_error(mode, &oid, path));
+            return Err(missing_member_error(&oid));
         }
         let gitlink = mode == MODE_GITLINK;
         let allow_missing = gitlink || flags.missing_ok || (slash.is_none() && row.intent_to_add());
@@ -493,9 +493,8 @@ fn rebuild_directory_node(
     if !unconfirmed.is_empty() {
         let oids: Vec<ObjectId> = unconfirmed.iter().map(|(oid, _, _)| *oid).collect();
         let present = odb.contains_many(&oids)?;
-        if let Some(((oid, mode, path), _)) = unconfirmed.iter().zip(present).find(|(_, has)| !has)
-        {
-            return Err(missing_member_error(*mode, oid, path));
+        if let Some(((oid, _, _), _)) = unconfirmed.iter().zip(present).find(|(_, has)| !has) {
+            return Err(missing_member_error(oid));
         }
     }
 
@@ -519,14 +518,8 @@ fn rebuild_directory_node(
     Ok((pos as i32, known_present))
 }
 
-fn missing_member_error(mode: u32, oid: &ObjectId, path: &[u8]) -> Error {
-    Error::Object(ObjectError::NotFound {
-        name: format!(
-            "{mode:o} {} at {}",
-            oid.to_hex(),
-            String::from_utf8_lossy(path)
-        ),
-    })
+fn missing_member_error(oid: &ObjectId) -> Error {
+    Error::Object(ObjectError::NotFound { oid: *oid })
 }
 
 /// Whether `node` and every descendant are valid and their trees are in `reusable`.
@@ -1757,7 +1750,7 @@ mod tests {
         index.add_or_replace(entry("beta/three", MODE_REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(
-            matches!(&err, Error::Object(ObjectError::NotFound { name: msg }) if msg.contains("beta/three")),
+            matches!(&err, Error::Object(ObjectError::NotFound { oid }) if *oid == missing),
             "{err:?}"
         );
     }

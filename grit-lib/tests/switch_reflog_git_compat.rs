@@ -79,7 +79,10 @@ fn grit_commit(
         .expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("head");
     co
 }
@@ -183,7 +186,10 @@ fn run_repro_sequence(repo: &Repository) {
         )
         .expect("switch -c topic");
 
-    let main_oid = repo.references().resolve("refs/heads/main").unwrap();
+    let main_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
     repo.checkout()
         .switch(
             &SwitchOptions::new(SwitchMode::Existing {
@@ -283,7 +289,10 @@ fn detach_at_annotated_tag_matches_git() {
     );
 
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("reattach");
     let git_switch = Command::new("git")
         .args(["switch", "--detach", "v1"])
@@ -313,7 +322,10 @@ fn switch_sequence_reflog_matches_git() {
     git_config(dir.path());
     run_repro_sequence(&repo);
 
-    let head_log = repo.references().reflog("HEAD").expect("head reflog");
+    let head_log = repo
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head reflog");
     let checkout_msgs: Vec<_> = head_log
         .iter()
         .filter_map(|e| {
@@ -327,12 +339,15 @@ fn switch_sequence_reflog_matches_git() {
 
     let topic_log = repo
         .references()
-        .reflog("refs/heads/topic")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"))
         .expect("topic log");
     assert_eq!(topic_log.len(), 1);
     assert_eq!(topic_log[0].message, "branch: Created from HEAD");
 
-    let b2_log = repo.references().reflog("refs/heads/b2").expect("b2 log");
+    let b2_log = repo
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/heads/b2").expect("valid ref name"))
+        .expect("b2 log");
     assert_eq!(b2_log.len(), 1);
     assert_eq!(b2_log[0].message, "branch: Created from main");
 
@@ -373,7 +388,10 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("topic");
-    let main_oid = repo.references().resolve("refs/heads/main").unwrap();
+    let main_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
     repo.checkout()
         .switch(
             &SwitchOptions::new(SwitchMode::Existing {
@@ -444,7 +462,10 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
         .status()
         .expect("git config");
 
-    let before = repo.references().reflog("HEAD").expect("head log");
+    let before = repo
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head log");
     assert_eq!(before.len(), 1, "git commit should seed HEAD reflog");
 
     repo.checkout()
@@ -463,7 +484,10 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
         )
         .expect("switch -c topic");
 
-    let after = repo.references().reflog("HEAD").expect("head log after");
+    let after = repo
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head log after");
     assert_eq!(
         after.len(),
         2,
@@ -481,7 +505,10 @@ fn same_branch_switch_appends_head_checkout_reflog() {
     let (_dir, repo) = init_repo();
     let c1 = grit_commit(&repo, "f", "1\n", None);
     let _c2 = grit_commit(&repo, "f", "1\n2\n", Some(c1));
-    let main_oid = repo.references().resolve("refs/heads/main").unwrap();
+    let main_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
 
     repo.checkout()
         .switch(
@@ -494,7 +521,10 @@ fn same_branch_switch_appends_head_checkout_reflog() {
         )
         .expect("same-branch switch");
 
-    let head_log = repo.references().reflog("HEAD").expect("head log");
+    let head_log = repo
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head log");
     assert!(
         head_log
             .iter()
@@ -535,7 +565,7 @@ fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
 
     let topic_log = repo
         .references()
-        .reflog("refs/heads/topic")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"))
         .expect("topic log");
     assert_eq!(topic_log.len(), 1);
     assert_eq!(
@@ -578,7 +608,10 @@ fn unborn_symbolic_head_switch_writes_zero_to_tip_checkout_reflog() {
     let (dir, repo) = init_repo();
     git_config(dir.path());
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("symhead");
     let _ = std::fs::remove_file(repo.git_dir().join("refs/heads/main"));
     let head = repo.references().head().expect("head");
@@ -614,7 +647,10 @@ fn unborn_symbolic_head_switch_writes_zero_to_tip_checkout_reflog() {
         } if refname == "refs/heads/feature" && oid == tip
     ));
 
-    let head_log = repo.references().reflog("HEAD").expect("head log");
+    let head_log = repo
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head log");
     assert_eq!(head_log.len(), 1);
     assert!(head_log[0].old_oid.is_zero() || head_log[0].old_oid == zero_oid());
     assert_eq!(head_log[0].new_oid, tip);
@@ -647,7 +683,11 @@ fn create_branch_leaves_no_ref_when_reflog_dir_not_writable() {
     std::fs::set_permissions(&logs_heads, std::fs::Permissions::from_mode(0o755))
         .expect("restore chmod");
     assert!(
-        repo.references().resolve("refs/heads/fail").is_err(),
+        repo.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/fail").expect("valid ref name")
+            )
+            .is_err(),
         "branch ref must not exist when reflog write fails"
     );
 }

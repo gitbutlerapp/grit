@@ -77,7 +77,9 @@ fn fetch_local_incremental_following_imports_reachable_tag() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/v2")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v2").expect("valid ref name")
+            )
             .expect("tag ref"),
         tag_oid
     );
@@ -186,14 +188,18 @@ fn fetch_local_incremental_following_with_existing_tags_matches_git() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/moving")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/moving").expect("valid ref name")
+            )
             .expect("moving tag"),
         moving_before,
         "an existing tag must not move without force"
     );
     assert!(grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/tags/side-only")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/side-only").expect("valid ref name")
+        )
         .is_err());
     assert_eq!(
         git(&local, &["for-each-ref", "refs/tags"]),
@@ -278,7 +284,10 @@ fn fetch_local_incremental_following_imports_lightweight_tag_on_existing_tip() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/lightweight-on-existing-tip")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/lightweight-on-existing-tip")
+                    .expect("valid ref name")
+            )
             .expect("tag ref"),
         tip,
         "lightweight tag must point at the already-local commit"

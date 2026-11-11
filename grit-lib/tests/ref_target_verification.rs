@@ -294,7 +294,10 @@ fn log_only_with_no_new_value_still_checks_explicit_reflog_objects() {
         let log_len = || {
             grit_test_support::refs::at(git_dir)
                 .references()
-                .reflog("refs/heads/main")
+                .reflog(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name"),
+                )
                 .map_or(0, |e| e.len())
         };
         let before = log_len();
@@ -492,7 +495,11 @@ fn git_dir_writers_refuse_missing_objects() {
         );
         let err = grit_test_support::refs::at(git_dir)
             .references()
-            .compare_and_swap("refs/heads/main", &fx.commit, &fx.tree)
+            .compare_and_swap(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+                &fx.commit,
+                &fx.tree,
+            )
             .expect_err("write_ref_cas to a tree");
         assert!(
             matches!(

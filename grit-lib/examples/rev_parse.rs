@@ -54,7 +54,10 @@ fn main() -> grit_lib::error::Result<()> {
     let oid = repo
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))?;
-    repo.references().update("refs/heads/main", &oid)?;
+    repo.references().update(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main")?,
+        &oid,
+    )?;
 
     let head = repo
         .revwalk()

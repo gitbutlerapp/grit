@@ -148,9 +148,11 @@ impl<'repo> RevWalk<'repo> {
     ///   [`RevParseError::AmbiguousShortObject`](super::rev_parse_error::RevParseError::AmbiguousShortObject)
     ///   when abbreviated hex matches several objects the options can't choose between, and
     ///   other rev-parse errors.
+    /// - [`RevisionError::NotFound`](crate::error::RevisionError::NotFound) when a name,
+    ///   abbreviated id or `:/<text>` search matches nothing.
     /// - [`RefError::Invalid`](crate::error::RefError::Invalid) when [`Peel::Commit`] meets a
-    ///   tree or blob, and [`ObjectError::NotFound`](crate::error::ObjectError::NotFound) when
-    ///   [`Peel::Tree`] or [`Peel::Blob`] cannot peel the object.
+    ///   tree or blob, and [`ObjectError::UnexpectedKind`](crate::error::ObjectError::UnexpectedKind)
+    ///   when [`Peel::Tree`] or [`Peel::Blob`] cannot peel the object.
     ///
     /// # Examples
     ///
@@ -194,8 +196,8 @@ impl<'repo> RevWalk<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns [`ObjectError::NotFound`](crate::error::ObjectError::NotFound) when the
-    /// object peels to a blob, and object read errors.
+    /// Returns [`ObjectError::UnexpectedKind`](crate::error::ObjectError::UnexpectedKind) when
+    /// the object peels to a blob, and object read errors.
     pub fn peel_to_tree(&self, oid: ObjectId) -> Result<ObjectId> {
         rev_parse::peel_to_tree(self.repository(), oid)
     }

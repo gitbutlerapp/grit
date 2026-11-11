@@ -181,7 +181,7 @@ fn push_delete_tag_on_local_remote() {
     let local_git = local.join(".git");
     let tag_oid = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/tags/v1")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name"))
         .unwrap();
     grit_lib::repo::Repository::open(
         &local_git,
@@ -201,7 +201,7 @@ fn push_delete_tag_on_local_remote() {
     .expect("push tag");
     assert!(grit_test_support::refs::at(&origin)
         .references()
-        .resolve("refs/tags/v1")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name"))
         .is_ok());
 
     grit_lib::repo::Repository::open(
@@ -222,6 +222,6 @@ fn push_delete_tag_on_local_remote() {
     .expect("delete tag");
     assert!(grit_test_support::refs::at(&origin)
         .references()
-        .resolve("refs/tags/v1")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name"))
         .is_err());
 }

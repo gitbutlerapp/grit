@@ -289,7 +289,10 @@ fn history_change_ids_survive_every_rewrite() {
             &CancelToken::never(),
         )
         .expect("apply absorb");
-    let main = grit.references().resolve("refs/heads/main").expect("main");
+    let main = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("main");
     let parent = parse_commit(&grit.odb().read(&main).expect("read").data)
         .expect("parse")
         .parents[0];
@@ -334,7 +337,10 @@ fn history_change_ids_survive_every_rewrite() {
         .drop_commit(d2, &rewrite_opts(5))
         .expect("drop");
     apply_plan(&grit, &plan);
-    let tip = grit.references().resolve("refs/heads/main").expect("tip");
+    let tip = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("tip");
     let replayed = parse_commit(&grit.odb().read(&tip).expect("read").data).expect("parse");
     assert_change_id_on_oid(wt, &replayed.parents[0], "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzt");
 

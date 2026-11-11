@@ -70,7 +70,10 @@ fn squash_folds_linear_range_into_oldest() {
         )
         .expect("squash");
     apply_plan(&grit, &plan);
-    let main = grit.references().resolve("refs/heads/main").expect("main");
+    let main = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("main");
     let parents = parse_commit(&grit.odb().read(&main).expect("read").data)
         .expect("parse")
         .parents;
@@ -361,7 +364,10 @@ fn squash_divergent_branch_refused_unless_update_refs_head() {
         matches!(err, HistoryError::DivergentBranch { .. }),
         "{err:?}"
     );
-    let side_before = grit.references().resolve("refs/heads/mid").expect("mid");
+    let side_before = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/mid").expect("valid ref name"))
+        .expect("mid");
     let plan = grit
         .history()
         .squash(
@@ -372,7 +378,7 @@ fn squash_divergent_branch_refused_unless_update_refs_head() {
     apply_plan(&grit, &plan);
     let side_after = grit
         .references()
-        .resolve("refs/heads/mid")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/mid").expect("valid ref name"))
         .expect("mid after");
     assert_eq!(side_before, side_after);
     assert!(!plan

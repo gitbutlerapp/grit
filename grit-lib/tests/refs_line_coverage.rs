@@ -14,14 +14,26 @@ use tempfile::tempdir;
 
 #[test]
 fn ref_matches_glob_wildcards_and_exact() {
-    assert!(ref_matches_glob("refs/heads/main", "refs/heads/main"));
     assert!(ref_matches_glob(
-        "refs/heads/feature/x",
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        "refs/heads/main"
+    ));
+    assert!(ref_matches_glob(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/feature/x").expect("valid ref name"),
         "refs/heads/feature/*"
     ));
-    assert!(ref_matches_glob("refs/heads/a", "refs/heads/?"));
-    assert!(ref_matches_glob("refs/heads/main", "main"));
-    assert!(!ref_matches_glob("refs/heads/main", "refs/tags/*"));
+    assert!(ref_matches_glob(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/a").expect("valid ref name"),
+        "refs/heads/?"
+    ));
+    assert!(ref_matches_glob(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        "main"
+    ));
+    assert!(!ref_matches_glob(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        "refs/tags/*"
+    ));
 }
 
 #[test]

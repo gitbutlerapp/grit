@@ -2,6 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::refs::store::RefName;
 use grit_lib::remote::pkt_line;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_protocol::upload_pack::stateless_rpc;
@@ -39,7 +40,7 @@ fn stateless_v0_done_emits_bare_ack_before_sideband_pack() {
     let parent = write_commit(&repo, tree, None, "root");
     let tip = write_commit(&repo, tree, Some(parent), "child");
     repo.references()
-        .update("refs/heads/main", &tip)
+        .update(&RefName::new("refs/heads/main").expect("valid ref"), &tip)
         .expect("ref");
 
     let caps = " multi_ack_detailed side-band-64k thin-pack no-progress ofs-delta";

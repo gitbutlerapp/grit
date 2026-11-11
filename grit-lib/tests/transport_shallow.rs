@@ -485,6 +485,8 @@ fn git_daemon_shallow_depth_two_keeps_parent_tag() {
 
     grit_test_support::refs::at(&dest.join(".git"))
         .references()
-        .resolve("refs/tags/parent-tag")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/parent-tag").expect("valid ref name"),
+        )
         .expect("parent-tag after depth-2 clone over git://");
 }

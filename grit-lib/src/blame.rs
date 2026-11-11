@@ -1937,9 +1937,7 @@ pub(crate) fn read_object_for_blame(
                     return odb.read(oid);
                 }
             }
-            Err(LibError::Object(ObjectError::NotFound {
-                name: oid.to_hex(),
-            }))
+            Err(LibError::Object(ObjectError::NotFound { oid: *oid }))
         }
         Err(err) => Err(err),
     }

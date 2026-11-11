@@ -94,7 +94,12 @@ fn t0601_peeled_and_sorted_traits_match_git() {
         .trim()
         .parse()
         .unwrap();
-    assert_eq!(packed.get("refs/tags/v-packed"), Some(tag_oid));
+    assert_eq!(
+        packed.get(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/v-packed").expect("valid ref name")
+        ),
+        Some(tag_oid)
+    );
 
     assert_list_refs_match_git(wt_path(&repo), "refs/");
 }
@@ -169,7 +174,10 @@ fn t1408_stale_packed_entry_no_error() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/stale-test")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/stale-test")
+                    .expect("valid ref name")
+            )
             .expect("resolve"),
         oid2
     );
@@ -211,7 +219,10 @@ fn t1408_unicode_ref_names_in_packed_refs() {
     git(wt, &["pack-refs", "--all"]);
     assert_list_refs_match_git(wt, "refs/heads/");
     let packed = PackedRefs::load(&git_dir).expect("load");
-    assert_eq!(packed.get(name), Some(oid));
+    assert_eq!(
+        packed.get(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name")),
+        Some(oid)
+    );
 }
 
 #[test]
@@ -229,9 +240,18 @@ fn packed_refs_get_has_namespace_and_entry_exists() {
     git(wt, &["pack-refs", "--all"]);
 
     let packed = PackedRefs::load(&git_dir).unwrap();
-    assert_eq!(packed.get("refs/heads/parent"), Some(oid));
-    assert!(packed.has_namespace_conflict("refs/heads/parent/child"));
-    assert!(!packed.has_namespace_conflict("refs/heads/other"));
+    assert_eq!(
+        packed.get(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/parent").expect("valid ref name")
+        ),
+        Some(oid)
+    );
+    assert!(packed.has_namespace_conflict(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/parent/child").expect("valid ref name")
+    ));
+    assert!(!packed.has_namespace_conflict(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/other").expect("valid ref name")
+    ));
     assert!(packed_refs_entry_exists(&git_dir, "refs/heads/parent").unwrap());
     assert!(!packed_refs_entry_exists(&git_dir, "refs/heads/missing").unwrap());
 }
@@ -301,7 +321,9 @@ fn t0600_delete_loose_and_packed_removes_both_and_fsck_clean() {
     let before_packed = read_bytes(&git_dir.join("packed-refs"));
     grit_test_support::refs::at(&git_dir)
         .references()
-        .delete("refs/heads/to-delete")
+        .delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/to-delete").expect("valid ref name"),
+        )
         .expect("delete");
     assert!(!git_dir.join("refs/heads/to-delete").exists());
     assert!(!packed_refs_entry_exists(&git_dir, "refs/heads/to-delete").unwrap());
@@ -326,7 +348,10 @@ fn t0600_delete_packed_only_ref() {
 
     grit_test_support::refs::at(&git_dir)
         .references()
-        .delete("refs/heads/packed-only")
+        .delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/packed-only")
+                .expect("valid ref name"),
+        )
         .expect("delete packed-only");
     assert!(!packed_refs_entry_exists(&git_dir, "refs/heads/packed-only").unwrap());
     assert_list_refs_match_git(wt, "refs/");
@@ -347,13 +372,18 @@ fn t0600_delete_symref_target() {
     .unwrap();
     grit_test_support::refs::at(&git_dir)
         .references()
-        .update_symbolic("refs/heads/sym", "refs/heads/target")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/sym").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/target").expect("valid ref name"),
+        )
         .unwrap();
     git(wt, &["pack-refs", "--all"]);
 
     grit_test_support::refs::at(&git_dir)
         .references()
-        .delete("refs/heads/target")
+        .delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/target").expect("valid ref name"),
+        )
         .expect("delete symref target");
     assert!(!packed_refs_entry_exists(&git_dir, "refs/heads/target").unwrap());
     assert_list_refs_match_git(wt, "refs/");
@@ -373,7 +403,7 @@ fn t0600_delete_packed_only_does_not_create_parent_directories() {
 
     grit_test_support::refs::at(&git_dir)
         .references()
-        .delete(nested)
+        .delete(grit_lib::refs::store::RefNameRef::new(&nested).expect("valid ref name"))
         .expect("delete");
     assert!(
         !parent.exists(),
@@ -418,7 +448,9 @@ fn t0600_delete_fails_cleanly_when_packed_refs_locked() {
 
     let err = grit_test_support::refs::at(&git_dir)
         .references()
-        .delete("refs/heads/locked")
+        .delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/locked").expect("valid ref name"),
+        )
         .expect_err("delete must fail");
     assert!(
         matches!(
@@ -450,7 +482,7 @@ fn t0600_delete_success_leaves_no_stray_lock_files() {
     git(wt, &["pack-refs", "--all"]);
     grit_test_support::refs::at(&git_dir)
         .references()
-        .delete("refs/heads/gone")
+        .delete(grit_lib::refs::store::RefNameRef::new("refs/heads/gone").expect("valid ref name"))
         .unwrap();
     assert!(!git_dir.join("packed-refs.lock").exists());
     assert!(!git_dir.join("packed-refs.new").exists());
@@ -495,7 +527,12 @@ fn pack_remote_tracking_refs_for_clone_matches_git() {
     }
     grit_test_support::refs::at(&clone_git)
         .references()
-        .update_symbolic("refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/HEAD")
+                .expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .unwrap();
 
     pack_remote_tracking_refs_for_clone(&clone_git, "origin").expect("pack remote-tracking");
@@ -565,7 +602,10 @@ fn resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/cached-b")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/cached-b")
+                    .expect("valid ref name")
+            )
             .expect("fresh resolve"),
         git(wt, &["rev-parse", "refs/heads/cached-b"])
             .trim()
@@ -581,7 +621,10 @@ fn resolve_ref_cached_and_write_ref_cached_reload_after_git_pack_refs() {
             .unwrap(),
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/cached-b")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/cached-b")
+                    .expect("valid ref name")
+            )
             .unwrap()
     );
 
@@ -820,7 +863,7 @@ fn lying_sorted_header_lookups_match_git() {
             .then(|| String::from_utf8_lossy(&git_out.stdout).trim().to_owned());
         let grit_oid = grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve(name)
+            .resolve(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
             .ok()
             .map(|oid| oid.to_hex());
         assert_eq!(grit_oid, git_oid, "{name}");
@@ -867,7 +910,13 @@ fn lying_sorted_header_prefix_scan_recovers_all_matching_refs() {
     );
     let loaded = PackedRefs::load(&git_dir).expect("full load");
     for name in ["refs/heads/a", "refs/heads/b", "refs/tags/t"] {
-        assert_eq!(loaded.get(name).unwrap().to_hex(), oid);
+        assert_eq!(
+            loaded
+                .get(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
+                .unwrap()
+                .to_hex(),
+            oid
+        );
     }
 
     // Grit writes through the same file backend; Git reads the new ref and validates the
@@ -905,7 +954,7 @@ fn non_utf8_packed_tag_leaves_branches_readable_like_git() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve(name)
+                .resolve(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
                 .expect("resolve")
                 .to_hex(),
             git(wt, &["rev-parse", name]).trim(),

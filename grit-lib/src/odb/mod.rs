@@ -1140,7 +1140,7 @@ impl Odb {
         if let Some(obj) = self.reread_primary_after_pack_recheck(oid)? {
             return Ok(obj);
         }
-        Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
+        Err(Error::Object(ObjectError::NotFound { oid: *oid }))
     }
 
     #[cold]
@@ -1180,7 +1180,7 @@ impl Odb {
         if let Some(info) = self.try_read_primary_info_after_negative_revalidate(oid)? {
             return Ok(info);
         }
-        Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
+        Err(Error::Object(ObjectError::NotFound { oid: *oid }))
     }
 
     #[cold]
@@ -1193,7 +1193,7 @@ impl Odb {
         if let Some(kind) = self.try_read_primary_into_after_negative_revalidate(oid, buf)? {
             return Ok(kind);
         }
-        Err(Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
+        Err(Error::Object(ObjectError::NotFound { oid: *oid }))
     }
 
     #[cfg(test)]
@@ -1249,7 +1249,7 @@ impl Odb {
         for oid in oids {
             let obj = store
                 .read(&oid)?
-                .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))?;
+                .ok_or_else(|| Error::Object(ObjectError::NotFound { oid }))?;
             payloads.push((obj.kind, obj.data));
         }
         self.mem_overlay_active.store(false, Ordering::Release);

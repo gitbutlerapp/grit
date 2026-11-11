@@ -134,7 +134,7 @@ fn commit_into(repo: &Repository, content: &[u8]) -> ObjectId {
     grit_lib::refs::update_direct_ref_on_store(
         repo.ref_store(),
         repo.git_dir(),
-        "refs/heads/main",
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
         &commit,
     )
     .expect("ref");
@@ -171,7 +171,10 @@ fn fetch_into_custom_primary_round_trips_with_git() {
 
     let tip = repo
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
     assert!(store.contains(&tip).expect("contains"));
@@ -208,7 +211,10 @@ fn fetch_from_bundle_into_custom_primary_succeeds() {
         .expect("bundle fetch into custom primary");
     let tip = repo
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
     assert!(store.contains(&tip).expect("contains"));
@@ -247,7 +253,10 @@ fn fetch_incremental_into_custom_primary_uses_haves_from_store() {
     assert!(count_store_objects(&store) > after_first);
     let tip = repo
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
 }
@@ -277,7 +286,10 @@ fn fetch_dry_run_into_custom_primary_classifies_without_persisting() {
     assert_eq!(count_store_objects(&store), before_count);
     assert!(repo
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name")
+        )
         .is_err());
 }
 
@@ -371,7 +383,7 @@ fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
     grit_lib::refs::update_direct_ref_on_store(
         repo.ref_store(),
         repo.git_dir(),
-        "refs/heads/main",
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
         &tip,
     )
     .expect("connect prerequisite to local ref");
@@ -433,7 +445,10 @@ fn fetch_all_succeeds_with_custom_primary() {
     outcome.as_ref().expect("custom primary fetch");
     assert!(repo
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name")
+        )
         .is_ok());
 }
 
@@ -631,7 +646,10 @@ fn files_primary_fetch_and_push_still_round_trip_with_git() {
         .expect("files-primary fetch");
     let tip = repo
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("tracking ref");
     assert_eq!(tip, rev_parse(upstream.path(), "main"));
     assert!(repo.odb().read(&tip).is_ok());

@@ -1119,7 +1119,7 @@ fn fetch_promised_tree_blobs(repo: &Repository, tree: ObjectId) -> Result<usize>
     let promised = crate::serve::promised_objects::PromisorObjects::new(repo)?;
     if !promised.is_promised(&first, Some(&referrer))? {
         return Err(crate::error::Error::Object(ObjectError::NotFound {
-            name: first.to_hex(),
+            oid: first,
         }));
     }
     let count = missing.len();

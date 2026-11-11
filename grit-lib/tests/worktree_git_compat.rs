@@ -223,7 +223,10 @@ fn per_worktree_refs_resolve_like_git() {
         .to_owned();
     let grit_oid = linked_repo
         .references()
-        .resolve("refs/worktree/exclusive")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/worktree/exclusive")
+                .expect("valid ref name"),
+        )
         .expect("resolve")
         .to_hex();
     assert_eq!(grit_oid, git_oid);

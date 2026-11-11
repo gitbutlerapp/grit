@@ -101,7 +101,10 @@ fn commit_file(
         .expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("symhead");
     co
 }
@@ -273,7 +276,9 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
         "cancelled reset moved the branch or index"
     );
     assert_eq!(
-        repo.references().resolve("HEAD").expect("HEAD"),
+        repo.references()
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+            .expect("HEAD"),
         head,
         "cancelled reset must not move HEAD"
     );
@@ -333,7 +338,10 @@ fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<Objec
         .expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("symhead");
     co
 }
@@ -399,7 +407,9 @@ fn hard_reset_cancel_restores_coalesced_directory_delete() {
         "cancelled reset moved the branch or index"
     );
     assert_eq!(
-        repo.references().resolve("HEAD").expect("HEAD"),
+        repo.references()
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+            .expect("HEAD"),
         commit_b,
         "cancelled reset must not move HEAD"
     );

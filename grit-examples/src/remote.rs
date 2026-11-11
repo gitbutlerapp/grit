@@ -7,6 +7,7 @@
 use anyhow::Context as _;
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
+use grit_lib::refs::store::RefNameRef;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::transfer::FetchOutcome;
@@ -69,7 +70,7 @@ fn default_remote_name(config: &ConfigSet, repo: &Repository, explicit: Option<&
     if let Some(name) = explicit {
         return name.to_owned();
     }
-    if let Ok(Some(head)) = repo.references().symbolic("HEAD") {
+    if let Ok(Some(head)) = repo.references().symbolic(RefNameRef::HEAD) {
         if let Some(branch) = head.as_str().strip_prefix("refs/heads/") {
             if let Some(remote) = config
                 .get(&format!("branch.{branch}.remote"))

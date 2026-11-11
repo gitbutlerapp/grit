@@ -477,7 +477,10 @@ fn bench_merge_base_deep(c: &mut Criterion) {
     let mid = fx
         .repo
         .references()
-        .resolve("refs/heads/bench/b00100")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/bench/b00100")
+                .expect("valid ref name"),
+        )
         .expect("mid-history branch ref");
     let mut group = c.benchmark_group("revwalk/merge_base_deep");
     for (graph_label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {
@@ -510,7 +513,10 @@ fn bench_ahead_behind_deep(c: &mut Criterion) {
     let mid = fx
         .repo
         .references()
-        .resolve("refs/heads/bench/b00100")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/bench/b00100")
+                .expect("valid ref name"),
+        )
         .expect("mid-history branch ref");
     let mut group = c.benchmark_group("revwalk/ahead_behind_deep");
     for (graph_label, use_graph) in [("no_commit_graph", false), ("commit_graph", true)] {

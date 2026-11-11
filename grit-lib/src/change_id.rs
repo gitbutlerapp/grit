@@ -876,14 +876,15 @@ fn change_id_from_commit_object_header(data: &[u8]) -> Option<ChangeId> {
 ///
 /// # Errors
 ///
-/// Returns [`crate::error::ObjectError::NotFound`] when nothing matches,
+/// Returns [`crate::error::RevisionError::NotFound`] when nothing matches,
 /// [`crate::error::RevisionError::Parse`] with [`RevParseError::AmbiguousChangeId`] when several commits match.
 pub fn resolve_commit_by_change_id_prefix(repo: &Repository, prefix: &str) -> Result<ObjectId> {
     let matches = find_commits_by_change_id_prefix(repo, prefix)?;
     match matches.len() {
-        0 => Err(Error::Object(ObjectError::NotFound {
-            name: prefix.to_owned(),
-        })),
+        0 => Err(crate::error::RevisionError::NotFound {
+            spec: prefix.to_owned(),
+        }
+        .into()),
         1 => Ok(matches[0].oid),
         _ => Err(RevParseError::AmbiguousChangeId {
             prefix: prefix.to_owned(),

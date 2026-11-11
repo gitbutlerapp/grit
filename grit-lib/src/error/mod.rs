@@ -1487,11 +1487,14 @@ impl ObjectReadFailure {
 ///
 /// ```
 /// use grit_lib::error::{Error, ObjectError};
+/// use grit_lib::objects::ObjectId;
 ///
-/// let err = Error::Object(ObjectError::NotFound { name: "1234abcd".into() });
+/// let oid = ObjectId::from_hex("1234abcd00000000000000000000000000000000")?;
+/// let err = Error::Object(ObjectError::NotFound { oid });
 /// assert_eq!(err.area(), "object");
 /// assert_eq!(err.kind_name(), "object_not_found");
 /// assert!(matches!(err, Error::Object(ObjectError::NotFound { .. })));
+/// # Ok::<(), grit_lib::error::Error>(())
 /// ```
 #[derive(Debug, Error)]
 #[non_exhaustive]
@@ -1973,6 +1976,12 @@ impl From<crate::refs::store::RefStoreError> for Error {
     }
 }
 
+impl From<crate::check_ref_format::RefNameError> for Error {
+    fn from(err: crate::check_ref_format::RefNameError) -> Self {
+        Self::Ref(RefError::InvalidName(err))
+    }
+}
+
 impl From<RefLockError> for Error {
     fn from(err: RefLockError) -> Self {
         Self::Ref(RefError::Lock(err))
@@ -2208,7 +2217,7 @@ impl From<crate::bundle::BundleError> for Error {
         use crate::bundle::BundleError;
         match err {
             BundleError::Cancelled => Self::Cancelled,
-            BundleError::ObjectNotFound { name } => Self::Object(ObjectError::NotFound { name }),
+            BundleError::ObjectNotFound { oid } => Self::Object(ObjectError::NotFound { oid }),
             other => Self::Remote(crate::remote::RemoteError::Bundle(other)),
         }
     }

@@ -34,6 +34,11 @@ pub enum DiffError {
     #[error(transparent)]
     HunkSelection(#[from] crate::porcelain::hunk_select::HunkSelectError),
 
+    /// A diff entry whose new side is in the working tree (null new object id) has no new path,
+    /// so there is no file to read.
+    #[error("diff entry has no working tree path to read")]
+    MissingWorktreePath,
+
     /// [`crate::blame::BlameFinalSource::Worktree`] was requested in a bare repository.
     #[error("cannot blame the working tree of a bare repository")]
     BlameWorktreeBareRepository,
@@ -102,6 +107,7 @@ impl DiffError {
             Self::FuncnamePattern(..) => "funcname_pattern",
             Self::Pickaxe(..) => "pickaxe",
             Self::HunkSelection(..) => "hunk_selection",
+            Self::MissingWorktreePath => "diff_missing_worktree_path",
             Self::BlameWorktreeBareRepository => "blame_worktree_bare_repository",
             Self::BlameIgnoreRevUnknown { .. } => "blame_ignore_rev_unknown",
             Self::BlameIgnoreRevsFileOpen { .. } => "blame_ignore_revs_file_open",

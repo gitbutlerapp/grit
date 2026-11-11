@@ -73,7 +73,11 @@ fn cancel_during_worktree_add_leaves_no_registration_or_branch() {
     assert!(err.is_cancelled(), "{err:?}");
     assert_eq!(repo.worktrees().list().expect("list").len(), 1);
     assert!(
-        repo.references().resolve("refs/heads/wtb").is_err(),
+        repo.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/wtb").expect("valid ref name")
+            )
+            .is_err(),
         "branch should be rolled back"
     );
     let common = repo.common_git_dir().to_path_buf();

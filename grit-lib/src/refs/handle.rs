@@ -81,7 +81,7 @@ impl<'repo> References<'repo> {
     /// let _ = repo
     ///     .references()
     ///     .store()
-    ///     .read_raw(RefNameRef::from_trusted("HEAD"))?;
+    ///     .read_raw(RefNameRef::HEAD)?;
     /// # Ok(())
     /// # }
     /// ```
@@ -113,7 +113,7 @@ impl<'repo> References<'repo> {
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
     /// let _ = repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?;
-    /// let main = RefName::try_from("refs/heads/main").expect("valid ref");
+    /// let main = RefName::new("refs/heads/main")?;
     /// let head = repo.references().resolve(&main)?;
     /// assert!(!head.to_hex().is_empty());
     /// # Ok(())
@@ -165,16 +165,17 @@ impl<'repo> References<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::refs::store::RefNameRef;
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    /// let target = repo.references().symbolic("HEAD")?;
+    /// let target = repo.references().symbolic(RefNameRef::HEAD)?;
     /// assert_eq!(target.as_ref().map(|name| name.as_str()), Some("refs/heads/main"));
     /// # Ok(())
     /// # }
     /// ```
     pub fn symbolic(&self, name: impl AsRef<RefNameRef>) -> Result<Option<RefName>> {
-        Ok(read_symbolic_ref_for_repository(self.repo, name)?.map(RefName::from_trusted))
+        Ok(read_symbolic_ref_for_repository(self.repo, name.as_ref())?.map(RefName::from_trusted))
     }
 
     /// Expand a short name the way revision arguments are expanded (`main` to
@@ -369,7 +370,7 @@ impl<'repo> References<'repo> {
     /// req.committer = Some(Signature::new("Doc", "doc@example.com", repo.identity_now())?);
     /// req.allow_empty = true;
     /// let commit = repo.commits().create_staged(&req, &mut NullProgress, &grit_lib::progress::CancelToken::never())?.oid;
-    /// let name = RefName::try_from("refs/heads/handle-demo").expect("valid ref");
+    /// let name = RefName::new("refs/heads/handle-demo")?;
     /// repo.references().update(&name, &commit)?;
     /// assert_eq!(repo.references().resolve(&name)?, commit);
     /// # Ok(())
@@ -438,10 +439,12 @@ impl<'repo> References<'repo> {
     ///
     /// ```
     /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::refs::store::{RefName, RefNameRef};
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    /// repo.references().update_symbolic("HEAD", "refs/heads/trunk")?;
+    /// let trunk = RefName::new("refs/heads/trunk")?;
+    /// repo.references().update_symbolic(RefNameRef::HEAD, &trunk)?;
     /// assert_eq!(repo.references().head()?.branch_name(), Some("trunk"));
     /// # Ok(())
     /// # }
@@ -517,13 +520,14 @@ impl<'repo> References<'repo> {
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    /// let target = RefName::try_from("refs/heads/main").expect("valid ref");
+    /// let target = RefName::new("refs/heads/main")?;
+    /// let alias = RefName::new("refs/heads/alias")?;
     /// repo.references().apply(&[RefUpdate::new(
-    ///     RefName::try_from("refs/heads/alias").expect("valid ref"),
+    ///     alias.clone(),
     ///     Some(RawRef::Symbolic(target.as_str().to_owned())),
     /// )
     /// .with_expected(Expected::Missing)])?;
-    /// assert_eq!(repo.references().symbolic("refs/heads/alias")?, Some(target));
+    /// assert_eq!(repo.references().symbolic(&alias)?, Some(target));
     /// # Ok(())
     /// # }
     /// ```

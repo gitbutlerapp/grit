@@ -37,7 +37,9 @@ fn git_packed_two_thousand_tags_resolve_matches_git() {
     );
 
     let packed = PackedRefs::load(&git_dir).expect("load packed snapshot");
-    assert!(packed.get("refs/heads/main").is_some());
+    assert!(packed
+        .get(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .is_some());
 
     for (name, grit_oid) in git_for_each_ref(wt, "refs/") {
         let git_oid = git(wt, &["rev-parse", &name]);
@@ -45,12 +47,14 @@ fn git_packed_two_thousand_tags_resolve_matches_git() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve(&name)
+                .resolve(&grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
                 .expect("resolve")
                 .to_hex(),
             git_oid.trim()
         );
-        if let Some(want) = packed.get(&name) {
+        if let Some(want) =
+            packed.get(&grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
+        {
             assert_eq!(want, grit_oid, "packed snapshot for {name}");
         }
     }
@@ -67,12 +71,17 @@ fn separate_repository_reads_see_git_packed_ref_update() {
 
     let oid_before = grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/heads/session-a")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/session-a").expect("valid ref name"),
+        )
         .expect("session-a");
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/session-a")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/session-a")
+                    .expect("valid ref name")
+            )
             .expect("lookup"),
         oid_before
     );
@@ -81,13 +90,18 @@ fn separate_repository_reads_see_git_packed_ref_update() {
     git(wt, &["pack-refs", "--all"]);
     let oid_b = grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/heads/session-b")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/session-b").expect("valid ref name"),
+        )
         .expect("session-b");
 
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/session-b")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/session-b")
+                    .expect("valid ref name")
+            )
             .expect("lookup"),
         oid_b
     );

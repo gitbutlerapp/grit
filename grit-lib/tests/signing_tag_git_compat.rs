@@ -89,7 +89,10 @@ fn create_tag_ssh_signed_verifies_with_git_verify_tag() {
     setup_ssh_signing_repo(root);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = repo.references().resolve("HEAD").unwrap();
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
     let tagger = "T <t@example.com> 1700000000 +0000".to_owned();
 
     let outcome = repo
@@ -130,7 +133,10 @@ fn create_tag_honors_tag_gpgsign_config() {
     git(root, &["config", "tag.gpgSign", "true"]);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = repo.references().resolve("HEAD").unwrap();
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
 
     let outcome = repo
         .tags()
@@ -155,7 +161,10 @@ fn signed_tag_passes_git_fsck_strict() {
     setup_ssh_signing_repo(root);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = repo.references().resolve("HEAD").unwrap();
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
     repo.tags()
         .create(
             &CreateTagRequest::new("rel".to_owned(), head)
@@ -283,7 +292,10 @@ fn create_tag_openpgp_signed_verifies_with_git() {
     let _gnupg = EnvVarGuard::set("GNUPGHOME", &gnupg_path);
 
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = repo.references().resolve("HEAD").unwrap();
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
     let outcome = repo
         .tags()
         .create(

@@ -26,7 +26,7 @@ pub fn resolve_commit_filter_target(
 ) -> crate::error::Result<ObjectId> {
     match repo.odb().read_info(&oid) {
         Err(Error::Object(ObjectError::NotFound { .. })) => {
-            Err(ObjectError::NotFound { name: oid.to_hex() }.into())
+            Err(ObjectError::NotFound { oid }.into())
         }
         Err(e) => Err(e),
         Ok(info) => match info.kind {

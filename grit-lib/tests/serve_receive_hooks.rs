@@ -226,7 +226,7 @@ fn in_process_pre_receive_can_reject_push_options_before_refs_move() {
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
     assert!(
         !repo.odb().exists(&oid),
@@ -295,7 +295,7 @@ fn pre_receive_cancel_kills_hook_process_group_and_leaves_ref_unmoved() {
     assert!(matches!(err, ServeError::Cancelled));
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
     assert!(!repo.odb().exists(&oid));
     let child_pid: u32 = std::fs::read_to_string(&child_pid_file)
@@ -351,7 +351,7 @@ fn receive_cancel_before_apply_leaves_ref_unmoved() {
     assert!(matches!(err, ServeError::Cancelled));
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
     assert!(!repo.odb().exists(&oid));
 }
@@ -385,7 +385,7 @@ fn pre_receive_reject_leaves_main_object_store_clean() {
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
     assert_eq!(count_pack_files(&bare.join("objects")), packs_before);
     assert!(
@@ -445,13 +445,17 @@ fn update_reject_only_blocks_one_ref() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         main
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/block")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/block").expect("valid ref name")
+        )
         .is_err());
 }
 
@@ -1053,7 +1057,9 @@ fn receive_pack_finishes_when_push_client_keeps_stream_open() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         oid,
         "push should land on the remote"

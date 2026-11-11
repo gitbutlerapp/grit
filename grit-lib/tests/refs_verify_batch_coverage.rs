@@ -142,7 +142,10 @@ fn update_refs_create_batch_rejects_later_conflict_without_partial_write() {
     assert!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/innocent")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/innocent")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "batch must not leave earlier creates on disk when a later create is rejected"
     );
@@ -184,7 +187,10 @@ fn update_refs_create_batch_rejects_remotes_conflict_without_partial_write() {
     assert!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/innocent")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/innocent")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "batch must not leave earlier creates when a later create hits refs/remotes D/F"
     );
@@ -223,7 +229,9 @@ fn update_refs_cas_sees_loose_tag_while_heads_tree_empty() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/tags/v1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+            )
             .unwrap(),
         new_oid
     );

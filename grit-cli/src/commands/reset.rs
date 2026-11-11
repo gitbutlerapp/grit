@@ -5,6 +5,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::error::ObjectError;
 use grit_lib::error::RefError;
+use grit_lib::error::RevisionError;
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions, ResetOutcome, DEFAULT_ORPHAN_LIMIT};
 use grit_lib::revwalk::{IndexDwim, Peel, ResolveOptions};
 
@@ -100,9 +101,14 @@ pub fn run(
 fn map_reset_committish_error(err: Error, spec: &str) -> anyhow::Error {
     match err {
         Error::Ref(RefError::Invalid { detail: msg }) => anyhow::anyhow!(msg),
-        Error::Object(ObjectError::NotFound { name: msg }) => {
+        Error::Revision(RevisionError::NotFound { spec: msg }) => {
             crate::json_error::structured_revision_not_found(format!(
                 "invalid revision '{spec}': {msg}"
+            ))
+        }
+        Error::Object(ObjectError::NotFound { oid }) => {
+            crate::json_error::structured_revision_not_found(format!(
+                "invalid revision '{spec}': {oid}"
             ))
         }
         other => anyhow::Error::new(other),

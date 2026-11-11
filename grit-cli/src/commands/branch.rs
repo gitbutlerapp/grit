@@ -405,6 +405,7 @@ fn map_create_start_revision_error(rev: &str, err: Error) -> AnyhowError {
         Error::Revision(RevisionError::Parse(
             RevParseError::InvalidObjectName { .. } | RevParseError::AmbiguousArgument { .. },
         ))
+        | Error::Revision(RevisionError::NotFound { .. })
         | Error::Object(ObjectError::NotFound { .. }) => {
             map_branch_error(Error::Branch(BranchError::InvalidStartPoint {
                 label: rev.to_owned(),

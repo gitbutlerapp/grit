@@ -274,7 +274,10 @@ fn ready_after_first_round_leaves_deep_history_unread() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .expect("tracking ref"),
         new_tip
     );
@@ -320,7 +323,10 @@ fn later_rounds_resend_acknowledged_commits_and_pack_stays_minimal() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .expect("tracking ref"),
         new_tip
     );
@@ -381,7 +387,10 @@ fn remote_tracking_refs_are_negotiation_tips() {
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .expect("tracking ref"),
         new_tip
     );

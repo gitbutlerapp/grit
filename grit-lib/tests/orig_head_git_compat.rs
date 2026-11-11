@@ -718,8 +718,13 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
         .odb()
         .write(ObjectKind::Commit, &serialize_commit(&commit))
         .expect("commit");
-    refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "refs/heads/main", &oid)
-        .expect("branch");
+    refs::update_direct_ref_on_store(
+        repo.ref_store(),
+        repo.git_dir(),
+        grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        &oid,
+    )
+    .expect("branch");
     oid
 }
 
@@ -766,11 +771,17 @@ fn write_orig_head_overwrites_and_git_reads_it() {
         None
     );
     repo.references()
-        .update_direct("ORIG_HEAD", &topic)
+        .update_direct(
+            grit_lib::refs::store::RefNameRef::new("ORIG_HEAD").expect("valid ref name"),
+            &topic,
+        )
         .expect("write");
     assert_eq!(git_orig_head(dir), Some(topic));
     repo.references()
-        .update_direct("ORIG_HEAD", &main)
+        .update_direct(
+            grit_lib::refs::store::RefNameRef::new("ORIG_HEAD").expect("valid ref name"),
+            &main,
+        )
         .expect("overwrite");
     assert_eq!(git_orig_head(dir), Some(main));
     assert_eq!(

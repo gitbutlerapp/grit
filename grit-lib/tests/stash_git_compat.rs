@@ -345,7 +345,7 @@ fn drop_stash_middle_entry_rechains_reflog_like_git() {
 
     let entries = grit_test_support::refs::at(&grit_dir.path().join(".git"))
         .references()
-        .reflog("refs/stash")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/stash").expect("valid ref name"))
         .expect("parse");
     for window in entries.windows(2) {
         assert_eq!(
@@ -1427,7 +1427,7 @@ fn stash_clear_removes_ref_and_reflog_git_agrees() {
     assert!(git_cmd(dir.path(), &["stash", "list"]).trim().is_empty());
     let reflog = grit_test_support::refs::at(dir.path().join(".git").as_path())
         .references()
-        .reflog("refs/stash")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/stash").expect("valid ref name"))
         .unwrap_or_default();
     assert!(reflog.is_empty(), "stash reflog must be empty after clear");
     assert_fsck_strict(dir.path());

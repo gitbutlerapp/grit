@@ -571,9 +571,7 @@ mod tests {
         let result =
             session.write_bundle(&odb, &[], &[(tip, "refs/heads/main".to_owned())], 0, |w| {
                 w.write_all(b"PACK")?;
-                Err(Error::Object(ObjectError::NotFound {
-                    name: "object went missing".to_owned(),
-                }))
+                Err(Error::Object(ObjectError::NotFound { oid: tip }))
             });
         assert!(result.is_err());
         assert!(!session.has_bundle());

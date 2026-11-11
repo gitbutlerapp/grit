@@ -814,7 +814,10 @@ fn switch_tree_diff_git_clean_after() {
     );
     git_fsck(tmp.path());
 
-    let _ = grit_repo.references().resolve("HEAD").expect("head");
+    let _ = grit_repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
 }
 
 #[test]

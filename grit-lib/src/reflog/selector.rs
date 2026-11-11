@@ -1,5 +1,6 @@
 //! Typed parsing for reflog references and newest-first selectors.
 
+use crate::check_ref_format::RefNamePolicy;
 use crate::error::RefError;
 use crate::error::{Error, Result};
 use crate::refs::store::RefName;
@@ -77,11 +78,16 @@ impl FromStr for ReflogSelector {
 /// Returns [`crate::error::RefError::ReflogUnknownRef`] with the supplied `spec` when neither form
 /// is valid.
 pub fn parse_reflog_ref(spec: &str) -> Result<RefName> {
-    if let Ok(name) = RefName::try_from(spec) {
+    // `HEAD` or any name with Git's default format (two or more components, so `topic/nested`
+    // is kept as given); anything else is tried as a branch short name.
+    if spec == "HEAD" {
+        return Ok(RefName::from_trusted(spec));
+    }
+    if let Ok(name) = RefName::parse(spec, &RefNamePolicy::default()) {
         return Ok(name);
     }
-    if spec != "HEAD" && !spec.starts_with("refs/") {
-        if let Ok(name) = RefName::try_from(&format!("refs/heads/{spec}")) {
+    if !spec.starts_with("refs/") {
+        if let Ok(name) = RefName::parse(&format!("refs/heads/{spec}"), &RefNamePolicy::default()) {
             return Ok(name);
         }
     }

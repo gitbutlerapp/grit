@@ -175,7 +175,7 @@ fn pre_receive_hook_refusal_refuses_whole_push_and_keeps_objects_out() {
     assert!(report.contains("ng refs/heads/main frozen branches are read-only"));
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
     assert!(
         !open(&bare).odb().exists(&tip),
@@ -222,7 +222,9 @@ fn pre_receive_hook_sees_quarantined_objects_and_only_accepted_commands() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );
@@ -263,13 +265,15 @@ fn update_closure_refuses_one_ref_and_applies_the_rest() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/tags/v1")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name"))
         .is_err());
     fsck(&bare);
 }
@@ -310,7 +314,7 @@ fn atomic_push_refuses_everything_when_the_update_hook_refuses_one() {
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
 }
 
@@ -406,7 +410,9 @@ fn corrupt_pack_checksum_is_an_ingest_error_for_both_storage_paths() {
         );
         assert!(grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .is_err());
         assert!(!has_quarantine_leftovers(&bare.join("objects")));
     }
@@ -430,7 +436,7 @@ fn max_input_size_is_a_typed_unpack_error() {
     ));
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
 }
 
@@ -468,7 +474,10 @@ fn pushed_pack_is_stored_streamed_and_fsck_clean_on_both_paths() {
         assert_eq!(
             grit_test_support::refs::at(&bare)
                 .references()
-                .resolve("refs/heads/main")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name")
+                )
                 .expect("main"),
             tip
         );
@@ -622,7 +631,9 @@ fn large_blob_push_under_unpack_limit_materializes_loose() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );
@@ -778,7 +789,7 @@ fn receive_pack_mixed_create_and_update_falls_back_from_initial_batch() {
     );
     let old_main = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main");
     let repo = open(&bare);
     let commands: Vec<(Option<ObjectId>, Option<ObjectId>, &str)> = vec![
@@ -797,14 +808,19 @@ fn receive_pack_mixed_create_and_update_falls_back_from_initial_batch() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/extra/a")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/extra/a")
+                    .expect("valid ref name")
+            )
             .expect("a"),
         tip
     );
@@ -834,13 +850,17 @@ fn receive_pack_non_atomic_batch_conflict_still_applies_valid_refs() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/ok")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/ok").expect("valid ref name")
+            )
             .expect("ok"),
         tip
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/ok/nested")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/ok/nested").expect("valid ref name")
+        )
         .is_err());
     fsck(&bare);
 }
@@ -877,7 +897,9 @@ fn shallow_client_push_onto_full_history_is_applied() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/t1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/t1").expect("valid ref name")
+            )
             .expect("t1"),
         tip
     );
@@ -906,7 +928,7 @@ fn malformed_shallow_line_is_a_protocol_error() {
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
 }
 
@@ -936,7 +958,7 @@ fn shallow_push_that_needs_a_shallow_update_is_refused_by_default() {
     );
     assert!(grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/t")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/t").expect("valid ref name"))
         .is_err());
     assert!(!bare.join("shallow").exists());
     assert!(!has_quarantine_leftovers(&bare.join("objects")));
@@ -984,7 +1006,9 @@ fn shallow_update_records_the_new_boundary_on_both_storage_paths() {
         assert_eq!(
             grit_test_support::refs::at(&bare)
                 .references()
-                .resolve("refs/heads/t")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/t").expect("valid ref name")
+                )
                 .expect("t"),
             tip
         );
@@ -1064,7 +1088,10 @@ fn non_atomic_receive_pack_many_creates_one_reftable_table() {
         assert_eq!(
             grit_test_support::refs::at(&bare)
                 .references()
-                .resolve(&format!("refs/heads/b{i}"))
+                .resolve(
+                    &grit_lib::refs::store::RefNameRef::new(&format!("refs/heads/b{i}"))
+                        .expect("valid ref name")
+                )
                 .ok(),
             Some(tip)
         );

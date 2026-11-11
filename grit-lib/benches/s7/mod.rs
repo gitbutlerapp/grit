@@ -309,7 +309,9 @@ impl HistoryBenchFixtures {
         let repo = build_history_repo(root.path(), commit_count);
         let head = repo
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+            )
             .expect("read head");
 
         if git_commit_graph_write(root.path()).is_err() {

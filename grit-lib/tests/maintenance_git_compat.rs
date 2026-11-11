@@ -273,7 +273,10 @@ fn repo_with_loose_stash_ref() -> (TempDir, Repository) {
     let dir = TempDir::new().expect("tempdir");
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).expect("init");
     one_commit(&repo);
-    let head = repo.references().resolve("refs/heads/main").expect("main");
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("main");
     grit_test_support::refs::set_ref(&repo, "refs/stash", &head).expect("refs/stash");
     let refs = repo.git_dir().join("refs");
     assert!(refs.join("stash").is_file());
@@ -312,7 +315,7 @@ fn assert_packed_stash_repo_readable_by_git(dir: &Path, repo: &Repository) {
     assert_eq!(git_stdout(dir, &["rev-parse", "--git-dir"]), ".git");
     let head = grit_test_support::refs::at(git_dir)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main");
     assert_eq!(git_stdout(dir, &["rev-parse", "refs/stash"]), head.to_hex());
     git(dir, &["fsck", "--strict"]);
@@ -2273,7 +2276,7 @@ fn prune_rejects_missing_reachable_blob() {
     let err = grit_lib::refs::gc::prune_loose_unreachable(repo.odb(), &roots, None)
         .expect_err("missing blob");
     assert!(
-        matches!(err, Error::Object(ObjectError::NotFound { name: ref hex }) if *hex == blob.to_hex()),
+        matches!(err, Error::Object(ObjectError::NotFound { oid }) if oid == blob),
         "{err:?}"
     );
 }

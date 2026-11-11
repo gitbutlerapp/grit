@@ -273,7 +273,11 @@ fn apply_rewrite_updates_refs_atomically_files_backend() {
     let new_tip = applied.head;
     assert_ne!(new_tip, oids["c"]);
     assert_eq!(
-        grit.references().resolve("refs/heads/main").expect("main"),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .expect("main"),
         new_tip
     );
     assert_ne!(new_tip, oids["c"]);
@@ -506,7 +510,10 @@ fn apply_rewrite_writes_reflog_entries() {
             &CancelToken::never(),
         )
         .expect("apply");
-    let tip = grit.references().resolve("refs/heads/main").expect("main");
+    let tip = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("main");
     let branch_reflog = git(wt, &["reflog", "show", "-1", "main"]);
     assert!(
         branch_reflog.contains("history rewrite"),
@@ -517,10 +524,13 @@ fn apply_rewrite_writes_reflog_entries() {
         head_reflog.contains("history rewrite"),
         "HEAD reflog must record apply message: {head_reflog}"
     );
-    let head_log = grit.references().reflog("HEAD").expect("parse HEAD reflog");
+    let head_log = grit
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("parse HEAD reflog");
     let branch_log = grit
         .references()
-        .reflog("refs/heads/main")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("parse branch reflog");
     let head_entry = head_log.last().expect("HEAD reflog entry");
     let branch_entry = branch_log.last().expect("branch reflog entry");
@@ -556,12 +566,15 @@ fn apply_rewrite_checked_out_branch_reflog_single_entry_per_update() {
         .expect("apply");
     let new_tip = grit
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main tip");
-    let head_log = grit.references().reflog("HEAD").expect("HEAD reflog");
+    let head_log = grit
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("HEAD reflog");
     let branch_log = grit
         .references()
-        .reflog("refs/heads/main")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main reflog");
     assert_eq!(
         head_log.len(),
@@ -619,7 +632,10 @@ fn apply_rewrite_head_reflog_matches_git_update_ref_on_checked_out_branch() {
             &CancelToken::never(),
         )
         .expect("apply");
-    let tip = grit.references().resolve("refs/heads/main").expect("main");
+    let tip = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("main");
     let head_gs = git(wt, &["reflog", "show", "-1", "--format=%gs", "HEAD"]);
     let branch_gs = git(
         wt,
@@ -654,10 +670,13 @@ fn apply_rewrite_head_reflog_reftable_backend() {
             &CancelToken::never(),
         )
         .expect("apply");
-    let head_log = grit.references().reflog("HEAD").expect("head log");
+    let head_log = grit
+        .references()
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head log");
     let branch_log = grit
         .references()
-        .reflog("refs/heads/main")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("branch log");
     let head_entry = head_log.last().expect("HEAD reflog entry");
     let branch_entry = branch_log.last().expect("branch reflog entry");

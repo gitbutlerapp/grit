@@ -127,11 +127,15 @@ fn clone_fetches_tags_on_unreachable_commits() {
     let git_dir = grit_dest.path().join(".git");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/tags/side-tag")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/side-tag").expect("valid ref name"),
+        )
         .expect("lightweight side-tag");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/tags/side-ann")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/side-ann").expect("valid ref name"),
+        )
         .expect("annotated side-ann");
 
     assert_eq!(git_tags(grit_dest.path()), expected);
@@ -161,11 +165,15 @@ fn clone_file_url_fetches_unreachable_tags() {
     let git_dir = grit_dest.path().join(".git");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/tags/side-tag")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/side-tag").expect("valid ref name"),
+        )
         .expect("side-tag via file://");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/tags/side-ann")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/side-ann").expect("valid ref name"),
+        )
         .expect("side-ann via file://");
     assert_packed_tags(grit_dest.path());
 }

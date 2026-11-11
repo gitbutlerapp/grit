@@ -38,7 +38,10 @@ fn grit_annotated_tag_round_trips_with_git() {
 
     let repo =
         Repository::discover(Some(root.as_path()), &RepositoryOptions::empty()).expect("discover");
-    let head = repo.references().resolve("HEAD").unwrap();
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
     let tagger = "Tagger <t@example.com> 946684800 +0000";
     let outcome = repo
         .tags()

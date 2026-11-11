@@ -146,7 +146,7 @@ fn clone_depth_one_lightweight_tag_matches_git() {
     assert_eq!(
         grit_test_support::refs::at(&grit_dest.join(".git"))
             .references()
-            .resolve("HEAD")
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .unwrap(),
         tag_tip
     );
@@ -211,7 +211,7 @@ fn clone_depth_one_annotated_tag_matches_git() {
     assert_eq!(
         grit_test_support::refs::at(&grit_dest.join(".git"))
             .references()
-            .resolve("HEAD")
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .unwrap(),
         tag_tip
     );
@@ -277,7 +277,10 @@ fn clone_depth_one_records_shallow_boundary_and_limits_history() {
     assert_eq!(
         grit_test_support::refs::at(&dest.join(".git"))
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .expect("origin/main"),
         tip
     );
@@ -386,7 +389,10 @@ fn shallow_clone_matches_git_single_branch_on_multi_branch_remote() {
     assert!(
         grit_test_support::refs::at(&grit_git)
             .references()
-            .resolve("refs/remotes/origin/side")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/side")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "side branch must not be fetched"
     );
@@ -570,7 +576,9 @@ fn shallow_depth_two_keeps_annotated_tag_on_fetched_parent() {
 
     let tag_oid = grit_test_support::refs::at(&dest.join(".git"))
         .references()
-        .resolve("refs/tags/parent-tag")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/parent-tag").expect("valid ref name"),
+        )
         .expect("refs/tags/parent-tag must exist like git clone --depth=2");
     assert!(
         outcome
@@ -598,7 +606,9 @@ fn shallow_depth_two_keeps_annotated_tag_on_fetched_parent() {
     assert!(status.success(), "git clone --depth=2 failed");
     let git_tag = grit_test_support::refs::at(&git_dest.join(".git"))
         .references()
-        .resolve("refs/tags/parent-tag")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/parent-tag").expect("valid ref name"),
+        )
         .expect("git must keep parent-tag");
     assert_eq!(tag_oid, git_tag, "grit and git must agree on tag oid");
 }

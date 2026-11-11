@@ -196,11 +196,17 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
     // Tracking refs written (same assertions as the v0/v1 test).
     let got_main = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("origin/main");
     let got_topic = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/topic")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/topic")
+                .expect("valid ref name"),
+        )
         .expect("origin/topic");
     assert_eq!(got_main, main_oid, "origin/main oid mismatch vs source");
     assert_eq!(got_topic, topic_oid, "origin/topic oid mismatch vs source");
@@ -208,7 +214,7 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
     // The annotated tag arrived (TagMode::All).
     let got_tag = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/tags/v1")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name"))
         .expect("tag v1 written");
     assert_eq!(got_tag, tag_oid, "tag v1 oid mismatch vs source");
 
@@ -414,7 +420,10 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
     // The new topic tip landed.
     let got_topic = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/topic")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/topic")
+                .expect("valid ref name"),
+        )
         .expect("origin/topic");
     assert_eq!(got_topic, topic_new, "incremental topic tip mismatch");
     let local_odb = open_odb(&local_git);

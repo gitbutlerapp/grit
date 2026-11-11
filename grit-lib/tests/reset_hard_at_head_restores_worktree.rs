@@ -49,7 +49,10 @@ fn commit_file(repo: &Repository, path: &str, contents: &str) -> grit_lib::objec
         .expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("symhead");
     co
 }
@@ -162,7 +165,10 @@ fn hard_reset_at_head_restores_chmod_only_change() {
     };
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &head).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("symhead");
     let mut perms = std::fs::metadata(&path).expect("meta").permissions();
     perms.set_mode(0o100644);

@@ -263,7 +263,11 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
 
     let err = linked_repo
         .references()
-        .compare_and_swap("HEAD", &head_oid, &head_oid)
+        .compare_and_swap(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            &head_oid,
+            &head_oid,
+        )
         .expect_err("HEAD update should fail");
     match &err {
         Error::Repository(RepositoryError::GitDirPathIo(_)) => {

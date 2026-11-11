@@ -363,7 +363,7 @@ fn generate_into_repo(repo: &Repository, spec: TierSpec) -> Result<ObjectId> {
     crate::refs::update_direct_ref_on_store(
         repo.ref_store(),
         repo.git_dir(),
-        "refs/heads/main",
+        crate::refs::store::RefNameRef::from_trusted("refs/heads/main"),
         &head,
     )?;
     Ok(head)

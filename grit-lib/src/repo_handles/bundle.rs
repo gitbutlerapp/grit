@@ -258,8 +258,8 @@ impl<'repo> RepositoryBundles<'repo> {
 
 fn lib_error_to_bundle_error(err: crate::error::Error) -> BundleError {
     match err {
-        crate::error::Error::Object(ObjectError::NotFound { name: id }) => {
-            BundleError::ObjectNotFound { name: id }
+        crate::error::Error::Object(ObjectError::NotFound { oid }) => {
+            BundleError::ObjectNotFound { oid }
         }
         other => BundleError::Io {
             detail: other.to_string(),

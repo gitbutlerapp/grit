@@ -26,18 +26,22 @@ fn write_ref_cas_and_delete_loose_ref() {
         .expect("create");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .compare_and_swap(name, &oid(1), &oid(2))
+        .compare_and_swap(
+            grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"),
+            &oid(1),
+            &oid(2),
+        )
         .expect("cas");
     assert_eq!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve(name)
+            .resolve(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
             .expect("resolve"),
         oid(2)
     );
     grit_test_support::refs::at(&git_dir)
         .references()
-        .delete(name)
+        .delete(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
         .expect("delete");
     assert!(matches!(
         read_raw_ref(&git_dir, name).expect("gone"),

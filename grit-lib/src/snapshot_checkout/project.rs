@@ -391,7 +391,7 @@ pub(crate) fn project_branch(
     crate::refs::update_direct_ref_on_store(
         repo.ref_store(),
         repo.git_dir(),
-        in_ref(&checkout.id, name),
+        crate::refs::store::RefNameRef::from_trusted(&in_ref(&checkout.id, name)),
         &projection.tip,
     )?;
     Ok(Ok(BranchInfo {

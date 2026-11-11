@@ -467,7 +467,13 @@ pub(super) fn run_exec_at_tip(
     ensure_worktree_clean_for_rebase_exec(repo).map_err(map_clean_error)?;
     let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
     repo.odb().flush_for_publish().map_err(exec_io)?;
-    update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &tip).map_err(exec_io)?;
+    update_direct_ref_on_store(
+        repo.ref_store(),
+        repo.git_dir(),
+        crate::refs::store::RefNameRef::from_trusted("HEAD"),
+        &tip,
+    )
+    .map_err(exec_io)?;
     let tip_tree = commit_tree_for_apply(repo, tip)?;
     let prestate = capture_exec_prestate(repo)?;
     let mut session = ExecDetachedSession {
@@ -625,8 +631,13 @@ fn execute_plan(
         repo.odb()
             .flush_for_publish()
             .map_err(worktree_apply_engine)?;
-        update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &tip)
-            .map_err(worktree_apply_engine)?;
+        update_direct_ref_on_store(
+            repo.ref_store(),
+            repo.git_dir(),
+            crate::refs::store::RefNameRef::from_trusted("HEAD"),
+            &tip,
+        )
+        .map_err(worktree_apply_engine)?;
         if let Err(err) =
             checkout_exec_tree_transition(repo, Some(&session.current_tree), &tip_tree)
         {
@@ -847,8 +858,13 @@ fn stop_on_replay_conflict(
             .unwrap_or(old_parent);
         let parent_tree = commit_tree_for_apply(repo, parent)?;
         repo.odb().flush_for_publish().map_err(exec_io)?;
-        update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &parent)
-            .map_err(exec_io)?;
+        update_direct_ref_on_store(
+            repo.ref_store(),
+            repo.git_dir(),
+            crate::refs::store::RefNameRef::from_trusted("HEAD"),
+            &parent,
+        )
+        .map_err(exec_io)?;
         checkout_exec_tree_transition(repo, Some(&session.current_tree), &parent_tree)?;
         session.current_tree = parent_tree;
         let _ephemeral_merge_objects = crate::porcelain::merge::MemOverlayGuard::enter(repo.odb());
@@ -1017,8 +1033,13 @@ fn restore_exec_prestate(
                 .map_err(worktree_apply_engine)?;
         }
         SavedHead::Detached(oid) => {
-            update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", oid)
-                .map_err(worktree_apply_engine)?;
+            update_direct_ref_on_store(
+                repo.ref_store(),
+                repo.git_dir(),
+                crate::refs::store::RefNameRef::from_trusted("HEAD"),
+                oid,
+            )
+            .map_err(worktree_apply_engine)?;
         }
     }
     checkout_hard_to_tree_from_head_tree(
@@ -1267,8 +1288,13 @@ pub(super) fn resume_exec_rebase(
         if still_on_branch {
             let tip_tree = commit_tree_for_apply(repo, expected)?;
             repo.odb().flush_for_publish().map_err(exec_io)?;
-            update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", &expected)
-                .map_err(exec_io)?;
+            update_direct_ref_on_store(
+                repo.ref_store(),
+                repo.git_dir(),
+                crate::refs::store::RefNameRef::from_trusted("HEAD"),
+                &expected,
+            )
+            .map_err(exec_io)?;
             checkout_exec_tree_transition(repo, None, &tip_tree)?;
         } else {
             return Err(crate::error::Error::from(

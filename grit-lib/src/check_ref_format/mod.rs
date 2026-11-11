@@ -295,7 +295,7 @@ pub(crate) fn refname_is_safe(refname: &str) -> bool {
     refname.bytes().all(|b| b.is_ascii_uppercase() || b == b'_')
 }
 
-pub(crate) use ref_name::{is_storable_ref_name, is_valid_fetch_advertised_ref};
+pub(crate) use ref_name::{is_storable_ref_name, is_valid_fetch_advertised_ref, TrustedRefName};
 
 /// Strip a leading `/` and collapse consecutive interior slashes to one.
 ///

@@ -94,7 +94,10 @@ fn repo_for_rebase() -> (
         .expect("reset");
     grit_test_support::refs::set_ref(&repo, "refs/heads/topic", &base).expect("topic");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/topic")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+        )
         .expect("HEAD");
     std::fs::write(tmp.path().join("topic.txt"), "topic\n").expect("write");
     let topic = commit_all(&repo, "topic");

@@ -50,7 +50,10 @@ fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::Obje
         .expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &co).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("symhead");
     co
 }

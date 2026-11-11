@@ -5,7 +5,6 @@
 //! through the [`WritableObjectStore`](grit_lib::objects::odb::store::WritableObjectStore)
 //! trait, and through a repository whose primary is that store.
 
-use grit_lib::error::ObjectError;
 use std::io::Cursor;
 use std::sync::Arc;
 
@@ -14,7 +13,7 @@ use grit_lib::objects::index_pack::{ingest_received_pack, IngestPackOptions};
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
-use grit_lib::objects::{serialize_tree, HashAlgo, ObjectKind, TreeEntry};
+use grit_lib::objects::{serialize_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::refs::store::MemoryRefStore;
 use grit_lib::repo::{InitOptions, Repository};
 
@@ -22,6 +21,7 @@ fn main() -> grit_lib::error::Result<()> {
     let dir = tempfile::tempdir()?;
     let (source, _) = Repository::init(&dir.path().join("source"), &InitOptions::default())?;
     let mut parent = None;
+    let mut tip = ObjectId::zero();
     for version in 1..=2 {
         let blob = source
             .odb()
@@ -38,11 +38,9 @@ fn main() -> grit_lib::error::Result<()> {
         let body = format!(
             "tree {tree}\n{parent_line}author A <a@example.com> 1 +0000\ncommitter A <a@example.com> 1 +0000\n\nv{version}\n"
         );
-        parent = Some(source.odb().write(ObjectKind::Commit, body.as_bytes())?);
+        tip = source.odb().write(ObjectKind::Commit, body.as_bytes())?;
+        parent = Some(tip);
     }
-    let tip = parent.ok_or(grit_lib::error::Error::Object(ObjectError::NotFound {
-        name: "tip".into(),
-    }))?;
     let pack = build_pack(source.odb(), &[tip], &[], &PackBuildOptions::default())?;
     println!("pack_bytes={}", pack.len());
 

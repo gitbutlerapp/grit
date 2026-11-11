@@ -264,7 +264,11 @@ pub(crate) fn replay_commit(
                 }
             } else {
                 let current = repo.references().resolve_if_exists(refname).ok().flatten();
-                crate::refs::verify_branch_commit_cas(Some(head_oid), current, refname)?;
+                crate::refs::verify_branch_commit_cas(
+                    Some(head_oid),
+                    current,
+                    crate::refs::store::RefNameRef::from_trusted(refname),
+                )?;
 
                 if let Err(err) =
                     apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged, progress, cancel)

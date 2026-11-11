@@ -103,6 +103,15 @@ impl<'repo> Tags<'repo> {
     }
 
     /// Delete `refs/tags/<name>`; returns the object the tag pointed at.
+    ///
+    /// With `dry_run`, nothing is deleted and the current target is still returned.
+    ///
+    /// # Errors
+    ///
+    /// [`TagError::InvalidName`](crate::porcelain::tag::TagError::InvalidName) when `name` is
+    /// not a valid tag name (it is checked before any ref is read, so `../heads/main` cannot
+    /// reach outside `refs/tags/`), [`TagError::NotFound`](crate::porcelain::tag::TagError::NotFound)
+    /// when the tag does not exist, and ref store errors.
     pub fn delete(&self, name: &str, dry_run: bool) -> Result<ObjectId> {
         delete_tag(self.repo, name, dry_run)
     }

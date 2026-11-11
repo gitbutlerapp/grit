@@ -7,7 +7,10 @@ use grit_test_support::git;
 fn origin_tip(path: &std::path::Path) -> grit_lib::objects::ObjectId {
     grit_test_support::refs::at(&path.join(".git"))
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("origin/main")
 }
 
@@ -37,7 +40,7 @@ fn fetch_literal_path_leaves_origin_tracking_refs_unchanged() {
     let origin_before = origin_tip(&clone);
     let o1_main = grit_test_support::refs::at(&o1.join(".git"))
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("o1 main");
 
     let mut fetch_opts = FetchOptions::new();
@@ -65,7 +68,10 @@ fn fetch_literal_path_leaves_origin_tracking_refs_unchanged() {
     assert!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/otherbr")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/otherbr")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "must not create origin/otherbr from foreign repo"
     );
@@ -79,7 +85,7 @@ fn fetch_literal_path_leaves_origin_tracking_refs_unchanged() {
         .trim();
     let o2_main = grit_test_support::refs::at(&o2.join(".git"))
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("o2 main");
     assert_eq!(grit_oid, o2_main.to_hex());
 
@@ -157,11 +163,13 @@ fn explicit_url_refspec_fetch_head_records_fetched_branch_not_default() {
 
     let other_tip = grit_test_support::refs::at(&o2.join(".git"))
         .references()
-        .resolve("refs/heads/otherbr")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/otherbr").expect("valid ref name"),
+        )
         .expect("otherbr tip");
     let main_tip = grit_test_support::refs::at(&o2.join(".git"))
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main tip");
     assert_ne!(other_tip, main_tip);
 

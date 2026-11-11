@@ -1718,7 +1718,7 @@ pub(crate) fn write_whole_pack_object_to_odb(
             )?;
             Ok(())
         })?
-        .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))?;
+        .ok_or_else(|| Error::Object(ObjectError::NotFound { oid }))?;
         return Ok(counter.n);
     }
     let obj = odb.read(&oid)?;

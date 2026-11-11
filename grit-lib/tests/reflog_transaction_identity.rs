@@ -65,7 +65,10 @@ fn seed_main_commit(repo: &Repository, dir: &TempDir) -> ObjectId {
         .expect("commit");
     grit_test_support::refs::set_ref(&repo, "refs/heads/main", &oid).expect("branch");
     repo.references()
-        .update_symbolic("HEAD", "refs/heads/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
         .expect("sym");
     oid
 }

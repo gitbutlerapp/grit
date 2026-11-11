@@ -56,26 +56,54 @@ fn handle_writes_are_what_git_reads() {
         let repo = open(test_repo);
         let refs = repo.references();
 
-        refs.update("refs/heads/topic", &first)
-            .expect("create topic");
-        refs.compare_and_swap("refs/heads/topic", &first, &second)
-            .expect("move topic");
-        let stale = refs.compare_and_swap("refs/heads/topic", &first, &second);
+        refs.update(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+            &first,
+        )
+        .expect("create topic");
+        refs.compare_and_swap(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+            &first,
+            &second,
+        )
+        .expect("move topic");
+        let stale = refs.compare_and_swap(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+            &first,
+            &second,
+        );
         assert!(stale.is_err(), "{backend:?}: stale compare-and-swap");
-        refs.update("refs/tags/v1", &first).expect("tag");
-        refs.update("refs/tags/v2", &second).expect("tag");
-        refs.update_symbolic("refs/heads/alias", "refs/heads/topic")
-            .expect("alias");
+        refs.update(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name"),
+            &first,
+        )
+        .expect("tag");
+        refs.update(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/v2").expect("valid ref name"),
+            &second,
+        )
+        .expect("tag");
+        refs.update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/alias").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+        )
+        .expect("alias");
         refs.apply(&[RefUpdate::new(
             RefName::try_from("refs/heads/batch").expect("valid"),
             Some(RawRef::Direct(first)),
         )
         .with_expected(Expected::Missing)])
             .expect("batch");
-        refs.compare_and_delete("refs/tags/v2", &second)
-            .expect("delete v2");
-        refs.update_symbolic("HEAD", "refs/heads/topic")
-            .expect("switch HEAD");
+        refs.compare_and_delete(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/v2").expect("valid ref name"),
+            &second,
+        )
+        .expect("delete v2");
+        refs.update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+        )
+        .expect("switch HEAD");
 
         assert_eq!(
             git_for_each_ref(worktree, "refs/"),
@@ -104,7 +132,9 @@ fn handle_writes_are_what_git_reads() {
             .collect();
         assert_eq!(git_log, vec![second, first], "{backend:?}: topic reflog");
         let grit_log: Vec<ObjectId> = refs
-            .reflog("refs/heads/topic")
+            .reflog(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+            )
             .expect("reflog")
             .iter()
             .rev()
@@ -119,17 +149,29 @@ fn handle_writes_are_what_git_reads() {
             message: "handle note".to_owned(),
         };
         repo.reflogs()
-            .append("refs/heads/topic", &note, ReflogCreate::IfAllowed)
+            .append(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+                &note,
+                ReflogCreate::IfAllowed,
+            )
             .expect("append");
         let newest = git_reflog_lines(worktree, "refs/heads/topic")
             .into_iter()
             .next()
             .expect("newest entry");
         assert_eq!(newest.2, "handle note", "{backend:?}");
-        assert!(repo.reflogs().exists("refs/heads/topic").expect("exists"));
+        assert!(repo
+            .reflogs()
+            .exists(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .expect("exists"));
         assert!(git_ok_reflog_exists(worktree, "refs/heads/topic"));
 
-        refs.delete("refs/heads/batch").expect("delete batch");
+        refs.delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/batch").expect("valid ref name"),
+        )
+        .expect("delete batch");
         assert!(
             !git_for_each_ref(worktree, "refs/heads/")
                 .iter()
@@ -194,9 +236,12 @@ fn handles_read_what_git_writes() {
             .collect();
         assert_eq!(tags, vec!["refs/tags/v1.0".to_owned()], "{backend:?}");
         assert_eq!(
-            refs.symbolic("refs/heads/current")
-                .expect("symbolic")
-                .map(String::from),
+            refs.symbolic(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/current")
+                    .expect("valid ref name")
+            )
+            .expect("symbolic")
+            .map(String::from),
             Some("refs/heads/main".to_owned()),
             "{backend:?}"
         );
@@ -214,7 +259,9 @@ fn handles_read_what_git_writes() {
         assert!(refs.dwim("no-such-ref").expect("dwim").is_none());
 
         let messages: Vec<String> = refs
-            .reflog("refs/heads/moved")
+            .reflog(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/moved").expect("valid ref name"),
+            )
             .expect("reflog")
             .into_iter()
             .map(|entry| entry.message)
@@ -323,15 +370,42 @@ fn handles_round_trip_through_a_reopened_store_on_both_backends() {
         )
         .expect("open");
         let refs = repo.references();
-        refs.update("HEAD", &first).expect("first commit on main");
-        refs.update("refs/heads/topic", &first).expect("topic");
-        refs.compare_and_swap("refs/heads/main", &first, &second)
-            .expect("advance main");
-        refs.update_symbolic("refs/remotes/origin/HEAD", "refs/heads/main")
-            .expect("symref");
-        refs.update("refs/tags/gone", &first).expect("tag");
-        refs.delete("refs/tags/gone").expect("delete tag");
-        refs.update("refs/tags/v1.0", &first).expect("tag v1.0");
+        refs.update(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            &first,
+        )
+        .expect("first commit on main");
+        refs.update(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+            &first,
+        )
+        .expect("topic");
+        refs.compare_and_swap(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+            &first,
+            &second,
+        )
+        .expect("advance main");
+        refs.update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/HEAD")
+                .expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+        )
+        .expect("symref");
+        refs.update(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/gone").expect("valid ref name"),
+            &first,
+        )
+        .expect("tag");
+        refs.delete(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/gone").expect("valid ref name"),
+        )
+        .expect("delete tag");
+        refs.update(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/v1.0").expect("valid ref name"),
+            &first,
+        )
+        .expect("tag v1.0");
         let outcomes = refs
             .apply_each(vec![
                 RefUpdate::new(
@@ -389,25 +463,38 @@ fn handles_round_trip_through_a_reopened_store_on_both_backends() {
             ["refs/tags/v1.0"],
             "{format:?}: glob prefix is not a directory"
         );
-        assert_eq!(refs.resolve("refs/heads/topic").expect("topic"), first);
         assert_eq!(
-            refs.symbolic("refs/remotes/origin/HEAD")
-                .expect("symbolic")
-                .map(String::from),
+            refs.resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .expect("topic"),
+            first
+        );
+        assert_eq!(
+            refs.symbolic(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/HEAD")
+                    .expect("valid ref name")
+            )
+            .expect("symbolic")
+            .map(String::from),
             Some("refs/heads/main".to_owned()),
             "{format:?}"
         );
         let origin = refs.dwim("origin").expect("dwim").expect("origin matches");
         assert_eq!(origin.name.as_str(), "refs/heads/main", "{format:?}");
         let main_log: Vec<ObjectId> = refs
-            .reflog("refs/heads/main")
+            .reflog(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+            )
             .expect("reflog")
             .into_iter()
             .map(|entry| entry.new_oid)
             .collect();
         assert_eq!(main_log, vec![first, second], "{format:?}");
         assert!(
-            repo.reflogs().exists("HEAD").expect("HEAD log"),
+            repo.reflogs()
+                .exists(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+                .expect("HEAD log"),
             "{format:?}"
         );
         assert!(repo.operation().state().expect("state").is_clean());

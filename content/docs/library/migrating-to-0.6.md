@@ -85,6 +85,34 @@ Many porcelain calls dropped separate `_with_progress` / `_with_cancel` free fun
 
 Ref and path selection use newtypes and [`Pathspec`](rustdoc:grit_lib::worktree::pathspec::Pathspec) rather than `&str` / `&[String]` deep in library calls. Parse at your CLI or UI boundary; inside the library, use [`References::resolve`](rustdoc:grit_lib::refs::References::resolve) and [`Diff::resolve_pathspec`](rustdoc:grit_lib::diff::Diff::resolve_pathspec).
 
+### Ref names are validated, and strings no longer convert to `RefNameRef`
+
+`str` and `String` no longer implement `AsRef<RefNameRef>`, so [`References`](rustdoc:grit_lib::refs::References) methods (`resolve`, `symbolic`, `update`, `update_direct`, `update_symbolic`, `compare_and_swap`, `delete`, `compare_and_delete`, `reflog`), [`RepositoryReflogs::exists`](rustdoc:grit_lib::repo_handles::RepositoryReflogs::exists) and `append`, [`PackedRefs::get`](rustdoc:grit_lib::refs::PackedRefs::get), `ref_matches_glob` and the other `impl AsRef<RefNameRef>` parameters take only validated names. Build one with [`RefName::new`](rustdoc:grit_lib::refs::store::RefName::new) (also `TryFrom<&str>`, `TryFrom<String>` and `str::parse`), [`RefNameRef::new`](rustdoc:grit_lib::refs::store::RefNameRef::new) for a borrowed name, or [`RefName::branch`](rustdoc:grit_lib::refs::store::RefName::branch) / [`RefName::tag`](rustdoc:grit_lib::refs::store::RefName::tag) from a short name. They accept full names under `refs/`, `HEAD` and upper-case pseudo-refs such as `ORIG_HEAD`; the inherent `RefName::try_from`, which rejected pseudo-refs, is now the `TryFrom<&str>` impl with that wider rule. A failed check converts into [`RefError::InvalidName`](rustdoc:grit_lib::error::RefError::InvalidName), so `?` works. Use `RefNameRef::HEAD` for `HEAD`. `Tags::delete` now rejects a name that is not a valid tag name (`TagError::InvalidName`) instead of reading `refs/tags/<name>` unchecked.
+
+```rust
+// 0.5.x
+repo.references().update("refs/heads/backup", &tip)?;
+let head = repo.references().symbolic("HEAD")?;
+
+// 0.6
+use grit_lib::refs::store::{RefName, RefNameRef};
+repo.references().update(&RefName::new("refs/heads/backup")?, &tip)?;
+let head = repo.references().symbolic(RefNameRef::HEAD)?;
+```
+
+### `ObjectError::NotFound` names an object id
+
+`ObjectError::NotFound { name: String }` was used for missing objects, revision expressions that matched nothing and assorted prose. It is now `NotFound { oid: ObjectId }` and means only that the object store lacks `oid`. A revision expression that names nothing (an unknown name, an abbreviated id with no match, `:/<text>` with no match, a missing `FETCH_HEAD`) is [`RevisionError::NotFound { spec }`](rustdoc:grit_lib::error::RevisionError::NotFound); `~`/`^` past a root commit is `RevParseError::RevisionOutOfRange`; `A...B` with no common ancestor is [`RevisionError::NoMergeBase`](rustdoc:grit_lib::error::RevisionError::NoMergeBase); an object that cannot be peeled to the kind asked for is [`ObjectError::UnexpectedKind`](rustdoc:grit_lib::error::ObjectError::UnexpectedKind). `BundleError::ObjectNotFound` carries an `oid: ObjectId` too.
+
+```rust
+// 0.5.x
+Err(Error::Object(ObjectError::NotFound { name })) => println!("not found: {name}"),
+
+// 0.6
+Err(Error::Object(ObjectError::NotFound { oid })) => println!("object {oid} is missing"),
+Err(Error::Revision(RevisionError::NotFound { spec })) => println!("no revision {spec}"),
+```
+
 ### Typed errors per area
 
 Stop matching `Error::Message` or `Result<_, String>`. Each area returns its own `#[non_exhaustive]` enum that converts into [`Error`](rustdoc:grit_lib::error::Error). Match on variants (see [Errors](errors.md)):
@@ -165,7 +193,7 @@ let update = RefUpdate {
 };
 
 // 0.6
-let update = RefUpdate::new(RefName::from_trusted("refs/heads/topic"), Some(RawRef::Direct(oid)))
+let update = RefUpdate::new(RefName::new("refs/heads/topic")?, Some(RawRef::Direct(oid)))
     .with_expected(Expected::Missing);
 ```
 
@@ -215,6 +243,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::blame::blame_file` | `grit_lib::diff::Diff::blame` |  |
 | `grit_lib::blame::resolve_blame_line_range` | `grit_lib::diff::Diff::resolve_blame_line_range` |  |
 | `grit_lib::blame::resolve_blame_line_range_with_options` | `grit_lib::diff::Diff::resolve_blame_line_range_with_options` |  |
+| `grit_lib::bundle::BundleError::ObjectNotFound::name` | `grit_lib::bundle::BundleError::ObjectNotFound::oid (an ObjectId instead of a hex string)` |  |
 | `grit_lib::bundle::write_bundle_header` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::change_id::OsChangeIdGenerator` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::change_id::OsChangeIdGenerator::clone` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
@@ -349,6 +378,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::diff::unified_diff_histogram_hunks_only` | `grit_lib::diff::unified_diff` |  |
 | `grit_lib::diff::unified_diff_with_prefix_and_funcname` | `grit_lib::diff::unified_diff` |  |
 | `grit_lib::diff::unified_diff_with_prefix_and_funcname_and_algorithm` | `grit_lib::diff::unified_diff` |  |
+| `grit_lib::error::ObjectError::NotFound::name` | `grit_lib::error::ObjectError::NotFound::oid (an ObjectId; an unresolved revision spec is grit_lib::error::RevisionError::NotFound)` |  |
 | `grit_lib::error::SparseCheckoutWarning` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::error::SparseCheckoutWarning::DisablingConePatternMatching` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::error::SparseCheckoutWarning::RepeatedPattern` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |

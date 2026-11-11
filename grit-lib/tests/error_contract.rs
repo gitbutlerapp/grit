@@ -216,11 +216,13 @@ const AREA_KIND_NAMES: &[&str] = &[
     "clone",
     "corrupt_stash",
     "diff_arguments",
+    "diff_missing_worktree_path",
     "funcname_pattern",
     "head_not_detached",
     "head_not_on_branch",
     "index_fsmonitor_hook_empty_token",
     "index_fsmonitor_hook_failed",
+    "invalid_ref_name",
     "invalid_reflog_expiry",
     "move_rollback_incomplete",
     "multiple_merge_bases",
@@ -403,7 +405,9 @@ fn legacy_kind_names_survive_the_area_collapse() {
             "invalid_object_id",
         ),
         (
-            Error::Object(ObjectError::NotFound { name: "x".into() }),
+            Error::Object(ObjectError::NotFound {
+                oid: grit_lib::objects::ObjectId::zero(),
+            }),
             "object_not_found",
         ),
         (

@@ -139,8 +139,11 @@ pub fn human_message_for_lib(err: &LibError) -> String {
         LibError::Revision(RevisionError::Parse(RevParseError::ReflogDateUnparseable { date })) => {
             format!("invalid reflog date '{date}'")
         }
-        LibError::Object(ObjectError::NotFound { name: spec }) => {
+        LibError::Revision(RevisionError::NotFound { spec }) => {
             format!("revision '{spec}' not found")
+        }
+        LibError::Object(ObjectError::NotFound { oid }) => {
+            format!("revision '{oid}' not found")
         }
         LibError::Object(ObjectError::HashCollision { oid }) => format!(
             "refusing to store content that triggers an SHA-1 hash collision (digest {})",
@@ -335,8 +338,11 @@ pub fn map_commit_spec_error(err: LibError) -> Error {
         LibError::Revision(RevisionError::Parse(e @ RevParseError::AmbiguousArgument { .. })) => {
             crate::json_error::structured_revision_not_found(e.to_string())
         }
-        LibError::Object(ObjectError::NotFound { name: spec }) => {
+        LibError::Revision(RevisionError::NotFound { spec }) => {
             crate::json_error::structured_revision_not_found(format!("revision '{spec}' not found"))
+        }
+        LibError::Object(ObjectError::NotFound { oid }) => {
+            crate::json_error::structured_revision_not_found(format!("revision '{oid}' not found"))
         }
         LibError::Revision(RevisionError::Parse(RevParseError::AmbiguousChangeId {
             prefix,
@@ -1731,13 +1737,13 @@ mod tests {
 
     #[test]
     fn library_object_not_found_keeps_remote_display() {
-        let err = super::map_remote_error(LibError::Object(ObjectError::NotFound {
-            name: "deadbeef".into(),
-        }));
+        let oid = grit_lib::objects::ObjectId::from_hex("deadbeef00000000000000000000000000000000")
+            .expect("hex");
+        let err = super::map_remote_error(LibError::Object(ObjectError::NotFound { oid }));
         assert!(err.downcast_ref::<LibError>().is_none());
         assert_eq!(
             crate::cli_messages::human_error_message(&err),
-            "object not found: deadbeef",
+            "object not found: deadbeef00000000000000000000000000000000",
             "must not remap to revision-not-found wording"
         );
         assert!(crate::json_error::structured_json_payload(&err).is_none());

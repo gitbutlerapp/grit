@@ -177,11 +177,17 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
     // Tracking refs written.
     let got_main = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("origin/main");
     let got_topic = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/topic")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/topic")
+                .expect("valid ref name"),
+        )
         .expect("origin/topic");
     assert_eq!(got_main, main_oid, "origin/main oid mismatch vs source");
     assert_eq!(got_topic, topic_oid, "origin/topic oid mismatch vs source");
@@ -190,7 +196,7 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
     let tag_oid = rev_parse(&source, "refs/tags/v1");
     let got_tag = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/tags/v1")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name"))
         .expect("tag v1 written");
     assert_eq!(got_tag, tag_oid, "tag v1 oid mismatch vs source");
 
@@ -332,20 +338,28 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
 
     let got_rel = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/rel")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/rel")
+                .expect("valid ref name"),
+        )
         .expect("origin/rel");
     assert_eq!(got_rel, rel_oid);
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/light")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/light").expect("valid ref name")
+            )
             .expect("light tag"),
         light_oid
     );
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/rel-1.0")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/rel-1.0")
+                    .expect("valid ref name")
+            )
             .expect("annotated tag"),
         rel10_oid
     );
@@ -468,7 +482,10 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/annotated-paired")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/annotated-paired")
+                    .expect("valid ref name")
+            )
             .expect("tag ref"),
         tag_oid
     );
@@ -552,7 +569,10 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     let repo = Repository::open(&local_git, &RepositoryOptions::empty()).expect("open local repo");
     let head = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("origin/main");
     let tag_outcome = repo
         .tags()
@@ -594,7 +614,9 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/tags/v1-ann")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1-ann").expect("valid ref name")
+            )
             .expect("tag ref on remote"),
         tag_outcome.oid
     );
@@ -685,7 +707,9 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     git(&local, &["branch", "probe", &c1_oid.to_hex()]);
     let probe_before = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/heads/probe")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/probe").expect("valid ref name"),
+        )
         .expect("probe");
 
     std::fs::write(work.join("c.txt"), "three\n").unwrap();
@@ -735,7 +759,9 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/heads/probe")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/probe").expect("valid ref name")
+            )
             .expect("probe after dry-run"),
         probe_before
     );

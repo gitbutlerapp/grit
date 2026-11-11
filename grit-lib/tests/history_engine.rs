@@ -964,7 +964,7 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
     commit_file(wt, "tracked.txt", "v1", "track");
     let before_head = grit_test_support::refs::at(open_grit(wt).git_dir())
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("read ref");
     let grit = open_grit(wt);
     let mut edits = HistoryEdits::new();
@@ -987,7 +987,7 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
         .expect("plan");
     let after_head = grit
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("read ref after");
     assert_eq!(before_head, after_head);
     assert!(wt.join("tracked.txt").exists());

@@ -2233,8 +2233,8 @@ impl OpenQueueTally {
 fn first_parent_oid(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<ObjectId> {
     let parents = cache.parents_of(oid)?;
     parents.first().copied().ok_or_else(|| {
-        Error::Object(ObjectError::NotFound {
-            name: format!("{oid} has no parent"),
+        Error::from(crate::rev_parse_error::RevParseError::RevisionOutOfRange {
+            spec: format!("{oid}~1"),
         })
     })
 }

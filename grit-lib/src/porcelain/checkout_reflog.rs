@@ -173,9 +173,12 @@ fn write_head(repo: &Repository, value: &RawRef) -> Result<()> {
         RawRef::Symbolic(target) => {
             write_symbolic_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", target)
         }
-        RawRef::Direct(oid) => {
-            update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", oid)
-        }
+        RawRef::Direct(oid) => update_direct_ref_on_store(
+            repo.ref_store(),
+            repo.git_dir(),
+            crate::refs::store::RefNameRef::from_trusted("HEAD"),
+            oid,
+        ),
     }
 }
 

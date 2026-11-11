@@ -3285,11 +3285,13 @@ impl Index {
         prefix: &[u8],
     ) -> Result<()> {
         let oid = rev_parse::resolve_revision(repo, treeish)?;
-        let tree_oid = repo.odb().peel_to_tree(oid)?.ok_or_else(|| {
-            Error::Object(ObjectError::NotFound {
-                name: format!("cannot peel {oid} to tree for --with-tree"),
-            })
-        })?;
+        let Some(tree_oid) = repo.odb().peel_to_tree(oid)? else {
+            return Err(Error::Object(ObjectError::UnexpectedKind {
+                oid,
+                expected: ObjectKind::Tree,
+                actual: repo.odb().read_info(&oid)?.kind,
+            }));
+        };
         for e in self.entries.iter_mut() {
             if e.stage() != 0 {
                 e.set_stage(3);
@@ -3343,8 +3345,10 @@ fn read_tree_into_overlay(
 ) -> Result<()> {
     let obj = repo.odb().read(tree_oid)?;
     if obj.kind != ObjectKind::Tree {
-        return Err(Error::Object(ObjectError::NotFound {
-            name: format!("object {tree_oid} is not a tree"),
+        return Err(Error::Object(ObjectError::UnexpectedKind {
+            oid: *tree_oid,
+            expected: ObjectKind::Tree,
+            actual: obj.kind,
         }));
     }
     let entries = parse_tree(&obj.data)?;

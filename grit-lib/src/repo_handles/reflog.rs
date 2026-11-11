@@ -208,7 +208,8 @@ impl<'repo> RepositoryReflogs<'repo> {
     /// use grit_lib::repo::{InitOptions, Repository};
     /// let dir = tempfile::tempdir()?;
     /// let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-    /// assert!(!repo.reflogs().exists("refs/heads/main")?);
+    /// let main = grit_lib::refs::store::RefName::new("refs/heads/main")?;
+    /// assert!(!repo.reflogs().exists(&main)?);
     /// # Ok(())
     /// # }
     /// ```
@@ -244,8 +245,9 @@ impl<'repo> RepositoryReflogs<'repo> {
     ///     identity: "Doc <doc@example.com> 1700000000 +0000".to_owned(),
     ///     message: "note".to_owned(),
     /// };
-    /// repo.reflogs().append("refs/notes/demo", &entry, ReflogCreate::Always)?;
-    /// assert!(repo.reflogs().exists("refs/notes/demo")?);
+    /// let demo = grit_lib::refs::store::RefName::new("refs/notes/demo")?;
+    /// repo.reflogs().append(&demo, &entry, ReflogCreate::Always)?;
+    /// assert!(repo.reflogs().exists(&demo)?);
     /// # Ok(())
     /// # }
     /// ```

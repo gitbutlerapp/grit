@@ -97,10 +97,15 @@ fn undo_after_rebase_restores_stacked_branches() {
     );
     let onto = commit_file(wt, "base.txt", "base\n", "onto");
     let grit = open_grit(wt);
-    let main_before = grit.references().resolve("refs/heads/main").expect("main");
+    let main_before = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("main");
     let stacked_before = grit
         .references()
-        .resolve("refs/heads/stacked")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/stacked").expect("valid ref name"),
+        )
         .expect("stacked");
     let plan = grit
         .history()
@@ -120,7 +125,11 @@ fn undo_after_rebase_restores_stacked_branches() {
         )
         .expect("apply rebase");
     assert_ne!(
-        grit.references().resolve("refs/heads/main").expect("main"),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .expect("main"),
         main_before
     );
 
@@ -132,12 +141,19 @@ fn undo_after_rebase_restores_stacked_branches() {
         )
         .expect("undo");
     assert_eq!(
-        grit.references().resolve("refs/heads/main").expect("main"),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .expect("main"),
         main_before
     );
     assert_eq!(
         grit.references()
-            .resolve("refs/heads/stacked")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/stacked")
+                    .expect("valid ref name")
+            )
             .expect("stacked"),
         stacked_before
     );

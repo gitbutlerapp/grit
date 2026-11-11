@@ -97,7 +97,11 @@ fn conflict_stop_logs_head_detach() {
         .expect("start");
     assert!(matches!(out, RebaseOutcome::Stopped(_)));
     assert_eq!(
-        grit.references().resolve("refs/heads/topic").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
         orig_tip
     );
     assert!(matches!(

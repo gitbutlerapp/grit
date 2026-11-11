@@ -31,7 +31,10 @@ pub(crate) fn reflog_wanted(
     config: &ConfigSet,
     refname: &str,
 ) -> Result<bool> {
-    if should_autocreate_reflog_for_mode(refname, config.effective_log_refs_config()) {
+    if should_autocreate_reflog_for_mode(
+        crate::refs::store::RefNameRef::from_trusted(refname),
+        config.effective_log_refs_config(),
+    ) {
         return Ok(true);
     }
     store.reflog_exists(RefNameRef::from_trusted(refname))

@@ -5,7 +5,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;
 use grit_lib::objects::{parse_commit, ObjectKind};
 
-use grit_lib::refs::store::RefName;
+use grit_lib::refs::store::{RefName, RefNameRef};
 use grit_lib::repo::Repository;
 
 #[derive(Debug, Parser)]
@@ -45,7 +45,7 @@ fn run() -> Result<()> {
 
     if let Some(target_ref) = repo
         .references()
-        .symbolic("HEAD")
+        .symbolic(RefNameRef::HEAD)
         .map(|t| t.map(String::from))?
     {
         let name = RefName::try_from(target_ref.as_str())

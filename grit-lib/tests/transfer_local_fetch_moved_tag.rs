@@ -50,7 +50,9 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
 
     let tag_before = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/tags/newtag")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/newtag").expect("valid ref name"),
+        )
         .expect("tag after first fetch");
     assert_eq!(tag_before, rev_parse(&remote, "refs/tags/newtag"));
 
@@ -90,7 +92,9 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/newtag")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/newtag").expect("valid ref name")
+            )
             .expect("local tag unchanged"),
         tag_before,
         "local tag must not move without --tags --force"
@@ -164,7 +168,9 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
 
     let tag_before = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/tags/newtag")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/tags/newtag").expect("valid ref name"),
+        )
         .unwrap();
     std::fs::write(remote.join("b.txt"), b"b\n").unwrap();
     git(&remote, &["add", "b.txt"]);
@@ -199,7 +205,9 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/newtag")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/newtag").expect("valid ref name")
+            )
             .unwrap(),
         tag_before
     );
@@ -225,7 +233,9 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/newtag")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/newtag").expect("valid ref name")
+            )
             .unwrap(),
         tag_after
     );

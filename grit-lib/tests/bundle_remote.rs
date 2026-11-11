@@ -108,7 +108,10 @@ fn fetch_from_git_bundle_matches_git_fetch() {
         .expect("grit fetched main");
     let git_tip = grit_test_support::refs::at(&dest.path().join(".git"))
         .references()
-        .resolve("refs/remotes/git/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/git/main")
+                .expect("valid ref name"),
+        )
         .expect("git tracking ref");
     assert_eq!(grit_tip, git_tip);
 }
@@ -323,7 +326,7 @@ fn literal_bundle_fetch_writes_fetch_head() {
         .expect("grit FETCH_HEAD must exist");
     let bundle_main = grit_test_support::refs::at(upstream.path().join(".git").as_path())
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("upstream main");
     let grit_oid = grit_fetch_head.split('\t').next().expect("oid").trim();
     assert_eq!(grit_oid, bundle_main.to_hex());

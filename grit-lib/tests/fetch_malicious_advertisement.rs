@@ -121,7 +121,9 @@ fn assert_no_tracking_ref_for_traversal(git_dir: &Path) {
     assert!(
         grit_test_support::refs::at(git_dir)
             .references()
-            .resolve("refs/remotes/origin/../../../config")
+            .resolve(grit_lib::refs::store::RefNameRef::from_trusted(
+                "refs/remotes/origin/../../../config"
+            ))
             .is_err(),
         "must not create a tracking ref for traversal-shaped names"
     );

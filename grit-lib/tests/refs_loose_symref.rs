@@ -43,7 +43,9 @@ fn assert_direct_ref_stored(git_dir: &Path, backend: Backend, refname: &str, oid
             assert_eq!(
                 grit_test_support::refs::at(git_dir)
                     .references()
-                    .resolve(refname)
+                    .resolve(
+                        grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name")
+                    )
                     .unwrap(),
                 *oid
             );
@@ -65,14 +67,20 @@ fn build_symref_chain(git_dir: &Path, depth: usize, tip: &ObjectId) {
         grit_test_support::refs::at(git_dir)
             .references()
             .update_symbolic(
-                &format!("refs/heads/r{i}"),
-                &format!("refs/heads/r{}", i - 1),
+                &grit_lib::refs::store::RefNameRef::new(&format!("refs/heads/r{i}"))
+                    .expect("valid ref name"),
+                &grit_lib::refs::store::RefNameRef::new(&format!("refs/heads/r{}", i - 1))
+                    .expect("valid ref name"),
             )
             .expect("chain link");
     }
     grit_test_support::refs::at(git_dir)
         .references()
-        .update_symbolic("refs/heads/chain-top", &format!("refs/heads/r{depth}"))
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/chain-top").expect("valid ref name"),
+            &grit_lib::refs::store::RefNameRef::new(&format!("refs/heads/r{depth}"))
+                .expect("valid ref name"),
+        )
         .expect("chain top");
 }
 
@@ -88,7 +96,7 @@ fn t1400_loose_ref_roundtrip_both_backends() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve(refname)
+                .resolve(grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
                 .unwrap(),
             oid
         );
@@ -126,7 +134,7 @@ fn t1400_git_written_ref_read_by_grit_both_backends() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve(refname)
+                .resolve(grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
                 .unwrap(),
             oid
         );
@@ -168,13 +176,21 @@ fn t1401_symref_read_write_roundtrip_both_backends() {
         .expect("target");
         grit_test_support::refs::at(&git_dir)
             .references()
-            .update_symbolic("refs/heads/sym-alias", "refs/heads/sym-target")
+            .update_symbolic(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/sym-alias")
+                    .expect("valid ref name"),
+                grit_lib::refs::store::RefNameRef::new("refs/heads/sym-target")
+                    .expect("valid ref name"),
+            )
             .expect("symref");
 
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .symbolic("refs/heads/sym-alias")
+                .symbolic(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/sym-alias")
+                        .expect("valid ref name")
+                )
                 .map(|t| t.map(String::from))
                 .unwrap(),
             Some("refs/heads/sym-target".to_owned())
@@ -182,7 +198,10 @@ fn t1401_symref_read_write_roundtrip_both_backends() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/sym-alias")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/sym-alias")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid
         );
@@ -202,7 +221,7 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
         assert!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .symbolic("HEAD")
+                .symbolic(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
                 .map(|t| t.map(String::from))
                 .unwrap()
                 .is_some(),
@@ -215,14 +234,14 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
             .expect("detach HEAD");
         assert!(grit_test_support::refs::at(&git_dir)
             .references()
-            .symbolic("HEAD")
+            .symbolic(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .map(|t| t.map(String::from))
             .unwrap()
             .is_none());
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("HEAD")
+                .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
                 .unwrap(),
             oid
         );
@@ -240,12 +259,15 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
 
         grit_test_support::refs::at(&git_dir)
             .references()
-            .update_symbolic("HEAD", "refs/heads/main")
+            .update_symbolic(
+                grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
+            )
             .expect("reattach HEAD");
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .symbolic("HEAD")
+                .symbolic(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
                 .map(|t| t.map(String::from))
                 .unwrap()
                 .as_deref(),
@@ -274,17 +296,28 @@ fn t1401_dangling_symref_resolve_and_read_both_backends() {
         let git_dir = repo.git_dir();
         grit_test_support::refs::at(&git_dir)
             .references()
-            .update_symbolic("refs/heads/dangle", "refs/heads/no-such-target")
+            .update_symbolic(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/dangle")
+                    .expect("valid ref name"),
+                grit_lib::refs::store::RefNameRef::new("refs/heads/no-such-target")
+                    .expect("valid ref name"),
+            )
             .expect("dangling symref");
 
         assert!(grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/dangle")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/dangle")
+                    .expect("valid ref name")
+            )
             .is_err());
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .symbolic("refs/heads/dangle")
+                .symbolic(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/dangle")
+                        .expect("valid ref name")
+                )
                 .map(|t| t.map(String::from))
                 .unwrap(),
             Some("refs/heads/no-such-target".to_owned())
@@ -309,7 +342,10 @@ fn t1401_symref_chain_max_depth_both_backends() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/chain-top")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/chain-top")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid,
             "chain depth {ok_depth} should resolve"
@@ -319,7 +355,10 @@ fn t1401_symref_chain_max_depth_both_backends() {
         build_symref_chain(&git_dir, fail_depth, &oid);
         let grit_err = grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/chain-top")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/chain-top")
+                    .expect("valid ref name"),
+            )
             .unwrap_err();
         assert!(
             matches!(grit_err, Error::Ref(RefError::Invalid { .. })),
@@ -357,7 +396,7 @@ fn t1401_long_ref_name_both_backends() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve(&refname)
+                .resolve(&grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
                 .unwrap(),
             oid
         );
@@ -375,7 +414,10 @@ fn t1401_symref_invalid_target_overwrite_both_backends() {
         let oid = empty_commit_oid(repo);
         grit_test_support::refs::at(&git_dir)
             .references()
-            .update_symbolic("refs/heads/over", "not a valid ref!!")
+            .update_symbolic(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/over").expect("valid ref name"),
+                grit_lib::refs::store::RefNameRef::from_trusted("not a valid ref!!"),
+            )
             .expect("bad symref");
         grit_test_support::refs::set_ref(
             &grit_test_support::refs::at(&git_dir),
@@ -386,7 +428,10 @@ fn t1401_symref_invalid_target_overwrite_both_backends() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/over")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/over")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid
         );
@@ -405,7 +450,7 @@ fn t1400_delete_ref_semantics_both_backends() {
 
         grit_test_support::refs::at(&git_dir)
             .references()
-            .delete(refname)
+            .delete(grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
             .expect("delete_ref");
         assert_eq!(
             read_raw_ref(&git_dir, refname).unwrap(),
@@ -413,7 +458,7 @@ fn t1400_delete_ref_semantics_both_backends() {
         );
         assert!(grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve(refname)
+            .resolve(grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
             .is_err());
         eprintln!("ok t1400_delete_semantics ({})", backend_label(backend));
     });
@@ -435,7 +480,7 @@ fn t1400_delete_ref_prunes_loose_paths() {
 
         grit_test_support::refs::at(&git_dir)
             .references()
-            .delete(refname)
+            .delete(grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"))
             .expect("delete_ref");
         assert!(!path.exists());
         assert!(
@@ -452,7 +497,10 @@ fn t1400_delete_missing_ref_typed_error_both_backends() {
         let git_dir = repo.git_dir();
         let err = grit_test_support::refs::at(&git_dir)
             .references()
-            .delete("refs/heads/never-created")
+            .delete(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/never-created")
+                    .expect("valid ref name"),
+            )
             .unwrap_err();
         assert!(
             matches!(
@@ -472,7 +520,10 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
         let git_dir = repo.git_dir();
         let err = grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/never-created")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/never-created")
+                    .expect("valid ref name"),
+            )
             .unwrap_err();
         assert!(
             matches!(
@@ -485,11 +536,18 @@ fn resolve_missing_ref_names_the_missing_ref_both_backends() {
 
         grit_test_support::refs::at(&git_dir)
             .references()
-            .update_symbolic("refs/heads/dangling", "refs/heads/gone")
+            .update_symbolic(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/dangling")
+                    .expect("valid ref name"),
+                grit_lib::refs::store::RefNameRef::new("refs/heads/gone").expect("valid ref name"),
+            )
             .expect("symref");
         let err = grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/heads/dangling")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/dangling")
+                    .expect("valid ref name"),
+            )
             .unwrap_err();
         assert!(
             matches!(
@@ -525,12 +583,20 @@ fn t1400_delete_through_symref_both_backends() {
         .expect("target");
         grit_test_support::refs::at(&git_dir)
             .references()
-            .update_symbolic("refs/heads/delete-alias", "refs/heads/delete-target")
+            .update_symbolic(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/delete-alias")
+                    .expect("valid ref name"),
+                grit_lib::refs::store::RefNameRef::new("refs/heads/delete-target")
+                    .expect("valid ref name"),
+            )
             .expect("alias");
 
         grit_test_support::refs::at(&git_dir)
             .references()
-            .delete("refs/heads/delete-alias")
+            .delete(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/delete-alias")
+                    .expect("valid ref name"),
+            )
             .expect("delete symref");
         assert_eq!(
             read_raw_ref(&git_dir, "refs/heads/delete-alias").unwrap(),
@@ -539,7 +605,10 @@ fn t1400_delete_through_symref_both_backends() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/delete-target")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/delete-target")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid,
             "deleting symref must not delete referent"
@@ -569,7 +638,10 @@ fn t0600_empty_directory_does_not_block_create() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/empty-dir-test/leaf")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/empty-dir-test/leaf")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid
         );
@@ -756,7 +828,9 @@ fn t1405_verify_refname_df_prefix_single_ref() {
 
         grit_test_support::refs::at(&git_dir)
             .references()
-            .delete("refs/df/parent")
+            .delete(
+                grit_lib::refs::store::RefNameRef::new("refs/df/parent").expect("valid ref name"),
+            )
             .expect("remove parent");
         grit_test_support::refs::set_ref(
             &grit_test_support::refs::at(&git_dir),
@@ -888,7 +962,10 @@ fn t1400_packed_refs_resolve_delete_and_cached() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/heads/packed-a")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/packed-a")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             oid
         );
@@ -904,7 +981,10 @@ fn t1400_packed_refs_resolve_delete_and_cached() {
         write_ref_cached(&git_dir, "refs/heads/packed-c", &oid, &mut packed).expect("cached write");
         grit_test_support::refs::at(&git_dir)
             .references()
-            .delete("refs/heads/packed-a")
+            .delete(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/packed-a")
+                    .expect("valid ref name"),
+            )
             .expect("delete packed entry");
         assert!(!packed_refs_entry_exists(&git_dir, "refs/heads/packed-a").unwrap());
         assert_git_fsck_strict(repo.worktree());
@@ -934,7 +1014,8 @@ fn t1400_reflog_append_and_log_refs_config_both_backends() {
         grit_test_support::refs::at(&git_dir)
             .reflogs()
             .append(
-                "refs/heads/reflog-branch",
+                grit_lib::refs::store::RefNameRef::new("refs/heads/reflog-branch")
+                    .expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: zero_oid,
                     new_oid: oid,
@@ -946,7 +1027,10 @@ fn t1400_reflog_append_and_log_refs_config_both_backends() {
             .expect("append_reflog");
         let entries = grit_test_support::refs::at(&git_dir)
             .references()
-            .reflog("refs/heads/reflog-branch")
+            .reflog(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/reflog-branch")
+                    .expect("valid ref name"),
+            )
             .expect("read_reflog");
         assert!(
             !entries.is_empty(),

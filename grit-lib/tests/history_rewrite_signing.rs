@@ -318,7 +318,7 @@ fn signing_failure_aborts_rewrite_without_ref_moves() {
     let git_dir = root.join(".git");
     let tip_before = grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("resolve tip");
 
     let grit = open_grit(root);
@@ -337,7 +337,7 @@ fn signing_failure_aborts_rewrite_without_ref_moves() {
     );
     let tip_after = grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("resolve tip");
     assert_eq!(
         tip_before, tip_after,

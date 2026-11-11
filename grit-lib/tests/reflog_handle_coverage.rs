@@ -28,7 +28,7 @@ fn repository_reflogs_public_methods() {
     grit_test_support::refs::at(git_dir)
         .reflogs()
         .append(
-            refname,
+            grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: grit_lib::objects::ObjectId::zero(),
                 new_oid: grit_lib::objects::ObjectId::zero(),
@@ -56,7 +56,7 @@ fn repository_reflogs_public_methods() {
     grit_test_support::refs::at(git_dir)
         .reflogs()
         .append(
-            refname,
+            grit_lib::refs::store::RefNameRef::new(&refname).expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: grit_lib::objects::ObjectId::zero(),
                 new_oid: grit_lib::objects::ObjectId::zero(),

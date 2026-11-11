@@ -5617,7 +5617,7 @@ pub(crate) fn stream_checkout_entry(
                 oid,
             )
         })?
-        .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
+        .ok_or_else(|| Error::Object(ObjectError::NotFound { oid }))
 }
 
 /// Write blob `oid` to `rel_path` with checkout conversion, replacing whatever is there.
@@ -5655,7 +5655,7 @@ pub(crate) fn write_blob_to_worktree(
                     has_symlinks,
                 )
             })?
-            .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))
+            .ok_or_else(|| Error::Object(ObjectError::NotFound { oid: *oid }))
             .map(Some);
     };
     let Some(bytes) =

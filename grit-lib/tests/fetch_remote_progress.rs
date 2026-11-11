@@ -201,7 +201,10 @@ fn run_case(protocol_v2: bool, remote_progress: bool) -> (Vec<u8>, Vec<u8>) {
 
     let got = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("origin/main");
     assert_eq!(got, main_oid);
 

@@ -66,7 +66,10 @@ fn checkout_uninitialized_gitlink_matches_git_clone() {
         &RepositoryOptions::empty().with_work_tree(&grit_dest),
     )
     .expect("open bare+wt");
-    let head_oid = repo.references().resolve("HEAD").expect("head");
+    let head_oid = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
     let head_obj = repo.odb().read(&head_oid).expect("read");
     let commit = grit_lib::objects::parse_commit(&head_obj.data).expect("commit");
     repo.checkout()

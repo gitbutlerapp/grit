@@ -8,6 +8,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::ident::parse_signature;
 use grit_lib::objects::NewCommit;
+use grit_lib::refs::store::RefName;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport_path::resolve_local_remote_git_dir;
 use grit_lib::remote::{ListRefsOptions, Remote};
@@ -49,8 +50,11 @@ fn main() -> Result<()> {
     fetch_opts.tags = TagMode::Following;
     remote::fetch(&repo, &remote_info, &fetch_opts)?;
 
-    let tracking = repo.references().resolve("refs/remotes/origin/main")?;
-    repo.references().update("refs/heads/main", &tracking)?;
+    let main = RefName::new("refs/heads/main")?;
+    let tracking = repo
+        .references()
+        .resolve(&RefName::new("refs/remotes/origin/main")?)?;
+    repo.references().update(&main, &tracking)?;
 
     let parent = repo.objects().read_commit(&tracking)?;
     let committer = parse_signature(&parent.committer)
@@ -64,7 +68,7 @@ fn main() -> Result<()> {
         )
         .with_parents([tracking]),
     )?;
-    repo.references().update("refs/heads/main", &new_oid)?;
+    repo.references().update(&main, &new_oid)?;
 
     let spec = PushRefSpec::default()
         .with_src(Some(new_oid))

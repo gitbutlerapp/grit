@@ -236,7 +236,10 @@ fn declining_pre_receive_keeps_ref_and_objects_out() {
         assert!(Fixture::quarantine_dirs(&fx.bare).is_empty());
         assert!(
             repo.references()
-                .resolve("refs/remotes/origin/main")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                        .expect("valid ref name")
+                )
                 .is_err(),
             "no tracking ref after a declined push"
         );

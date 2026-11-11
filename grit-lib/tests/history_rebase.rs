@@ -133,7 +133,10 @@ fn rebase_onto_replays_range_and_moves_branch() {
         .iter()
         .any(|u| u.name.as_str().ends_with("main")));
     apply_plan(&grit, &plan);
-    let new_tip = grit.references().resolve("refs/heads/main").expect("ref");
+    let new_tip = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .expect("ref");
     assert_ne!(new_tip, tip);
     assert_git_fsck_strict(wt);
 }
@@ -404,12 +407,19 @@ fn rebase_onto_moves_stacked_branches() {
         .expect("stacked moves");
     apply_plan(&grit, &plan);
     assert_eq!(
-        grit.references().resolve("refs/heads/main").expect("main"),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .expect("main"),
         main_update.new
     );
     assert_eq!(
         grit.references()
-            .resolve("refs/heads/stacked")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/stacked")
+                    .expect("valid ref name")
+            )
             .expect("stacked"),
         stacked_update.new
     );
@@ -572,7 +582,9 @@ fn rebase_onto_defaults_upstream_from_tracking_config() {
     assert_eq!(merge.as_deref(), Some("refs/heads/upstream"));
     let upstream = grit
         .references()
-        .resolve("refs/heads/upstream")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/upstream").expect("valid ref name"),
+        )
         .expect("upstream");
     assert_eq!(upstream, oids["u"]);
 }
@@ -659,7 +671,11 @@ fn rebase_onto_bare_repository() {
         .expect("plan bare");
     apply_plan(&open, &plan);
     assert_ne!(
-        open.references().resolve("refs/heads/main").expect("ref"),
+        open.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .expect("ref"),
         tip
     );
 }
@@ -707,7 +723,7 @@ fn history_rebase_matches_git_replay_onto() {
     }
     let grit_tip = grit
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("grit tip");
     let git_tip = git_rev_parse(wt_git, "main");
     if grit_tip != git_tip {
@@ -743,7 +759,12 @@ fn plan_apply(grit: &Repository, request: RebaseRequest, opts: &RebaseOntoOption
         RebasePlan::Conflict { .. } => panic!("unexpected conflict"),
         RebasePlan::Plan(plan) => {
             apply_plan(grit, &plan);
-            grit.references().resolve("refs/heads/main").expect("main")
+            grit.references()
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name"),
+                )
+                .expect("main")
         }
     }
 }
@@ -808,7 +829,11 @@ fn plan_rebase_up_to_date_is_noop() {
         .expect("plan");
     assert_eq!(plan, RebasePlan::UpToDate);
     assert_eq!(
-        grit.references().resolve("refs/heads/main").expect("main"),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .expect("main"),
         tip
     );
 }
@@ -1039,7 +1064,10 @@ fn plan_rebase_over_merged_unrelated_root_matches_git_rebase() {
     apply_plan(&grit, &plan);
 
     git(wt, &["rebase", "-q", "main", "feat-git"]);
-    let grit_tip = grit.references().resolve("refs/heads/feat").expect("feat");
+    let grit_tip = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/feat").expect("valid ref name"))
+        .expect("feat");
     let git_tip = git_rev_parse(wt, "feat-git");
     let grit_commit = parse_commit(&grit.odb().read(&grit_tip).expect("read").data).expect("parse");
     let git_commit = parse_commit(&grit.odb().read(&git_tip).expect("read").data).expect("parse");
@@ -1076,7 +1104,7 @@ fn history_rebase_matches_git_rebase() {
     git_rebase_onto(wt_git, &o_git, &u_git, "main");
     let grit_tip = grit
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("grit tip");
     let git_tip = git_rev_parse(wt_git, "main");
     if grit_tip != git_tip {

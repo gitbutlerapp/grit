@@ -62,7 +62,10 @@ fn shallow_boundary_commit_diff_is_against_empty_tree() {
     build_linear_bare(&bare);
     let clone_dir = dir.path().join("shallow");
     let repo = grit_shallow_clone(&bare, &clone_dir, 1);
-    let tip = repo.references().resolve("HEAD").unwrap();
+    let tip = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
     assert!(repo.git_dir().join("shallow").exists());
 
     let config = repo.config().snapshot().unwrap().clone();
@@ -140,7 +143,10 @@ fn depth_two_child_still_diffs_against_parent() {
     build_linear_bare(&bare);
     let clone_dir = dir.path().join("shallow2");
     let repo = grit_shallow_clone(&bare, &clone_dir, 2);
-    let tip = repo.references().resolve("HEAD").unwrap();
+    let tip = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
     let parent = repo
         .revwalk()
         .resolve("HEAD~1", &grit_lib::revwalk::ResolveOptions::default())

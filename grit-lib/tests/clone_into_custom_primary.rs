@@ -97,7 +97,9 @@ fn clone_into_custom_primary_fetches_and_checks_out() {
     assert_eq!(
         grit_test_support::refs::at(&dir.path().join(".git"))
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         tip
     );

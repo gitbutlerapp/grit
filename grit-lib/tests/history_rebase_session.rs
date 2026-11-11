@@ -240,7 +240,11 @@ fn rebase_session_conflict_stop_continue_and_abort() {
     assert_eq!(stop.remaining, vec![tip]);
     assert!(stop.conflicts.iter().any(|c| c.path == "f.txt"));
     assert_eq!(
-        grit.references().resolve("refs/heads/topic").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
         orig_tip
     );
     assert!(grit.git_dir().join("rebase-merge/grit-plan").is_file());
@@ -965,7 +969,12 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
         )
         .expect("stop");
     let head_before = git_oid(wt, "HEAD");
-    let branch_before = grit.references().resolve("refs/heads/topic").unwrap();
+    let branch_before = grit
+        .references()
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+        )
+        .unwrap();
 
     let mut pull_progress = NullProgress;
     let pull_err = pull(
@@ -1019,7 +1028,11 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
 
     assert_eq!(git_oid(wt, "HEAD"), head_before);
     assert_eq!(
-        grit.references().resolve("refs/heads/topic").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
         branch_before
     );
     assert_eq!(branch_before, orig_tip);
@@ -1063,7 +1076,11 @@ fn stop_writes_markers_and_detaches_head() {
     let body = std::fs::read_to_string(wt.join("f.txt")).expect("f.txt");
     assert!(body.contains("<<<<<<<"));
     assert_eq!(
-        grit.references().resolve("refs/heads/topic").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
         orig_tip
     );
     assert!(matches!(
@@ -1155,7 +1172,11 @@ fn exec_replay_conflict_stops_resumably_and_continue_runs_command() {
     };
     assert!(stop.conflicts.iter().any(|c| c.path == "f.txt"));
     assert_eq!(
-        grit.references().resolve("refs/heads/topic").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
         orig_tip
     );
     assert!(wt.join(".git/rebase-merge/grit-plan").is_file());
@@ -1379,7 +1400,11 @@ fn branch_refs_unchanged_until_final_step() {
         )
         .expect("stop");
     assert_eq!(
-        grit.references().resolve("refs/heads/topic").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
         orig_tip
     );
     std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
@@ -1393,7 +1418,11 @@ fn branch_refs_unchanged_until_final_step() {
         )
         .expect("continue");
     assert_ne!(
-        grit.references().resolve("refs/heads/topic").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
         orig_tip
     );
     assert_git_fsck_strict(wt);
@@ -1905,7 +1934,12 @@ fn refscope_head_leaves_other_branch_refs_on_continue() {
 
     let grit = open_grit(wt);
     git(wt, &["switch", "topic"]);
-    let mirror_before = grit.references().resolve("refs/heads/mirror").unwrap();
+    let mirror_before = grit
+        .references()
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/mirror").expect("valid ref name"),
+        )
+        .unwrap();
     let _ = grit
         .history()
         .start_rebase(
@@ -1927,11 +1961,23 @@ fn refscope_head_leaves_other_branch_refs_on_continue() {
         )
         .expect("continue");
     assert_eq!(
-        grit.references().resolve("refs/heads/mirror").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/mirror")
+                    .expect("valid ref name")
+            )
+            .unwrap(),
         mirror_before,
         "RefScope::Head must not move unrelated branch refs"
     );
-    assert_ne!(grit.references().resolve("refs/heads/topic").unwrap(), tip);
+    assert_ne!(
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name")
+            )
+            .unwrap(),
+        tip
+    );
     assert_git_fsck_strict(wt);
 }
 
@@ -1972,8 +2018,16 @@ fn stacked_branches_move_atomically_after_continue() {
         apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
         exec: None,
     };
-    let main_before = grit.references().resolve("refs/heads/main").unwrap();
-    let stacked_before = grit.references().resolve("refs/heads/stacked").unwrap();
+    let main_before = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
+    let stacked_before = grit
+        .references()
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/stacked").expect("valid ref name"),
+        )
+        .unwrap();
     match grit
         .history()
         .start_rebase(
@@ -2004,8 +2058,16 @@ fn stacked_branches_move_atomically_after_continue() {
         }
         other => panic!("expected conflict stop, got {other:?}"),
     }
-    let main_after = grit.references().resolve("refs/heads/main").unwrap();
-    let stacked_after = grit.references().resolve("refs/heads/stacked").unwrap();
+    let main_after = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
+    let stacked_after = grit
+        .references()
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/stacked").expect("valid ref name"),
+        )
+        .unwrap();
     assert_ne!(main_before, main_after);
     assert_ne!(stacked_before, stacked_after);
     assert_git_fsck_strict(wt);
@@ -4581,8 +4643,16 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
         apply: rebase_apply_with_record(),
         exec: None,
     };
-    let main_before = grit.references().resolve("refs/heads/main").unwrap();
-    let stacked_before = grit.references().resolve("refs/heads/stacked").unwrap();
+    let main_before = grit
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
+    let stacked_before = grit
+        .references()
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/stacked").expect("valid ref name"),
+        )
+        .unwrap();
 
     match grit
         .history()
@@ -4615,11 +4685,20 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
     }
 
     assert_ne!(
-        grit.references().resolve("refs/heads/main").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .unwrap(),
         main_before
     );
     assert_ne!(
-        grit.references().resolve("refs/heads/stacked").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/stacked")
+                    .expect("valid ref name")
+            )
+            .unwrap(),
         stacked_before
     );
 
@@ -4636,11 +4715,20 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
         )
         .expect("undo");
     assert_eq!(
-        grit.references().resolve("refs/heads/main").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .unwrap(),
         main_before
     );
     assert_eq!(
-        grit.references().resolve("refs/heads/stacked").unwrap(),
+        grit.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/stacked")
+                    .expect("valid ref name")
+            )
+            .unwrap(),
         stacked_before
     );
     assert_eq!(

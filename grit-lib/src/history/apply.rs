@@ -1441,7 +1441,7 @@ pub(super) fn update_detached_head_with_reflog(
         return crate::refs::update_direct_ref_on_store(
             repo.ref_store(),
             repo.git_dir(),
-            "HEAD",
+            crate::refs::store::RefNameRef::from_trusted("HEAD"),
             &new,
         );
     };

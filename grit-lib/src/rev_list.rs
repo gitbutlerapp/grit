@@ -1115,7 +1115,7 @@ fn retain_maximal_commits(
 ///
 /// # Errors
 ///
-/// Returns [`crate::error::ObjectError::NotFound`] / [`crate::error::RefError::Invalid`] for bad revision
+/// Returns [`crate::error::RevisionError::NotFound`] / [`crate::error::RefError::Invalid`] for bad revision
 /// specs, [`RevListError::UnexpandedSymmetricRange`] for a raw `A...B` spec, and
 /// [`crate::error::ObjectError::Corrupt`] for non-commit or malformed commit data.
 pub(crate) fn rev_list(
@@ -2598,7 +2598,9 @@ fn resolve_specs_with_options(
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
             Err(
-                Error::Object(ObjectError::NotFound { .. }) | Error::Ref(RefError::Invalid { .. }),
+                Error::Object(ObjectError::NotFound { .. })
+                | Error::Revision(crate::error::RevisionError::NotFound { .. })
+                | Error::Ref(RefError::Invalid { .. }),
             ) if ignore_missing => continue,
             Err(err) => return Err(err),
         };
@@ -2730,6 +2732,7 @@ fn resolve_specs_for_objects_with_options(
                     Ok(oid) => oid,
                     Err(
                         Error::Object(ObjectError::NotFound { .. })
+                        | Error::Revision(crate::error::RevisionError::NotFound { .. })
                         | Error::Ref(RefError::Invalid { .. }),
                     ) if ignore_missing => {
                         continue;
@@ -2740,6 +2743,7 @@ fn resolve_specs_for_objects_with_options(
                     Ok(oid) => oid,
                     Err(
                         Error::Object(ObjectError::NotFound { .. })
+                        | Error::Revision(crate::error::RevisionError::NotFound { .. })
                         | Error::Ref(RefError::Invalid { .. }),
                     ) if ignore_missing => {
                         continue;
@@ -2769,7 +2773,9 @@ fn resolve_specs_for_objects_with_options(
         let oid = match resolve_revision_for_range_end(repo, spec) {
             Ok(oid) => oid,
             Err(
-                Error::Object(ObjectError::NotFound { .. }) | Error::Ref(RefError::Invalid { .. }),
+                Error::Object(ObjectError::NotFound { .. })
+                | Error::Revision(crate::error::RevisionError::NotFound { .. })
+                | Error::Ref(RefError::Invalid { .. }),
             ) if ignore_missing => continue,
             Err(err) => return Err(err),
         };
@@ -13286,7 +13292,7 @@ mod line_coverage_tests {
             },
         );
         assert!(
-            matches!(result, Err(Error::Object(ObjectError::NotFound { name: oid })) if oid == missing.to_hex())
+            matches!(result, Err(Error::Object(ObjectError::NotFound { oid })) if oid == missing)
         );
         Ok(())
     }

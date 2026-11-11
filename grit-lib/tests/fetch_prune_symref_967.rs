@@ -33,7 +33,12 @@ fn setup_clone_like_layout(tmp: &Path) -> (PathBuf, PathBuf, ObjectId) {
     );
     grit_test_support::refs::at(&local_git)
         .references()
-        .update_symbolic("refs/remotes/origin/HEAD", "refs/remotes/origin/main")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/HEAD")
+                .expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .unwrap();
     write_ref_direct(&local_git, "refs/remotes/origin/main", &main);
     pack_remote_tracking_refs_for_clone(&local_git, "origin").unwrap();
@@ -73,7 +78,10 @@ fn batch_delete_origin_head_keeps_packed_main() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .unwrap(),
         main
     );
@@ -103,8 +111,10 @@ fn setup_slash_remote_layout(tmp: &Path) -> (PathBuf, PathBuf) {
     grit_test_support::refs::at(&local_git)
         .references()
         .update_symbolic(
-            "refs/remotes/team/origin/HEAD",
-            "refs/remotes/team/origin/main",
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/team/origin/HEAD")
+                .expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/team/origin/main")
+                .expect("valid ref name"),
         )
         .unwrap();
     write_ref_direct(&local_git, "refs/remotes/team/origin/main", &main);

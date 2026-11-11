@@ -546,7 +546,12 @@ pub(crate) fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<Cr
 
     if !req.dry_run {
         repo.odb().flush_for_publish()?;
-        refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), &tag_ref, &ref_oid)?;
+        refs::update_direct_ref_on_store(
+            repo.ref_store(),
+            repo.git_dir(),
+            crate::refs::store::RefNameRef::from_trusted(&tag_ref),
+            &ref_oid,
+        )?;
     }
 
     Ok(CreateTagOutcome {
@@ -875,15 +880,25 @@ impl<'a> TagClassifier<'a> {
 /// Returns [`TagError::NotFound`] when the tag does not exist, and propagates ref
 /// store failures.
 pub(crate) fn delete_tag(repo: &Repository, name: &str, dry_run: bool) -> Result<ObjectId> {
-    let tag_ref = format!("{TAGS_PREFIX}{name}");
-    let existing = repo.references().read_existing(&tag_ref)?.ok_or_else(|| {
-        Error::Tag(TagError::NotFound {
-            name: name.to_owned(),
+    // Validate before the name reaches ref storage: `../heads/main` must not read or delete
+    // a ref outside `refs/tags/`.
+    let tag_ref = RefName::tag(name).map_err(|e| {
+        Error::Tag(TagError::InvalidName {
+            detail: e.to_string(),
         })
     })?;
+    let existing = repo
+        .references()
+        .read_existing(tag_ref.as_str())?
+        .ok_or_else(|| {
+            Error::Tag(TagError::NotFound {
+                name: name.to_owned(),
+            })
+        })?;
     let oid = existing.oid;
     if !dry_run {
-        repo.references().delete_verified(&tag_ref, &existing)?;
+        repo.references()
+            .delete_verified(tag_ref.as_str(), &existing)?;
     }
     Ok(oid)
 }
@@ -1144,6 +1159,22 @@ mod tests {
             TagList::Names(Vec::new())
         );
         assert!(repo.odb().exists(&annotated));
+    }
+
+    #[test]
+    fn delete_rejects_names_outside_refs_tags() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        let err = delete_tag(&repo, "../heads/main", true).unwrap_err();
+        assert!(
+            matches!(&err, Error::Tag(TagError::InvalidName { .. })),
+            "{err:?}"
+        );
+        assert_eq!(
+            repo.references()
+                .resolve(&RefName::new("refs/heads/main").unwrap())
+                .unwrap(),
+            commit
+        );
     }
 
     #[test]

@@ -33,7 +33,7 @@
 //! # fn main() -> grit_lib::error::Result<()> {
 //! let dir = tempfile::tempdir()?;
 //! let (_repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
-//! assert!(_repo.ref_store().read_raw(RefNameRef::from_trusted("HEAD"))?.is_some());
+//! assert!(_repo.ref_store().read_raw(RefNameRef::HEAD)?.is_some());
 //!
 //! # Ok(())
 //! # }
@@ -86,7 +86,7 @@ use store::{
     RefTransaction, RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 
-use crate::check_ref_format::{check_refname_format_borrowed, RefFormatOptions};
+use crate::check_ref_format::{check_refname_format_borrowed, RefFormatOptions, TrustedRefName};
 use crate::config::ConfigSet;
 use crate::error::{Error, RefLockError, Result};
 use crate::lockfile::LockWait;
@@ -240,7 +240,7 @@ pub(crate) fn commit_ref_update_on_store_with_wait(
 /// held.commit()?;
 ///
 /// prepare_with_lock_wait(&store, txn("refs/heads/b")?, LockWait::files_ref_lock(None))?.commit()?;
-/// assert_eq!(store.read_raw(RefNameRef::from_trusted("refs/heads/b"))?, Some(RawRef::Direct(oid)));
+/// assert_eq!(store.read_raw(RefNameRef::new("refs/heads/b")?)?, Some(RawRef::Direct(oid)));
 /// # Ok(())
 /// # }
 /// ```
@@ -829,8 +829,8 @@ pub(crate) fn parse_ref_content(content: &str) -> Result<Ref> {
 /// - [`crate::error::RefError::Store`] with [`RefStoreError::NotFound`] if
 ///   `refname`, or the target at the end of its symbolic chain, does not exist.
 /// - [`crate::error::RefError::Invalid`] if the ref is malformed or forms a cycle.
-pub(crate) fn resolve_ref(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> Result<ObjectId> {
-    let refname = refname.as_ref().as_str();
+pub(crate) fn resolve_ref(git_dir: &Path, refname: impl TrustedRefName) -> Result<ObjectId> {
+    let refname = refname.trusted_ref_name();
     open_ref_store(git_dir)?
         .resolve(RefNameRef::from_trusted(refname))
         .map_err(|err| map_public_ref_store_error(err, refname))
@@ -893,11 +893,8 @@ pub enum RawRefLookup {
 /// # Errors
 ///
 /// Propagates I/O and reftable errors other than "not found".
-pub(crate) fn read_raw_ref(
-    git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
-) -> Result<RawRefLookup> {
-    let refname = refname.as_ref().as_str();
+pub(crate) fn read_raw_ref(git_dir: &Path, refname: impl TrustedRefName) -> Result<RawRefLookup> {
+    let refname = refname.trusted_ref_name();
     let store = open_ref_store(git_dir)?;
     match store.read_raw(RefNameRef::from_trusted(refname))? {
         Some(_) => Ok(RawRefLookup::Exists),
@@ -979,7 +976,7 @@ pub(crate) fn packed_refname_namespace_conflict(
 }
 
 fn packed_ref_namespace_conflict(git_dir: &Path, refname: &str) -> Result<bool> {
-    Ok(PackedRefs::load(git_dir)?.has_namespace_conflict(refname))
+    Ok(PackedRefs::load(git_dir)?.has_namespace_conflict(RefNameRef::from_trusted(refname)))
 }
 
 /// Returns true if `packed-refs` in the ref storage directory for `refname` contains that name.
@@ -999,9 +996,9 @@ fn packed_ref_namespace_conflict(git_dir: &Path, refname: &str) -> Result<bool> 
 /// Propagates I/O errors reading `packed-refs`.
 pub(crate) fn packed_refs_entry_exists(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
 ) -> Result<bool> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     if refname == "HEAD" {
         return Ok(false);
     }
@@ -1116,11 +1113,11 @@ pub(crate) fn is_valid_advertised_symref_target(name: &str) -> bool {
 /// - `skip` — refnames that may be deleted or updated away in the same batch.
 pub(crate) fn verify_ref_available_for_create(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
     extras: &BTreeSet<String>,
     skip: &HashSet<String>,
 ) -> std::result::Result<(), RefnameUnavailable> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     // `Repository::git_dir` may be a relative path (e.g. `.git`); resolve so lookups match the
     // on-disk ref store regardless of process cwd (test harness runs from `trash/.git/...`).
     let git_dir = git_dir
@@ -2627,10 +2624,10 @@ pub(crate) fn test_commit(git_dir: &Path, message: &str) -> ObjectId {
 #[cfg(any(test, feature = "unstable-hosting"))]
 pub(crate) fn write_symbolic_ref(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
     target: &str,
 ) -> Result<()> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     store_write_value(
         git_dir,
         refname,
@@ -2682,10 +2679,10 @@ pub(crate) fn ensure_refname_safe_for_storage(refname: &str) -> Result<()> {
 /// `oid` is not a commit (both as [`crate::error::RefError::Store`]).
 pub(crate) fn write_ref(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
     oid: &ObjectId,
 ) -> Result<()> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     store_write_value(
         git_dir,
         refname,
@@ -2824,11 +2821,11 @@ fn write_ref_at_storage(
 /// fails under lock.
 pub(crate) fn write_ref_cas(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
     oid: &ObjectId,
     expected_old: ObjectId,
 ) -> Result<()> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     store_write_value(
         git_dir,
         refname,
@@ -2947,10 +2944,10 @@ impl PackedRefs {
 /// Returns an error on ref-file I/O failures other than "not found".
 pub(crate) fn resolve_ref_cached(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
     packed: &PackedRefs,
 ) -> Result<Option<ObjectId>> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return Ok(resolve_ref(git_dir, RefNameRef::from_trusted(refname)).ok());
     }
@@ -2981,7 +2978,7 @@ fn resolve_files_ref_cached(
     }
 
     for name in &try_names {
-        if let Some(oid) = packed.get(name) {
+        if let Some(oid) = packed.get(RefNameRef::from_trusted(name)) {
             return Ok(Some(oid));
         }
     }
@@ -2999,16 +2996,16 @@ fn resolve_files_ref_cached(
 #[cfg_attr(not(any(test, feature = "test-support")), allow(dead_code))]
 pub(crate) fn write_ref_cached(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
     oid: &ObjectId,
     packed: &mut PackedRefs,
 ) -> Result<()> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return write_ref(git_dir, RefNameRef::from_trusted(refname), oid);
     }
     ensure_refname_safe_for_storage(refname)?;
-    if packed.has_namespace_conflict(refname) {
+    if packed.has_namespace_conflict(RefNameRef::from_trusted(refname)) {
         return Err(Error::Ref(RefError::Invalid {
             detail: format!("cannot update ref '{refname}': reference namespace conflict"),
         }));
@@ -3140,8 +3137,8 @@ fn remove_dir_tree(dir: &Path) -> io::Result<()> {
 /// Returns [`RefStoreError::NotFound`] (inside
 /// [`crate::error::RefError::Store`]) when `refname` does not exist, [`crate::error::RefError::Invalid`] when it is not
 /// safe for ref storage, or [`Error::Io`] for filesystem failures.
-pub(crate) fn delete_ref(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> Result<()> {
-    let refname = refname.as_ref().as_str();
+pub(crate) fn delete_ref(git_dir: &Path, refname: impl TrustedRefName) -> Result<()> {
+    let refname = refname.trusted_ref_name();
     if matches!(
         read_raw_ref(git_dir, RefNameRef::from_trusted(refname))?,
         RawRefLookup::NotFound
@@ -3469,9 +3466,9 @@ fn write_packed_refs_tmp_and_rename(packed_path: &Path, body: &str) -> Result<()
 /// `Ok(None)` when it is direct or missing.
 pub(crate) fn read_symbolic_ref(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
 ) -> Result<Option<String>> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     match open_ref_store(git_dir)?.read_raw(RefNameRef::from_trusted(refname))? {
         Some(StoreRawRef::Symbolic(target)) => Ok(Some(target)),
         Some(StoreRawRef::Direct(_)) | None => Ok(None),
@@ -3481,9 +3478,9 @@ pub(crate) fn read_symbolic_ref(
 /// Like [`read_symbolic_ref`] but uses an open [`crate::repo::Repository`] ref store (no format re-detection).
 pub(crate) fn read_symbolic_ref_for_repository(
     repo: &crate::repo::Repository,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
 ) -> Result<Option<String>> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     match repo
         .ref_store()
         .read_raw(RefNameRef::from_trusted(refname))?
@@ -3573,8 +3570,11 @@ pub fn should_autocreate_reflog_for_mode(
 
 /// Whether a new reflog file may be auto-created for `refname` (Git `should_autocreate_reflog`).
 #[must_use]
-pub(crate) fn should_autocreate_reflog(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> bool {
-    should_autocreate_reflog_for_mode(refname, effective_log_refs_config(git_dir))
+pub(crate) fn should_autocreate_reflog(git_dir: &Path, refname: impl TrustedRefName) -> bool {
+    should_autocreate_reflog_for_mode(
+        RefNameRef::from_trusted(refname.trusted_ref_name()),
+        effective_log_refs_config(git_dir),
+    )
 }
 
 /// Like [`should_autocreate_reflog`], using an already-loaded repository config snapshot.
@@ -3584,7 +3584,10 @@ pub(crate) fn should_autocreate_reflog_with_config(
     _git_dir: &Path,
     refname: &str,
 ) -> bool {
-    should_autocreate_reflog_for_mode(refname, config.effective_log_refs_config())
+    should_autocreate_reflog_for_mode(
+        RefNameRef::from_trusted(refname),
+        config.effective_log_refs_config(),
+    )
 }
 
 /// Write a reflog entry.
@@ -3684,14 +3687,14 @@ fn validate_reflog_update(log: &ReflogUpdate) -> Result<()> {
 #[cfg(test)]
 pub(crate) fn append_reflog(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl TrustedRefName,
     old_oid: &ObjectId,
     new_oid: &ObjectId,
     identity: &str,
     message: &str,
     force_create: bool,
 ) -> Result<()> {
-    let refname = refname.as_ref().as_str();
+    let refname = refname.trusted_ref_name();
     append_reflog_with_config(
         git_dir,
         refname,
@@ -4645,8 +4648,8 @@ pub(crate) fn update_detached_head_for_commit_files(
 /// `commondir` link (linked worktrees / `git clone --shared` member repos); `HEAD` stays under
 /// `git_dir`.
 #[must_use]
-pub(crate) fn reflog_file_path(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> PathBuf {
-    let refname = refname.as_ref().as_str();
+pub(crate) fn reflog_file_path(git_dir: &Path, refname: impl TrustedRefName) -> PathBuf {
+    let refname = refname.trusted_ref_name();
     let (store, stor_name) = crate::worktree_ref::resolve_ref_storage(git_dir, refname);
     store.join("logs").join(stor_name)
 }
@@ -5091,7 +5094,7 @@ pub(crate) fn list_refs_glob_for_repository(
     };
     Ok(all
         .into_iter()
-        .filter(|(refname, _)| ref_matches_glob(refname, pattern))
+        .filter(|(refname, _)| ref_matches_glob(RefNameRef::from_trusted(refname), pattern))
         .collect())
 }
 
@@ -5116,7 +5119,7 @@ pub(crate) fn list_refs_glob(git_dir: &Path, pattern: &str) -> Result<Vec<(Strin
     };
     let mut results = Vec::new();
     for (refname, oid) in all {
-        if ref_matches_glob(&refname, pattern) {
+        if ref_matches_glob(RefNameRef::from_trusted(&refname), pattern) {
             results.push((refname, oid));
         }
     }
@@ -6566,7 +6569,12 @@ mod packed_refs_parse_tests {
         fs::write(&path, lying.data.as_ref() as &[u8]).unwrap();
         let loaded = PackedRefs::load(dir.path()).unwrap();
         for name in every {
-            assert!(loaded.get(name).is_some(), "{name}");
+            assert!(
+                loaded
+                    .get(crate::refs::store::RefNameRef::new(&name).expect("valid ref name"))
+                    .is_some(),
+                "{name}"
+            );
         }
     }
 

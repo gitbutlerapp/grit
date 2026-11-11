@@ -80,7 +80,10 @@ fn write_ref_fails_when_lock_file_exists() {
     );
     let err = grit_test_support::refs::at(&git_dir)
         .references()
-        .compare_and_delete("refs/heads/locked", &oid(1))
+        .compare_and_delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/locked").expect("valid ref name"),
+            &oid(1),
+        )
         .expect_err("lock held");
     assert!(
         is_lock_held(&err),
@@ -88,7 +91,9 @@ fn write_ref_fails_when_lock_file_exists() {
     );
     let err = grit_test_support::refs::at(&git_dir)
         .references()
-        .delete("refs/heads/locked")
+        .delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/locked").expect("valid ref name"),
+        )
         .expect_err("lock held");
     assert!(
         is_lock_held(&err),
@@ -141,7 +146,10 @@ fn delete_ref_cas_and_directory_in_the_way() {
     .expect("seed");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .compare_and_delete("refs/heads/del", &oid(4))
+        .compare_and_delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/del").expect("valid ref name"),
+            &oid(4),
+        )
         .expect("delete");
     grit_test_support::refs::set_ref(
         &grit_test_support::refs::at(&git_dir),
@@ -157,7 +165,10 @@ fn delete_ref_cas_and_directory_in_the_way() {
     .is_err());
     grit_test_support::refs::at(&git_dir)
         .references()
-        .delete("refs/heads/parent/leaf")
+        .delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/parent/leaf")
+                .expect("valid ref name"),
+        )
         .expect("cleanup");
     let extras = BTreeSet::new();
     let skip = HashSet::new();

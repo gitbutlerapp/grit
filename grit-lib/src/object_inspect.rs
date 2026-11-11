@@ -266,7 +266,10 @@ impl Repository {
     pub fn resolve(&self, spec: &str) -> crate::error::Result<ResolvedObject> {
         let oid = match resolve_revision(self, spec) {
             Ok(o) => o,
-            Err(Error::Object(ObjectError::NotFound { .. })) => {
+            Err(
+                Error::Object(ObjectError::NotFound { .. })
+                | Error::Revision(RevisionError::NotFound { .. }),
+            ) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 }
@@ -350,7 +353,10 @@ impl Repository {
 
         let oid = match resolve_revision_for_verify(self, spec) {
             Ok(o) => o,
-            Err(Error::Object(ObjectError::NotFound { .. })) => {
+            Err(
+                Error::Object(ObjectError::NotFound { .. })
+                | Error::Revision(RevisionError::NotFound { .. }),
+            ) => {
                 return Err(ResolveError::UnknownRevision {
                     spec: spec.to_owned(),
                 }

@@ -66,7 +66,7 @@ fn expire_reflog_keeps_concurrent_append_files() {
     b.join().expect("join");
     let kept = grit_test_support::refs::at(git_dir)
         .references()
-        .reflog("refs/heads/race")
+        .reflog(grit_lib::refs::store::RefNameRef::new("refs/heads/race").expect("valid ref name"))
         .expect("read")
         .len();
     assert!(kept >= fresh, "expire_reflog lost concurrent appends");

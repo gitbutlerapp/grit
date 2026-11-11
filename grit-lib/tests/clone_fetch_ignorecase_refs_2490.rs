@@ -99,7 +99,7 @@ fn clone_stores_casefold_remote_refs_in_packed_refs() {
     ] {
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve(name)
+            .resolve(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
             .unwrap_or_else(|_| panic!("missing {name}"));
     }
 
@@ -161,22 +161,31 @@ fn fetch_rejects_second_case_twin_and_keeps_first() {
 
     grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("main stored");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/remotes/origin/Foo")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/Foo")
+                .expect("valid ref name"),
+        )
         .expect("first branch spelling stored");
     assert!(
         grit_test_support::refs::at(&git_dir)
             .references()
-            .resolve("refs/remotes/origin/foo")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/foo")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "second branch spelling must not be stored as loose ref"
     );
     grit_test_support::refs::at(&git_dir)
         .references()
-        .resolve("refs/tags/V1")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/tags/V1").expect("valid ref name"))
         .expect("first tag spelling stored");
 
     let rejected = outcome

@@ -28,9 +28,18 @@ pub fn at(git_dir: impl AsRef<Path>) -> Repository {
 /// symbolic ref is followed. `oid` must be stored in the repository, and be a commit for a
 /// branch or `HEAD`.
 ///
+/// `name` is a plain string so fixtures can pass literals; the ref store validates it
+/// before writing, exactly as it would a [`RefName`](grit_lib::refs::store::RefName).
+///
 /// # Errors
 ///
-/// The errors of [`update_direct_ref_on_store`].
-pub fn set_ref(repo: &Repository, name: impl AsRef<RefNameRef>, oid: &ObjectId) -> Result<()> {
-    update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), name, oid)
+/// The errors of [`update_direct_ref_on_store`], including [`grit_lib::error::RefError::Invalid`]
+/// for a name that is not safe to store.
+pub fn set_ref(repo: &Repository, name: impl AsRef<str>, oid: &ObjectId) -> Result<()> {
+    update_direct_ref_on_store(
+        repo.ref_store(),
+        repo.git_dir(),
+        RefNameRef::from_trusted(name.as_ref()),
+        oid,
+    )
 }

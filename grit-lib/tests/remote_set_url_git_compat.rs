@@ -271,7 +271,7 @@ fn push_after_set_url_uses_new_pushurl() {
     let client_repo = open(&client);
     let main_oid = client_repo
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("main oid");
     let remote = grit_lib::remote::Remote::from_config(
         &client_repo.config().snapshot().expect("config"),

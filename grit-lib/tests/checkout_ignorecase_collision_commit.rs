@@ -320,7 +320,9 @@ fn commit_request(message: &str) -> CommitRequest {
 }
 
 fn head_oid(repo: &Repository) -> grit_lib::objects::ObjectId {
-    repo.references().resolve("HEAD").expect("head")
+    repo.references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head")
 }
 
 #[test]
@@ -685,7 +687,10 @@ fn build_flat_readme_collision_head(fx: &TestRepo) -> grit_lib::objects::ObjectI
             &CancelToken::never(),
         )
         .expect("head commit");
-    fx.repo.references().resolve("HEAD").expect("head")
+    fx.repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head")
 }
 
 #[test]
@@ -719,7 +724,10 @@ fn switch_reports_collisions_and_status_lists_mismatched_index_row() {
     grit_test_support::refs::set_ref(&fx.repo, "refs/heads/master", &main_tip).expect("main");
     fx.repo
         .references()
-        .update_symbolic("HEAD", "refs/heads/master")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/master").expect("valid ref name"),
+        )
         .expect("head main");
     let _ = fs::remove_file(fx.dest.join("A.txt"));
     let _ = fs::remove_file(fx.dest.join("a.txt"));

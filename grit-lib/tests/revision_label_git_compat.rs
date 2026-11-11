@@ -35,9 +35,14 @@ fn revision_labels_read_system_git_tags_and_packed_refs() {
                 matches!(&label, Some(RevisionLabel::Branch { name }) if name == "main"),
                 "{backend:?} {spec}: {label:?}; HEAD={:?}; branch={:?}",
                 repo.references()
-                    .symbolic("HEAD")
+                    .symbolic(
+                        grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name")
+                    )
                     .map(|t| t.map(String::from)),
-                repo.references().resolve("refs/heads/main")
+                repo.references().resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name")
+                )
             );
         }
         assert!(matches!(repo.revision_label("light").expect("tag label"),

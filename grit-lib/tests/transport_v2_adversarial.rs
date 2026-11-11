@@ -378,14 +378,20 @@ fn v2_clone_from_scratch_no_haves_and_not_v0() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .unwrap(),
         main_oid
     );
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/topic")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/topic")
+                    .expect("valid ref name")
+            )
             .unwrap(),
         topic_oid
     );
@@ -542,7 +548,10 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .unwrap(),
         main_new,
         "incremental main tip"
@@ -743,14 +752,19 @@ fn v2_tag_modes_all_and_following() {
         assert_eq!(
             grit_test_support::refs::at(&local_git)
                 .references()
-                .resolve("refs/tags/v1")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+                )
                 .expect("v1 tag (All)"),
             v1_oid
         );
         assert_eq!(
             grit_test_support::refs::at(&local_git)
                 .references()
-                .resolve("refs/tags/vside")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/tags/vside")
+                        .expect("valid ref name")
+                )
                 .expect("vside tag (All)"),
             vside_oid,
             "TagMode::All must fetch even unreachable-from-main tags"
@@ -794,7 +808,9 @@ fn v2_tag_modes_all_and_following() {
         assert_eq!(
             grit_test_support::refs::at(&local_git)
                 .references()
-                .resolve("refs/tags/v1")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+                )
                 .expect("v1 tag (Following)"),
             v1_oid,
             "TagMode::Following must keep tags reachable from fetched heads"
@@ -803,7 +819,10 @@ fn v2_tag_modes_all_and_following() {
         assert!(
             grit_test_support::refs::at(&local_git)
                 .references()
-                .resolve("refs/tags/vside")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/tags/vside")
+                        .expect("valid ref name")
+                )
                 .is_err(),
             "TagMode::Following must NOT write a tag unreachable from fetched heads"
         );
@@ -871,7 +890,9 @@ fn v2_ref_prefix_filtering_excludes_tags() {
     assert!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/v1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+            )
             .is_err(),
         "heads-only refspec with TagMode::None must not fetch tags"
     );
@@ -1014,21 +1035,29 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .unwrap(),
         main_oid
     );
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/topic")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/topic")
+                    .expect("valid ref name")
+            )
             .unwrap(),
         topic_oid
     );
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/tags/v1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+            )
             .expect("sha256 tag v1"),
         tag_oid
     );
@@ -1038,7 +1067,10 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
     assert_eq!(
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .unwrap()
             .to_hex(),
         git(&srv.source, &["rev-parse", "refs/heads/main"]).trim()

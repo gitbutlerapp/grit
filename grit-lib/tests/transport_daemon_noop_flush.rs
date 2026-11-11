@@ -171,7 +171,10 @@ fn git_daemon_noop_fetch_and_push_send_flush_not_hangup() {
         )
         .unwrap();
 
-    let main_tip = repo.references().resolve("refs/heads/main").unwrap();
+    let main_tip = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
+        .unwrap();
     remote
         .push(
             &repo,

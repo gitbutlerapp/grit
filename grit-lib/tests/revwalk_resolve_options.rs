@@ -148,7 +148,7 @@ fn peel_and_index_dwim_matrix_on_a_branch_name() {
                 Peel::Any | Peel::Commit => assert_eq!(got.ok(), Some(f.second), "{peel:?}"),
                 Peel::Tree => assert_eq!(got.ok(), Some(tree), "{peel:?} {index_dwim:?}"),
                 _ => assert!(
-                    matches!(got, Err(Error::Object(ObjectError::NotFound { .. }))),
+                    matches!(got, Err(Error::Object(ObjectError::UnexpectedKind { .. }))),
                     "{peel:?} {index_dwim:?}: a commit is not a blob, got {got:?}"
                 ),
             }
@@ -202,7 +202,7 @@ fn peel_and_index_dwim_matrix_on_an_annotated_tag() {
         assert_eq!(peeled_tree, tree);
         let blob = resolve_spec(&f.repo, "v1", &peel_dwim_options(Peel::Blob, index_dwim));
         assert!(
-            matches!(blob, Err(Error::Object(ObjectError::NotFound { .. }))),
+            matches!(blob, Err(Error::Object(ObjectError::UnexpectedKind { .. }))),
             "{blob:?}"
         );
     }
@@ -524,7 +524,7 @@ fn peel_helpers_match_resolve_options() {
     ));
     assert!(matches!(
         walk.peel_to_tree(f.tracked_blob),
-        Err(Error::Object(ObjectError::NotFound { .. }))
+        Err(Error::Object(ObjectError::UnexpectedKind { .. }))
     ));
     let blob_at = walk.blob_at_path("v1:tracked.txt").expect("blob at path");
     assert_eq!(blob_at.oid, f.tracked_blob);

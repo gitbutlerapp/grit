@@ -163,7 +163,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
 
     let tracking = grit_test_support::refs::at(&local_git)
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("tracking ref");
     assert_eq!(
         tracking, main_oid,
@@ -173,7 +176,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     // The remote ref now points at our main, and the objects are present.
     let remote_main = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main written");
     assert_eq!(remote_main, main_oid, "remote main oid mismatch");
 
@@ -261,7 +264,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     // The remote ref must be unchanged by the rejected push.
     let remote_main_after = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main still set");
     assert_eq!(
         remote_main_after, main_oid,
@@ -306,7 +309,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     assert_eq!(r3.new_oid, Some(diverged));
     let remote_main_forced = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main after force");
     assert_eq!(
         remote_main_forced, diverged,
@@ -358,7 +361,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/scratch")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/scratch")
+                    .expect("valid ref name")
+            )
             .expect("scratch created"),
         diverged,
         "scratch ref should be created before deletion"
@@ -403,7 +409,10 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
     assert!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/scratch")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/scratch")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "scratch ref must be gone after a deletion push"
     );
@@ -525,7 +534,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     );
     let remote_main_after_a = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main");
     assert_eq!(
         remote_main_after_a, advanced,
@@ -572,7 +581,9 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     );
     let remote_newbr = grit_test_support::refs::at(&bare)
         .references()
-        .resolve("refs/heads/newbr")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/newbr").expect("valid ref name"),
+        )
         .expect("remote newbr");
     assert_eq!(remote_newbr, new_tip);
     assert!(
@@ -617,7 +628,9 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main after force"),
         new_tip
     );

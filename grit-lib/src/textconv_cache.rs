@@ -203,7 +203,12 @@ fn write_notes_ref(
         crate::refs::store::open_ref_store(git_dir)?,
         odb.clone(),
     );
-    crate::refs::update_direct_ref_on_store(&store, git_dir, notes_ref, &commit_oid)?;
+    crate::refs::update_direct_ref_on_store(
+        &store,
+        git_dir,
+        crate::refs::store::RefNameRef::from_trusted(notes_ref),
+        &commit_oid,
+    )?;
     Ok(())
 }
 

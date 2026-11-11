@@ -49,9 +49,7 @@ struct OfflineFetcher(AtomicUsize);
 impl PromisorFetcher for OfflineFetcher {
     fn fetch_missing(&self, _: &Repository, oids: &[ObjectId]) -> Result<()> {
         self.0.fetch_add(1, Ordering::SeqCst);
-        Err(Error::Object(ObjectError::NotFound {
-            name: oids[0].to_hex(),
-        }))
+        Err(Error::Object(ObjectError::NotFound { oid: oids[0] }))
     }
 }
 

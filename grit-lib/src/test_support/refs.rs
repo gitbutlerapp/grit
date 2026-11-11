@@ -12,7 +12,6 @@ use std::path::{Path, PathBuf};
 use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::refs::reftable::WriteOptions;
-use crate::refs::store::RefNameRef;
 use crate::refs::{
     BranchCommitRefUpdate, LogRefsConfig, PackedRefRecord, PackedRefs, RawRefLookup, RefBatchItem,
     RefnameUnavailable,
@@ -43,8 +42,8 @@ pub fn read_log_refs_config(git_dir: &Path) -> LogRefsConfig {
 }
 
 #[must_use]
-pub fn should_autocreate_reflog(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> bool {
-    crate::refs::should_autocreate_reflog(git_dir, refname)
+pub fn should_autocreate_reflog(git_dir: &Path, refname: impl AsRef<str>) -> bool {
+    crate::refs::should_autocreate_reflog(git_dir, refname.as_ref())
 }
 
 pub fn list_refs_physical(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
@@ -55,17 +54,17 @@ pub fn pack_remote_tracking_refs_for_clone(git_dir: &Path, remote: &str) -> Resu
     crate::refs::pack_remote_tracking_refs_for_clone(git_dir, remote)
 }
 
-pub fn packed_refs_entry_exists(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> Result<bool> {
-    crate::refs::packed_refs_entry_exists(git_dir, refname)
+pub fn packed_refs_entry_exists(git_dir: &Path, refname: impl AsRef<str>) -> Result<bool> {
+    crate::refs::packed_refs_entry_exists(git_dir, refname.as_ref())
 }
 
-pub fn read_raw_ref(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> Result<RawRefLookup> {
-    crate::refs::read_raw_ref(git_dir, refname)
+pub fn read_raw_ref(git_dir: &Path, refname: impl AsRef<str>) -> Result<RawRefLookup> {
+    crate::refs::read_raw_ref(git_dir, refname.as_ref())
 }
 
 #[must_use]
-pub fn reflog_file_path(git_dir: &Path, refname: impl AsRef<RefNameRef>) -> PathBuf {
-    crate::refs::reflog_file_path(git_dir, refname)
+pub fn reflog_file_path(git_dir: &Path, refname: impl AsRef<str>) -> PathBuf {
+    crate::refs::reflog_file_path(git_dir, refname.as_ref())
 }
 
 pub fn resolve_at_n_branch(git_dir: &Path, spec: &str) -> Result<String> {
@@ -74,28 +73,28 @@ pub fn resolve_at_n_branch(git_dir: &Path, spec: &str) -> Result<String> {
 
 pub fn resolve_ref_cached(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl AsRef<str>,
     packed: &PackedRefs,
 ) -> Result<Option<ObjectId>> {
-    crate::refs::resolve_ref_cached(git_dir, refname, packed)
+    crate::refs::resolve_ref_cached(git_dir, refname.as_ref(), packed)
 }
 
 pub fn write_ref_cached(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl AsRef<str>,
     oid: &ObjectId,
     packed: &mut PackedRefs,
 ) -> Result<()> {
-    crate::refs::write_ref_cached(git_dir, refname, oid, packed)
+    crate::refs::write_ref_cached(git_dir, refname.as_ref(), oid, packed)
 }
 
 pub fn verify_ref_available_for_create(
     git_dir: &Path,
-    refname: impl AsRef<RefNameRef>,
+    refname: impl AsRef<str>,
     extras: &BTreeSet<String>,
     skip: &HashSet<String>,
 ) -> std::result::Result<(), RefnameUnavailable> {
-    crate::refs::verify_ref_available_for_create(git_dir, refname, extras, skip)
+    crate::refs::verify_ref_available_for_create(git_dir, refname.as_ref(), extras, skip)
 }
 
 pub fn verify_ref_transaction_batch(

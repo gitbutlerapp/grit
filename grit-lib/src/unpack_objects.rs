@@ -1083,7 +1083,7 @@ fn entry_object_bytes<'a, S: UnpackSink + ?Sized>(
             }
             let obj = sink
                 .read_stored(oid)?
-                .ok_or_else(|| Error::Object(ObjectError::NotFound { name: oid.to_hex() }))?;
+                .ok_or_else(|| Error::Object(ObjectError::NotFound { oid: *oid }))?;
             if let Some(off) = pack_offset {
                 cache.put(off, *kind, obj.data.clone());
             }

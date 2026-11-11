@@ -1525,7 +1525,12 @@ fn setup_clone_head(
     match requested {
         CloneRequestedRef::Tag { name, peel } => {
             if !peel.is_zero() {
-                refs::update_direct_ref_on_store(repo.ref_store(), repo.git_dir(), "HEAD", peel)?;
+                refs::update_direct_ref_on_store(
+                    repo.ref_store(),
+                    repo.git_dir(),
+                    crate::refs::store::RefNameRef::from_trusted("HEAD"),
+                    peel,
+                )?;
                 append_clone_reflog_on_store(repo, "HEAD", &zero, peel, identity, clone_message)?;
             }
             Ok((
@@ -1547,7 +1552,7 @@ fn setup_clone_head(
                     refs::update_direct_ref_on_store(
                         repo.ref_store(),
                         repo.git_dir(),
-                        &branch_ref,
+                        crate::refs::store::RefNameRef::from_trusted(&branch_ref),
                         &oid,
                     )?;
                     append_clone_reflog_on_store(
@@ -1598,7 +1603,7 @@ fn setup_clone_head(
                     refs::update_direct_ref_on_store(
                         repo.ref_store(),
                         repo.git_dir(),
-                        &branch_ref,
+                        crate::refs::store::RefNameRef::from_trusted(&branch_ref),
                         &oid,
                     )?;
                     append_clone_reflog_on_store(

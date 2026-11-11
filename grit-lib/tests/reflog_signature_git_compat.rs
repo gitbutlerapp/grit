@@ -154,7 +154,7 @@ fn seed_git_reflog(repo: &TestRepo) {
     );
     let entries = grit_test_support::refs::at(repo.git_dir())
         .references()
-        .reflog("HEAD")
+        .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
         .expect("read");
     let first_commit = entries
         .iter()
@@ -177,7 +177,7 @@ fn git_writes_grit_reads_reflog_signatures() {
         seed_git_reflog(&repo);
         let entries = grit_test_support::refs::at(repo.git_dir())
             .references()
-            .reflog("HEAD")
+            .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("read reflog");
         assert!(entries.len() >= 4, "expected several reflog entries");
         assert_signatures_match_git(&repo, "HEAD", &entries);
@@ -230,7 +230,7 @@ fn grit_writes_git_reads() {
         run_grit(repo.worktree(), &grit, &["switch", "-c", "grit-side"]);
         let entries = grit_test_support::refs::at(repo.git_dir())
             .references()
-            .reflog("HEAD")
+            .reflog(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .expect("grit read reflog");
         assert!(entries.len() >= 2);
         assert_signatures_match_git(&repo, "HEAD", &entries);
@@ -261,7 +261,8 @@ fn grit_written_reflog_timezones_read_back_by_git() {
             grit_test_support::refs::at(repo.git_dir())
                 .reflogs()
                 .append(
-                    "refs/heads/main",
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name"),
                     &grit_lib::refs::reflog::ReflogEntry {
                         old_oid: oid,
                         new_oid: oid,
@@ -290,7 +291,10 @@ fn grit_written_reflog_timezones_read_back_by_git() {
             );
             let entries = grit_test_support::refs::at(repo.git_dir())
                 .references()
-                .reflog("refs/heads/main")
+                .reflog(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name"),
+                )
                 .expect("read");
             let last = entries.last().expect("entry");
             assert!(

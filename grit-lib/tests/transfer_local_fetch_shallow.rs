@@ -81,21 +81,27 @@ fn fetch_local_in_git_shallow_clone_does_not_create_broken_tags() {
     assert!(
         grit_test_support::refs::at(&shallow_git)
             .references()
-            .resolve("refs/tags/v1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+            )
             .is_err(),
         "v1 must not be created in a depth-1 shallow clone"
     );
     assert!(
         grit_test_support::refs::at(&shallow_git)
             .references()
-            .resolve("refs/tags/v2")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v2").expect("valid ref name")
+            )
             .is_err(),
         "v2 must not be created in a depth-1 shallow clone"
     );
     assert_eq!(
         grit_test_support::refs::at(&shallow_git)
             .references()
-            .resolve("refs/tags/v3")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v3").expect("valid ref name")
+            )
             .expect("v3"),
         rev_parse(&shallow, "HEAD")
     );
@@ -158,14 +164,18 @@ fn fetch_local_clone_from_shallow_source_propagates_shallow_file() {
     assert_eq!(
         grit_test_support::refs::at(&dest_git)
             .references()
-            .resolve("refs/tags/v3")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v3").expect("valid ref name")
+            )
             .expect("v3 on shallow clone"),
         rev_parse(&shallow_src, "HEAD")
     );
     assert!(
         grit_test_support::refs::at(&dest_git)
             .references()
-            .resolve("refs/tags/v1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+            )
             .is_err(),
         "v1 must not be imported from a depth-1 source"
     );
@@ -228,7 +238,7 @@ fn fetch_local_initial_fetch_following_imports_reachable_tags() {
     ] {
         grit_test_support::refs::at(&local_git)
             .references()
-            .resolve(tag)
+            .resolve(grit_lib::refs::store::RefNameRef::new(&tag).expect("valid ref name"))
             .unwrap_or_else(|_| panic!("missing {tag}"));
     }
     git_fsck_clean(&local);
@@ -424,7 +434,10 @@ fn shallow_tag_following_uses_requested_history_and_tag_mode() {
         if tags == TagMode::Following {
             assert!(grit_test_support::refs::at(&client.join(".git"))
                 .references()
-                .resolve("refs/tags/side-tag")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/tags/side-tag")
+                        .expect("valid ref name")
+                )
                 .is_err());
         }
     }
@@ -538,7 +551,9 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
                 .any(|u| u.remote_ref == "refs/tags/v1"));
             assert!(grit_test_support::refs::at(&client.join(".git"))
                 .references()
-                .resolve("refs/tags/v1")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+                )
                 .is_err());
         }
         assert_eq!(

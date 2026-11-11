@@ -53,7 +53,9 @@ fn walk_trees_from_root(odb: &Odb, root: ObjectId) -> grit_lib::error::Result<()
 }
 
 fn trees_from_repo_head(repo: &Repository) -> grit_lib::error::Result<()> {
-    let head = repo.references().resolve("HEAD")?;
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))?;
     let tree = tree_oid_of_commit(repo.odb(), &head)?;
     walk_trees_from_root(repo.odb(), tree)
 }
@@ -91,7 +93,10 @@ fn tree_ref_iter_matches_parse_tree_sha256_repo() {
         &grit_lib::config::environment::RepositoryOptions::empty().with_work_tree(fixture.path()),
     )
     .expect("open");
-    let head = repo.references().resolve("HEAD").expect("head");
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("head");
     let commit_obj = repo.odb().read(&head).expect("commit");
     let commit = grit_lib::objects::parse_commit(&commit_obj.data).expect("parse commit");
     let tree_obj = repo.odb().read(&commit.tree).expect("tree object");

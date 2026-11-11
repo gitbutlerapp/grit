@@ -399,7 +399,10 @@ fn file_lease_success_updates_tracking_ref() {
     );
     let tracking = grit_test_support::refs::at(open_repo(&fx.grit_client).git_dir())
         .references()
-        .resolve("refs/remotes/origin/main")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                .expect("valid ref name"),
+        )
         .expect("tracking");
     assert_eq!(tracking, remote_tip(&fx.bare));
 }

@@ -15,6 +15,7 @@ use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::CommitScope;
 use grit_lib::progress::NullProgress;
+use grit_lib::refs::check_ref_format::RefNamePolicy;
 use grit_lib::refs::store::{MemoryRefStore, RefName, RefNameRef, RefStore};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{ExpireOptions, ReflogQuery};
@@ -124,7 +125,7 @@ fn injected_store_reflog_is_listed_and_read() {
     );
 
     // A partial name resolves to the branch log through the store.
-    let main = RefName::try_from("heads/main").expect("heads/main");
+    let main = RefName::parse("heads/main", &RefNamePolicy::default()).expect("heads/main");
     assert_eq!(repo.reflogs().entries(&main).expect("main").len(), 3);
 }
 

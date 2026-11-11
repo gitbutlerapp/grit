@@ -81,7 +81,9 @@ fn create_branch_over_a_ref_directory_names_the_ref() {
         assert_names_blocking_ref(&err, "refs/heads/rel/1.0", "refs/heads/rel");
         assert!(grit_test_support::refs::at(&dir.join(".git"))
             .references()
-            .resolve("refs/heads/rel")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/rel").expect("valid ref name")
+            )
             .is_err());
         assert_git_refuses_branch(dir);
         git(dir, &["fsck", "--no-progress"]);
@@ -130,7 +132,7 @@ fn create_branch_over_a_stray_reflog_directory_names_the_log() {
     assert_names_blocking_ref(&err, "refs/heads/rel/1.0", "refs/heads/rel");
     assert!(grit_test_support::refs::at(&dir.join(".git"))
         .references()
-        .resolve("refs/heads/rel")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/rel").expect("valid ref name"))
         .is_err());
     let out = git_cmd(&["branch", "rel"]).in_dir(dir).exec();
     assert!(!out.ok(), "git refuses while logs remain: {}", out.stdout);
@@ -198,11 +200,17 @@ fn assert_fetch_rejects_rel_and_creates_other(clone: &Path, bare: &Path, opts: &
     .expect("fetch without prune");
     assert!(grit_test_support::refs::at(&clone_git)
         .references()
-        .resolve("refs/remotes/origin/other")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/other")
+                .expect("valid ref name")
+        )
         .is_ok());
     assert!(grit_test_support::refs::at(&clone_git)
         .references()
-        .resolve("refs/remotes/origin/rel")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/rel")
+                .expect("valid ref name")
+        )
         .is_err());
     let rel = outcome
         .updates
@@ -242,7 +250,10 @@ fn assert_fetch_rejects_rel_and_creates_other(clone: &Path, bare: &Path, opts: &
     assert!(!outcome.has_rejections(), "{:?}", outcome.updates);
     assert!(grit_test_support::refs::at(&clone_git)
         .references()
-        .resolve("refs/remotes/origin/rel")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/rel")
+                .expect("valid ref name")
+        )
         .is_ok());
     git(clone, &["fsck", "--no-progress"]);
 }
@@ -276,12 +287,18 @@ fn system_git_fetch_also_rejects_the_blocked_ref() {
     assert!(
         grit_test_support::refs::at(&clone.join(".git"))
             .references()
-            .resolve("refs/remotes/origin/other")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/other")
+                    .expect("valid ref name")
+            )
             .is_ok(),
         "git still creates the unblocked ref"
     );
     assert!(grit_test_support::refs::at(&clone.join(".git"))
         .references()
-        .resolve("refs/remotes/origin/rel")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/rel")
+                .expect("valid ref name")
+        )
         .is_err());
 }

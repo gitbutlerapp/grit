@@ -10273,19 +10273,13 @@ fn read_new_side_bytes(
     if entry.new_oid != zero_oid() {
         return blob_bytes(odb, &entry.new_oid);
     }
-    let path = entry.new_path.as_deref().ok_or_else(|| {
-        Error::Object(ObjectError::NotFound {
-            name: "modified entry missing new_path for worktree read".into(),
-        })
-    })?;
-    let root = work_root.ok_or_else(|| {
-        Error::Object(ObjectError::NotFound {
-            name: format!(
-                "worktree bytes required for {} but no work_root was provided",
-                path
-            ),
-        })
-    })?;
+    let path = entry
+        .new_path
+        .as_deref()
+        .ok_or(Error::Diff(crate::error::DiffError::MissingWorktreePath))?;
+    let root = work_root.ok_or(Error::Repository(
+        crate::error::RepositoryError::RequiresWorkTree,
+    ))?;
     if let Some(wctx) = worktree {
         let mode = entry.new_mode.bits();
         let index_entry = wctx.index.get(path.as_bytes(), 0);
@@ -10302,11 +10296,10 @@ fn worktree_side_differs_after_normalize(
     worktree: &DiffPostprocessWorktree<'_>,
     config: &ConfigSet,
 ) -> Result<bool> {
-    let path = entry.new_path.as_deref().ok_or_else(|| {
-        Error::Object(ObjectError::NotFound {
-            name: "modified entry missing new_path for worktree read".into(),
-        })
-    })?;
+    let path = entry
+        .new_path
+        .as_deref()
+        .ok_or(Error::Diff(crate::error::DiffError::MissingWorktreePath))?;
     let raw = fs::read(work_root.join(path)).map_err(Error::Io)?;
     let canonical = read_new_side_bytes(odb, entry, Some(work_root), Some(worktree), config)?;
     Ok(raw != canonical)

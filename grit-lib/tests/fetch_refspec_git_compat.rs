@@ -66,7 +66,7 @@ fn read_fetch_head(git_dir: &Path) -> String {
 fn tracking_tip(git_dir: &Path, name: &str) -> Option<ObjectId> {
     grit_test_support::refs::at(git_dir)
         .references()
-        .resolve(name)
+        .resolve(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
         .ok()
 }
 
@@ -256,7 +256,7 @@ fn named_remote_explicit_refspec_writes_fetch_head_via_remote_fetch() {
     let fetch_head = read_fetch_head(&git_dir);
     let expected = grit_test_support::refs::at(remote.git_dir())
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .expect("remote main");
     let got_oid = fetch_head
         .lines()

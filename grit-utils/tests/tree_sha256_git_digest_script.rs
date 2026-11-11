@@ -44,7 +44,10 @@ fn run_git_repro(root: &Path, rev: &str) -> String {
 
 fn grit_digest(root: &Path) -> String {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let head = repo.references().resolve("HEAD").unwrap();
+    let head = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::HEAD)
+        .unwrap();
     repo.tree_sha256(head, &TreeSha256Options::default())
         .expect("tree_sha256")
         .digest

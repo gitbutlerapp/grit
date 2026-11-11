@@ -152,7 +152,7 @@ fn seed_reflog_repo_with_spread_timestamps() -> TestRepo {
         grit_test_support::refs::at(git_dir)
             .reflogs()
             .append(
-                "HEAD",
+                grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"),
                 &grit_lib::refs::reflog::ReflogEntry {
                     old_oid: zero,
                     new_oid: oid,

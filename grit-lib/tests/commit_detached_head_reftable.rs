@@ -88,7 +88,11 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
         other => panic!("expected detached HEAD, got {other:?}"),
     }
     assert_eq!(
-        repo.references().resolve("refs/heads/main").unwrap(),
+        repo.references()
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
+            .unwrap(),
         main_tip
     );
 

@@ -52,7 +52,9 @@ fn packed_refs_load_and_namespace_conflict() {
     .expect("packed");
     let mut packed = PackedRefs::load(&git_dir).expect("load");
     assert!(packed_refs_entry_exists(&git_dir, "refs/heads/packed").expect("exists"));
-    assert!(packed.has_namespace_conflict("refs/heads/packed/extra"));
+    assert!(packed.has_namespace_conflict(
+        grit_lib::refs::store::RefNameRef::new("refs/heads/packed/extra").expect("valid ref name")
+    ));
     write_ref_cached(&git_dir, "refs/heads/cached-new", &oid(8), &mut packed)
         .expect("cached write");
     assert_eq!(
@@ -83,11 +85,19 @@ fn write_ref_cas_and_delete_cas_error_paths() {
     .expect("seed");
     assert!(grit_test_support::refs::at(&git_dir)
         .references()
-        .compare_and_swap("refs/heads/cas", &oid(9), &oid(2))
+        .compare_and_swap(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/cas").expect("valid ref name"),
+            &oid(9),
+            &oid(2)
+        )
         .is_err());
     grit_test_support::refs::at(&git_dir)
         .references()
-        .compare_and_swap("refs/heads/cas", &oid(1), &oid(2))
+        .compare_and_swap(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/cas").expect("valid ref name"),
+            &oid(1),
+            &oid(2),
+        )
         .expect("cas ok");
     assert_eq!(
         resolve_ref_cached(
@@ -101,7 +111,10 @@ fn write_ref_cas_and_delete_cas_error_paths() {
     );
     grit_test_support::refs::at(&git_dir)
         .references()
-        .compare_and_delete("refs/heads/cas", &oid(2))
+        .compare_and_delete(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/cas").expect("valid ref name"),
+            &oid(2),
+        )
         .expect("delete cas");
 }
 
@@ -131,7 +144,7 @@ fn reflog_policy_and_append() {
     grit_test_support::refs::at(&git_dir)
         .reflogs()
         .append(
-            "refs/heads/logged",
+            grit_lib::refs::store::RefNameRef::new("refs/heads/logged").expect("valid ref name"),
             &grit_lib::refs::reflog::ReflogEntry {
                 old_oid: oid(1),
                 new_oid: oid(2),
@@ -163,7 +176,10 @@ fn list_refs_resolve_dwim_and_symbolic() {
     .expect("write");
     grit_test_support::refs::at(&git_dir)
         .references()
-        .update_symbolic("refs/heads/sym", "refs/heads/topic")
+        .update_symbolic(
+            grit_lib::refs::store::RefNameRef::new("refs/heads/sym").expect("valid ref name"),
+            grit_lib::refs::store::RefNameRef::new("refs/heads/topic").expect("valid ref name"),
+        )
         .expect("sym");
     let listed = grit_test_support::refs::at(&git_dir)
         .references()
@@ -183,7 +199,7 @@ fn list_refs_resolve_dwim_and_symbolic() {
     assert!(dwim.name.as_str().ends_with("/topic"));
     let head = grit_test_support::refs::at(&git_dir)
         .references()
-        .symbolic("HEAD")
+        .symbolic(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
         .map(|t| t.map(String::from))
         .expect("head");
     assert!(head.as_deref().is_some_and(|h| h.contains("main")));

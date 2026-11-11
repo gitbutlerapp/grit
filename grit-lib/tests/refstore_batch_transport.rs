@@ -67,11 +67,17 @@ fn fetch_updates_refs_in_one_transaction_reftable() {
 
         assert!(grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/branch-a")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/branch-a")
+                    .expect("valid ref name")
+            )
             .is_ok());
         assert!(grit_test_support::refs::at(&local_git)
             .references()
-            .resolve("refs/remotes/origin/branch-b")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/branch-b")
+                    .expect("valid ref name")
+            )
             .is_ok());
         let (_, count_after) = reftable_tables_snapshot(&local_git);
         assert_eq!(
@@ -119,14 +125,20 @@ fn push_tracking_remote_refs_one_reftable_transaction() {
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/remotes/origin/alpha")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/alpha")
+                        .expect("valid ref name")
+                )
                 .ok(),
             Some(c1)
         );
         assert_eq!(
             grit_test_support::refs::at(&git_dir)
                 .references()
-                .resolve("refs/remotes/origin/beta")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/beta")
+                        .expect("valid ref name")
+                )
                 .ok(),
             Some(c2)
         );
@@ -161,7 +173,10 @@ fn non_atomic_multi_ref_create_one_reftable_transaction() {
             assert_eq!(
                 grit_test_support::refs::at(&git_dir)
                     .references()
-                    .resolve(&format!("refs/heads/batch-{i}"))
+                    .resolve(
+                        &grit_lib::refs::store::RefNameRef::new(&format!("refs/heads/batch-{i}"))
+                            .expect("valid ref name")
+                    )
                     .ok(),
                 Some(tip)
             );
@@ -230,7 +245,9 @@ fn atomic_push_over_grit_http(_ref_format: RefStorageFormat) {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("bare main"),
         graph.ff
     );
@@ -281,7 +298,9 @@ fn atomic_push_over_grit_http(_ref_format: RefStorageFormat) {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("main"),
         graph.ff,
         "atomic abort must leave main unchanged"
@@ -289,7 +308,10 @@ fn atomic_push_over_grit_http(_ref_format: RefStorageFormat) {
     assert!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/atomic-ok")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/atomic-ok")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "atomic abort must not create the otherwise-valid ref"
     );

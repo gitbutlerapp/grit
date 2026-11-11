@@ -176,7 +176,9 @@ fn create_then_fast_forward_is_accepted_and_git_fsck_passes() {
     assert_eq!(
         grit_test_support::refs::at(&f.bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         one
     );
@@ -200,7 +202,9 @@ fn create_then_fast_forward_is_accepted_and_git_fsck_passes() {
     assert_eq!(
         grit_test_support::refs::at(&f.bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         three
     );
@@ -248,7 +252,10 @@ fn fast_forward_with_descendants_dated_before_the_old_tip_is_accepted() {
         assert_eq!(
             grit_test_support::refs::at(&f.bare)
                 .references()
-                .resolve("refs/heads/main")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/main")
+                        .expect("valid ref name")
+                )
                 .unwrap(),
             new
         );
@@ -290,7 +297,9 @@ fn non_fast_forward_branch_update_is_refused() {
     assert_eq!(
         grit_test_support::refs::at(&f.bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         two
     );
@@ -307,7 +316,9 @@ fn non_fast_forward_branch_update_is_refused() {
     assert_eq!(
         grit_test_support::refs::at(&f.bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         two
     );
@@ -348,7 +359,9 @@ fn non_branch_ref_rewrite_is_not_subject_to_the_policy() {
     assert_eq!(
         grit_test_support::refs::at(&f.bare)
             .references()
-            .resolve("refs/tags/v1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+            )
             .unwrap(),
         unrelated
     );
@@ -378,7 +391,9 @@ fn branch_update_to_a_non_commit_is_refused_as_bad_ref() {
     assert_eq!(
         grit_test_support::refs::at(&f.bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         one
     );

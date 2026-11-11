@@ -65,7 +65,10 @@ fn fetch_applies_other_refs_when_stale_nested_ref_blocks_without_prune() {
     assert!(
         grit_test_support::refs::at(&clone_git)
             .references()
-            .resolve("refs/remotes/origin/gone/x")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/gone/x")
+                    .expect("valid ref name")
+            )
             .is_ok(),
         "stale nested tracking ref should exist after first fetch"
     );
@@ -107,14 +110,20 @@ fn fetch_applies_other_refs_when_stale_nested_ref_blocks_without_prune() {
     assert!(
         grit_test_support::refs::at(&clone_git)
             .references()
-            .resolve("refs/remotes/origin/other")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/other")
+                    .expect("valid ref name")
+            )
             .is_ok(),
         "origin/other must be created despite gone conflict"
     );
     assert!(
         grit_test_support::refs::at(&clone_git)
             .references()
-            .resolve("refs/remotes/origin/gone")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/gone")
+                    .expect("valid ref name")
+            )
             .is_err(),
         "origin/gone must not be created while gone/x remains"
     );
@@ -144,7 +153,10 @@ fn fetch_applies_other_refs_when_stale_nested_ref_blocks_without_prune() {
     assert!(
         grit_test_support::refs::at(&git_clone.join(".git"))
             .references()
-            .resolve("refs/remotes/origin/other")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/other")
+                    .expect("valid ref name")
+            )
             .is_ok(),
         "system git fetch should also create origin/other"
     );
@@ -214,10 +226,16 @@ fn fetch_with_prune_resolves_namespace_conflict() {
     );
     assert!(grit_test_support::refs::at(&clone_git)
         .references()
-        .resolve("refs/remotes/origin/gone")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/gone")
+                .expect("valid ref name")
+        )
         .is_ok());
     assert!(grit_test_support::refs::at(&clone_git)
         .references()
-        .resolve("refs/remotes/origin/gone/x")
+        .resolve(
+            grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/gone/x")
+                .expect("valid ref name")
+        )
         .is_err());
 }

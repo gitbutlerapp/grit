@@ -44,6 +44,12 @@ use grit_lib::revwalk::history::RebaseSessionError;
 use grit_lib::revwalk::rev_parse_error::{AmbiguousChangeIdHint, RevParseError};
 use grit_lib::state::InProgressOperation;
 
+/// A fixed object id for rows that report a missing object.
+fn deadbeef_oid() -> ObjectId {
+    ObjectId::from_hex("deadbeef00000000000000000000000000000000")
+        .unwrap_or_else(|_| ObjectId::zero())
+}
+
 struct ContractRow {
     label: &'static str,
     build: fn() -> Error,
@@ -582,22 +588,20 @@ static CONTRACT: &[ContractRow] = &[
     },
     ContractRow {
         label: "lib_object_not_found",
-        build: || Error::new(LibError::Object(ObjectError::NotFound { name: "deadbeef".into() })),
+        build: || Error::new(LibError::Object(ObjectError::NotFound { oid: deadbeef_oid() })),
         kind: None,
         exit: ExitStatus::Failure,
-        human: || "revision 'deadbeef' not found".to_owned(),
+        human: || format!("revision '{}' not found", deadbeef_oid()),
         hint: None,
     },
     ContractRow {
         label: "remote_library_object_not_found",
         build: || {
-            map_remote_error(LibError::Object(ObjectError::NotFound { name:
-                "deadbeef".into(),
-             }))
+            map_remote_error(LibError::Object(ObjectError::NotFound { oid: deadbeef_oid() }))
         },
         kind: None,
         exit: ExitStatus::Failure,
-        human: || "object not found: deadbeef".to_owned(),
+        human: || format!("object not found: {}", deadbeef_oid()),
         hint: None,
     },
     ContractRow {

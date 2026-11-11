@@ -59,7 +59,10 @@ fn commit_all(repo: &Repository, message: &str) -> grit_lib::objects::ObjectId {
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let parent = repo.references().resolve("HEAD").ok();
+    let parent = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .ok();
     let commit_data = CommitData::new(
         tree,
         parent.into_iter().collect(),

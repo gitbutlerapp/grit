@@ -155,7 +155,7 @@ fn a_large_push_missing_an_object_is_refused_like_git() {
     );
     assert!(grit_test_support::refs::at(&grit_dir)
         .references()
-        .resolve("refs/heads/main")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
         .is_err());
     let line = "ng refs/heads/main missing necessary objects";
     assert!(report.contains(line), "{report}");
@@ -195,7 +195,9 @@ fn a_large_complete_push_is_accepted() {
     assert_eq!(
         grit_test_support::refs::at(&server)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         tip
     );
@@ -258,7 +260,9 @@ fn a_large_push_naming_an_offloaded_blob_is_accepted() {
     assert_eq!(
         grit_test_support::refs::at(&server)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .unwrap(),
         tip
     );
@@ -348,6 +352,6 @@ fn a_tip_left_by_a_refused_push_is_refused_again_like_git() {
     ));
     assert!(grit_test_support::refs::at(&grit_dir)
         .references()
-        .resolve("refs/heads/bad")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/bad").expect("valid ref name"))
         .is_err());
 }

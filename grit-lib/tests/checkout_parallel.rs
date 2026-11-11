@@ -68,7 +68,10 @@ fn commit_tree(repo: &Repository, message: &str) -> ObjectId {
     repo.index()
         .write(&mut index, &grit_lib::index::IndexWriteOptions::default())
         .expect("write index");
-    let parent = repo.references().resolve("HEAD").ok();
+    let parent = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .ok();
     let commit_data = CommitData::new(
         tree,
         parent.into_iter().collect(),
@@ -595,7 +598,7 @@ fn parallel_pool_error_rolls_back_every_job() {
     let err =
         checkout_tree_changes(&open_with_policy(root, 1, None), &changes).expect_err("serial fail");
     assert!(
-        matches!(&err, grit_lib::error::Error::Object(ObjectError::NotFound { name: oid }) if *oid == missing.to_hex()),
+        matches!(&err, grit_lib::error::Error::Object(ObjectError::NotFound { oid }) if *oid == missing),
         "serial: {err:?}"
     );
     for i in 0..N {
@@ -608,7 +611,7 @@ fn parallel_pool_error_rolls_back_every_job() {
     let err_parallel = checkout_tree_changes(&open_with_forced_parallel_pool(root, 4), &changes)
         .expect_err("parallel fail");
     assert!(
-        matches!(&err_parallel, grit_lib::error::Error::Object(ObjectError::NotFound { name: oid }) if *oid == missing.to_hex()),
+        matches!(&err_parallel, grit_lib::error::Error::Object(ObjectError::NotFound { oid }) if *oid == missing),
         "parallel: {err_parallel:?}"
     );
     for i in 0..N {
@@ -660,7 +663,7 @@ fn missing_blob_error_rolls_back_earlier_write() {
     let err = checkout_tree_changes(&open_with_policy(root, 1, None), &changes)
         .expect_err("missing object must fail");
     assert!(
-        matches!(&err, grit_lib::error::Error::Object(ObjectError::NotFound { name: oid }) if *oid == missing.to_hex()),
+        matches!(&err, grit_lib::error::Error::Object(ObjectError::NotFound { oid }) if *oid == missing),
         "serial: {err:?}"
     );
     assert!(
@@ -671,7 +674,7 @@ fn missing_blob_error_rolls_back_earlier_write() {
     let err_parallel = checkout_tree_changes(&open_with_policy(root, 4, Some(0)), &changes)
         .expect_err("parallel path must fail the same way");
     assert!(
-        matches!(&err_parallel, grit_lib::error::Error::Object(ObjectError::NotFound { name: oid }) if *oid == missing.to_hex()),
+        matches!(&err_parallel, grit_lib::error::Error::Object(ObjectError::NotFound { oid }) if *oid == missing),
         "parallel: {err_parallel:?}"
     );
     assert!(

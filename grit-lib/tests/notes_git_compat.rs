@@ -417,7 +417,10 @@ fn find_noted_object_in_singleton_bucket(
 }
 
 fn notes_root_tree_oids(repo: &Repository, notes_ref: &str) -> Vec<(Vec<u8>, ObjectId)> {
-    let tip = repo.references().resolve(notes_ref).expect("notes tip");
+    let tip = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new(&notes_ref).expect("valid ref name"))
+        .expect("notes tip");
     let tree_oid = match repo.odb().read(&tip).expect("read tip").kind {
         ObjectKind::Commit => {
             parse_commit(&repo.odb().read(&tip).unwrap().data)

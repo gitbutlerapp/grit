@@ -245,7 +245,9 @@ impl Fixture {
         );
         assert!(grit_test_support::refs::at(&self.bare)
             .references()
-            .resolve("refs/heads/bad")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/bad").expect("valid ref name")
+            )
             .is_err());
         assert!(
             !self.server().odb().exists(&bad),
@@ -268,7 +270,10 @@ impl Fixture {
         assert_eq!(
             grit_test_support::refs::at(&self.bare)
                 .references()
-                .resolve("refs/heads/bad")
+                .resolve(
+                    grit_lib::refs::store::RefNameRef::new("refs/heads/bad")
+                        .expect("valid ref name")
+                )
                 .expect("ref"),
             tip
         );
@@ -367,7 +372,7 @@ fn unreadable_skip_list_refuses_the_push() {
     assert!(pushed.report.contains("skip list"), "{}", pushed.report);
     assert!(grit_test_support::refs::at(&f.bare)
         .references()
-        .resolve("refs/heads/bad")
+        .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/bad").expect("valid ref name"))
         .is_err());
 }
 

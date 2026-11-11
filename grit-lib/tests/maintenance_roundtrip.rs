@@ -687,7 +687,10 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
         )
         .expect("commit");
 
-    let tip = repo.references().resolve("HEAD").expect("tip");
+    let tip = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .expect("tip");
     let git_dir = repo.git_dir();
     let branch_ref = git_dir.join("refs/heads/main");
     if branch_ref.is_file() {
@@ -697,7 +700,7 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
     assert!(
         grit_test_support::refs::at(git_dir)
             .references()
-            .resolve("HEAD")
+            .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
             .is_err(),
         "on-disk HEAD should be unborn after removing the branch ref"
     );

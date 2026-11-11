@@ -518,7 +518,7 @@ fn install_refs(repo: &Repository, records: &[PackedRefRecord], storage: RefStor
                 crate::refs::update_direct_ref_on_store(
                     repo.ref_store(),
                     repo.git_dir(),
-                    &record.refname,
+                    crate::refs::store::RefNameRef::from_trusted(&record.refname),
                     &record.oid,
                 )?;
             }

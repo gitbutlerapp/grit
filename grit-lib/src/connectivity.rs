@@ -271,7 +271,7 @@ mod tests {
         crate::refs::update_direct_ref_on_store(
             repo.ref_store(),
             repo.git_dir(),
-            "refs/heads/main",
+            crate::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"),
             &tip,
         )
         .expect("ref");

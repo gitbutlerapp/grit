@@ -119,10 +119,18 @@ impl RefNamePolicy {
 }
 
 /// Validated full ref name (for example `refs/heads/main`).
+///
+/// Build one with [`RefName::new`] (also `TryFrom<&str>`, `TryFrom<String>` and
+/// [`str::parse`]), [`RefName::parse`] for a specific [`RefNamePolicy`], or
+/// [`RefName::branch`] / [`RefName::tag`] for short names. Plain strings do not convert
+/// implicitly: functions that take `impl AsRef<RefNameRef>` accept only these validated names.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct RefName(String);
 
 /// Borrowed validated ref name (like [`std::path::Path`] to [`std::path::PathBuf`]).
+///
+/// Build one with [`RefNameRef::new`] or [`RefNameRef::parse`], or borrow it from a
+/// [`RefName`].
 #[repr(transparent)]
 #[derive(PartialEq, Eq, PartialOrd, Ord)]
 pub struct RefNameRef(str);
@@ -163,22 +171,41 @@ impl RefName {
         Self::parse(&format!("refs/tags/{short}"), &RefNamePolicy::default())
     }
 
-    /// Construct a ref name read from storage without re-validating.
+    /// Wrap `name` without validating it.
+    ///
+    /// Only for names that were already validated or were read back from ref storage (for
+    /// example by a [`RefStore`](crate::refs::store::RefStore) implementation listing its own
+    /// refs). Ref stores still validate names when writing, but reads trust the type, so never
+    /// pass user input here: use [`RefName::new`] instead.
     #[must_use]
     pub fn from_trusted(name: impl Into<String>) -> Self {
         Self(name.into())
     }
 
-    /// Parse and validate using default Git full-ref format rules, plus `HEAD`.
+    /// Validate a full ref name that can be stored in a repository.
+    ///
+    /// Accepts names under `refs/` that pass Git's default format rules (for example
+    /// `refs/heads/main` or `refs/stash`), `HEAD`, and pseudo-refs such as `ORIG_HEAD` or
+    /// `FETCH_HEAD` (one level, upper-case letters and `_` only). Short names such as
+    /// `main` are rejected: build them with [`RefName::branch`] or [`RefName::tag`].
+    /// This is the same validation as [`RefNameRef::new`], `TryFrom<&str>` and
+    /// [`str::parse`].
     ///
     /// # Errors
     ///
-    /// Returns [`RefNameError`] when the name is empty or otherwise invalid.
-    pub fn try_from(name: &str) -> Result<Self, RefNameError> {
-        if name == "HEAD" {
-            return Ok(Self(name.to_owned()));
-        }
-        Self::parse(name, &RefNamePolicy::default())
+    /// Returns [`RefNameError`] when the name is empty, malformed, or not storable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::refs::store::RefName;
+    /// assert!(RefName::new("refs/heads/main").is_ok());
+    /// assert!(RefName::new("ORIG_HEAD").is_ok());
+    /// assert!(RefName::new("main").is_err());
+    /// assert!(RefName::new("refs/heads/../config").is_err());
+    /// ```
+    pub fn new(name: &str) -> Result<Self, RefNameError> {
+        RefNameRef::new(name).map(|name| Self(name.as_str().to_owned()))
     }
 
     /// Borrow the stored ref name.
@@ -189,6 +216,9 @@ impl RefName {
 }
 
 impl RefNameRef {
+    /// `HEAD`, the ref naming the current branch or detached commit.
+    pub const HEAD: &'static RefNameRef = RefNameRef::unchecked("HEAD");
+
     /// Parse `name` in place when validation does not require owning a normalized copy.
     ///
     /// # Errors
@@ -206,7 +236,29 @@ impl RefNameRef {
             check_refname_format_borrowed(name, &format)?;
         }
         apply_policy_checks(name, policy)?;
-        Ok(Self::new(name))
+        Ok(Self::unchecked(name))
+    }
+
+    /// Validate a borrowed full ref name that can be stored in a repository.
+    ///
+    /// Accepts the same names as [`RefName::new`]: names under `refs/` that pass Git's
+    /// default format rules, `HEAD`, and pseudo-refs such as `ORIG_HEAD`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RefNameError`] when the name is empty, malformed, or not storable.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::refs::store::RefNameRef;
+    /// let head = RefNameRef::new("HEAD")?;
+    /// assert_eq!(head.as_str(), "HEAD");
+    /// assert!(RefNameRef::new("refs/heads/a b").is_err());
+    /// # Ok::<(), grit_lib::refs::check_ref_format::RefNameError>(())
+    /// ```
+    pub fn new(name: &str) -> Result<&Self, RefNameError> {
+        Self::parse(name, &RefNamePolicy::new().storable())
     }
 
     /// Borrow the validated ref name as UTF-8.
@@ -215,34 +267,77 @@ impl RefNameRef {
         &self.0
     }
 
-    /// Borrow a name read from ref storage without re-validating.
+    /// Borrow `s` as a ref name without validating it.
+    ///
+    /// The same contract as [`RefName::from_trusted`]: only for names already validated or
+    /// read back from ref storage. Use [`RefNameRef::new`] for anything else.
     #[must_use]
     pub fn from_trusted(s: &str) -> &Self {
-        Self::new(s)
+        Self::unchecked(s)
     }
 
     #[must_use]
-    fn new(s: &str) -> &Self {
+    const fn unchecked(s: &str) -> &Self {
         // SAFETY: RefNameRef is repr(transparent) over str.
         unsafe { &*(s as *const str as *const RefNameRef) }
     }
 }
 
-impl AsRef<RefNameRef> for str {
-    fn as_ref(&self) -> &RefNameRef {
-        RefNameRef::from_trusted(self)
-    }
-}
-
-impl AsRef<RefNameRef> for String {
-    fn as_ref(&self) -> &RefNameRef {
-        RefNameRef::from_trusted(self.as_str())
+impl AsRef<str> for RefNameRef {
+    fn as_ref(&self) -> &str {
+        self.as_str()
     }
 }
 
 impl AsRef<RefNameRef> for RefNameRef {
     fn as_ref(&self) -> &RefNameRef {
         self
+    }
+}
+
+/// Crate-internal ref-name argument for helpers whose callers already hold a trusted name
+/// (validated earlier, built from a fixed prefix, or read back from ref storage).
+///
+/// Public entry points take `impl AsRef<RefNameRef>`, which only validated names satisfy;
+/// this trait keeps the internal string-taking helpers free of per-call conversions.
+pub(crate) trait TrustedRefName {
+    /// The ref name as stored.
+    fn trusted_ref_name(&self) -> &str;
+}
+
+impl TrustedRefName for str {
+    fn trusted_ref_name(&self) -> &str {
+        self
+    }
+}
+
+impl TrustedRefName for String {
+    fn trusted_ref_name(&self) -> &str {
+        self
+    }
+}
+
+impl TrustedRefName for RefName {
+    fn trusted_ref_name(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl TrustedRefName for RefNameRef {
+    fn trusted_ref_name(&self) -> &str {
+        self.as_str()
+    }
+}
+
+impl TrustedRefName for Cow<'_, str> {
+    fn trusted_ref_name(&self) -> &str {
+        self
+    }
+}
+
+impl<T: TrustedRefName + ?Sized> TrustedRefName for &T {
+    fn trusted_ref_name(&self) -> &str {
+        (**self).trusted_ref_name()
     }
 }
 
@@ -340,13 +435,13 @@ impl From<RefName> for String {
 
 impl AsRef<RefNameRef> for RefName {
     fn as_ref(&self) -> &RefNameRef {
-        RefNameRef::new(self.as_str())
+        RefNameRef::unchecked(self.as_str())
     }
 }
 
 impl Borrow<RefNameRef> for RefName {
     fn borrow(&self) -> &RefNameRef {
-        RefNameRef::new(self.as_str())
+        RefNameRef::unchecked(self.as_str())
     }
 }
 
@@ -354,7 +449,44 @@ impl Deref for RefName {
     type Target = RefNameRef;
 
     fn deref(&self) -> &RefNameRef {
-        RefNameRef::new(self.as_str())
+        RefNameRef::unchecked(self.as_str())
+    }
+}
+
+impl TryFrom<&str> for RefName {
+    type Error = RefNameError;
+
+    /// Same validation as [`RefName::new`].
+    fn try_from(name: &str) -> Result<Self, Self::Error> {
+        Self::new(name)
+    }
+}
+
+impl TryFrom<String> for RefName {
+    type Error = RefNameError;
+
+    /// Same validation as [`RefName::new`]; reuses the allocation on success.
+    fn try_from(name: String) -> Result<Self, Self::Error> {
+        RefNameRef::new(&name)?;
+        Ok(Self(name))
+    }
+}
+
+impl str::FromStr for RefName {
+    type Err = RefNameError;
+
+    /// Same validation as [`RefName::new`].
+    fn from_str(name: &str) -> Result<Self, Self::Err> {
+        Self::new(name)
+    }
+}
+
+impl<'a> TryFrom<&'a str> for &'a RefNameRef {
+    type Error = RefNameError;
+
+    /// Same validation as [`RefNameRef::new`].
+    fn try_from(name: &'a str) -> Result<Self, Self::Error> {
+        RefNameRef::new(name)
     }
 }
 

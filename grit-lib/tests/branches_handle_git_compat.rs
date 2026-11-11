@@ -32,7 +32,10 @@ fn init() -> (tempfile::TempDir, Repository) {
 #[test]
 fn branches_handle_round_trips_with_git() {
     let (dir, repo) = init();
-    let tip = repo.references().resolve("HEAD").unwrap();
+    let tip = repo
+        .references()
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
+        .unwrap();
 
     repo.branches()
         .create(&BranchCreateOptions {

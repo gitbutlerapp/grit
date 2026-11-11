@@ -235,7 +235,9 @@ fn push_options_are_delivered_to_receive_pack_hook_over_git_daemon() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("remote main written"),
         main_oid
     );
@@ -344,7 +346,9 @@ fn push_options_are_delivered_to_receive_pack_hook_over_ssh() {
     assert_eq!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .expect("remote main written"),
         main_oid
     );
@@ -429,7 +433,9 @@ fn pushing_options_to_server_without_capability_errors_typed() {
     assert!(
         grit_test_support::refs::at(&bare)
             .references()
-            .resolve("refs/heads/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name")
+            )
             .is_err(),
         "no ref should be created when the push aborts before sending"
     );

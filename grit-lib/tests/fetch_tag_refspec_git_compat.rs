@@ -78,7 +78,7 @@ fn update_mode(outcome: &FetchOutcome, local_ref: &str) -> UpdateMode {
 fn assert_annotated_tag(dir: &Path, name: &str, expected: ObjectId) {
     let got = grit_test_support::refs::at(&dir.join(".git"))
         .references()
-        .resolve(name)
+        .resolve(grit_lib::refs::store::RefNameRef::new(&name).expect("valid ref name"))
         .expect("tag ref");
     assert_eq!(got, expected, "{name} must point at the tag object");
     assert_eq!(git(dir, &["cat-file", "-t", name]).trim(), "tag");
@@ -127,7 +127,9 @@ fn forced_annotated_tag_refspec_moves_retargeted_tag() {
     assert_eq!(
         grit_test_support::refs::at(&grit_dn.join(".git"))
             .references()
-            .resolve("refs/tags/rel")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/rel").expect("valid ref name")
+            )
             .unwrap(),
         old
     );
@@ -154,7 +156,9 @@ fn tag_pattern_refspec_is_not_subject_to_following() {
     assert_eq!(
         grit_test_support::refs::at(&grit_dn.join(".git"))
             .references()
-            .resolve("refs/tags/v1")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/tags/v1").expect("valid ref name")
+            )
             .unwrap(),
         rev_parse(&up, "refs/tags/v1")
     );

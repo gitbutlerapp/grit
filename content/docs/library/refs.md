@@ -5,12 +5,15 @@ summary: Repository ref handles, HEAD, reflogs, operation state, transactions an
 
 References name commits and other objects. Everything you do with them goes through [`repo.references()`](rustdoc:grit_lib::refs::References): `head`, `resolve`, `symbolic`, `dwim`, `list`, `list_glob`, `update`, `update_direct`, `update_symbolic`, `compare_and_swap`, `delete`, `compare_and_delete`, and `apply` / `apply_each` for batches. Reflogs are on [`repo.reflogs()`](rustdoc:grit_lib::repo_handles::RepositoryReflogs), and paused merges, rebases, picks and reverts on [`repo.operation()`](rustdoc:grit_lib::operation::Operations). Call `Repository::ref_store` to borrow the cached `RefStore` trait object, or `with_ref_store` to inject a custom backend (for example `MemoryRefStore` or the `custom_ref_store` example below). All of these work on the repository's store, so an injected store is always honoured.
 
+Ref names are [`RefName`](rustdoc:grit_lib::refs::store::RefName) values, validated when you build them: [`RefName::new`](rustdoc:grit_lib::refs::store::RefName::new) (or `TryFrom<&str>`, `str::parse`) accepts full names under `refs/`, `HEAD` and pseudo-refs such as `ORIG_HEAD`, and [`RefName::branch`](rustdoc:grit_lib::refs::store::RefName::branch) / [`RefName::tag`](rustdoc:grit_lib::refs::store::RefName::tag) build one from a short name. Plain strings do not convert implicitly, so a name from user input cannot reach the ref store (or the files under `.git`) unchecked. A failed check is `RefError::InvalidName`, so `?` works in functions returning `grit_lib::error::Result`. `RefNameRef::HEAD` is a ready-made `HEAD`.
+
 ```rust
+use grit_lib::refs::store::RefName;
 use grit_lib::state::HeadState;
 
 let refs = repo.references();
 if let HeadState::Branch { refname, oid: Some(tip), .. } = refs.head()? {
-    refs.update("refs/heads/backup", &tip)?;
+    refs.update(&RefName::new("refs/heads/backup")?, &tip)?;
     println!("{refname} is at {tip}");
 }
 for (name, oid) in refs.list_glob("refs/tags/v*")? {

@@ -257,7 +257,7 @@ fn porcelain_checkout_glob_and_branch_tracking() {
     );
     let head = grit_test_support::refs::at(git_dir.as_path())
         .references()
-        .resolve("HEAD")
+        .resolve(grit_lib::refs::store::RefNameRef::new("HEAD").expect("valid ref name"))
         .expect("head");
     let pushed = {
         let mut result = PushRefResult::new("refs/heads/main", PushRefStatus::Ok);
@@ -271,7 +271,10 @@ fn porcelain_checkout_glob_and_branch_tracking() {
     assert_eq!(
         grit_test_support::refs::at(git_dir.as_path())
             .references()
-            .resolve("refs/remotes/origin/main")
+            .resolve(
+                grit_lib::refs::store::RefNameRef::new("refs/remotes/origin/main")
+                    .expect("valid ref name")
+            )
             .ok(),
         Some(head)
     );
