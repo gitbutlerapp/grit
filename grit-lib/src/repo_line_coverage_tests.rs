@@ -255,7 +255,8 @@ fn discover_honors_git_dir_and_ceiling_env() -> crate::error::Result<()> {
     let mut opts = RepositoryOptions::empty();
     opts.environment = env.clone();
     let explicit = Repository::discover(None, &opts)?;
-    assert_eq!(explicit.git_dir(), git_dir);
+    // The opener canonicalizes the git dir (e.g. `/var` -> `/private/var` on macOS).
+    assert_eq!(canonical(explicit.git_dir()), canonical(&git_dir));
 
     let mut env_wt = env.clone();
     env_wt.git_work_tree = Some(dir.path().to_string_lossy().into_owned());

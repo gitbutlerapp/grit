@@ -168,15 +168,21 @@ fn clone_tty_banner_redacts_url_credentials() {
     let dest = base.path().join("tty-clone");
     let url = clone_url(remote.port);
     let grit = std::fs::canonicalize(GRIT).expect("grit path");
-    let out = Command::new("script")
-        .args(["-q", "-c"])
-        .arg(format!(
-            "env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null {} clone {} {}",
-            grit.display(),
-            url,
-            dest.display()
-        ))
-        .arg("/dev/null")
+    let shell_cmd = format!(
+        "env GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null {} clone {} {}",
+        grit.display(),
+        url,
+        dest.display()
+    );
+    let mut script = Command::new("script");
+    // util-linux `script` takes the command via `-c` before the transcript file; BSD/macOS
+    // `script` takes the transcript file followed by the command and its arguments.
+    if cfg!(target_os = "linux") {
+        script.args(["-q", "-c", &shell_cmd, "/dev/null"]);
+    } else {
+        script.args(["-q", "/dev/null", "sh", "-c", &shell_cmd]);
+    }
+    let out = script
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()

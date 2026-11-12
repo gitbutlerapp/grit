@@ -7079,8 +7079,17 @@ mod tests {
         ];
         checkout_tree_changes(&repo, &changes).expect("apply delete+add");
 
-        assert!(
-            !wt.join("Foo").exists(),
+        // Compare directory entry spellings: on a case-insensitive volume `Foo` and `foo`
+        // name the same entry, so `exists()` cannot tell which spelling is on disk.
+        let top_level: Vec<String> = fs::read_dir(wt)
+            .expect("read work tree")
+            .filter_map(|e| e.ok())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|name| name != ".git")
+            .collect();
+        assert_eq!(
+            top_level,
+            vec!["foo".to_owned()],
             "emptied old-case directory must be removed before creating the new spelling"
         );
         assert!(

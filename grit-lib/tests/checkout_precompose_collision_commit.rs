@@ -22,6 +22,14 @@ fn enable_precompose(repo: &Repository, root: &Path) {
     repo.reload_config().expect("reload");
 }
 
+/// Whether this volume resolves NFC and NFD spellings to one file (APFS, HFS+).
+///
+/// There checkout leaves a single dentry for the collision group; elsewhere both
+/// spellings are written as separate files.
+fn aliases_nfc_and_nfd(dir: &Path) -> bool {
+    grit_lib::test_support::fs_probe::is_normalization_insensitive(dir)
+}
+
 fn build_nfc_nfd_collision_tree(repo: &Repository) -> grit_lib::objects::ObjectId {
     let wt = repo.work_tree().expect("worktree");
     let nfc = "caf\u{00e9}.txt";
@@ -183,14 +191,25 @@ fn collision_loser_auto_stage_commit_is_noop_for_nfc() {
             &CancelToken::never(),
         )
         .expect_err("auto-stage must not commit phantom loser changes");
-    assert!(
-        matches!(
-            err,
-            Error::Commit(CommitError::NothingStagedToCommit { .. })
-                | Error::Commit(CommitError::NothingToCommit)
-        ),
-        "{err:?}"
-    );
+    if aliases_nfc_and_nfd(tmp.path()) {
+        // One shared dentry (APFS/HFS+): the loser holds its sibling's bytes, which is
+        // collision drift rather than a clean tree, as with case-only collisions.
+        match &err {
+            Error::Commit(CommitError::WorktreeCaseCollision { paths }) => {
+                assert_eq!(paths, &[nfd.to_owned(), nfc.to_owned()], "{err:?}");
+            }
+            other => panic!("expected WorktreeCaseCollision, got {other:?}"),
+        }
+    } else {
+        assert!(
+            matches!(
+                err,
+                Error::Commit(CommitError::NothingStagedToCommit { .. })
+                    | Error::Commit(CommitError::NothingToCommit)
+            ),
+            "{err:?}"
+        );
+    }
 
     assert_eq!(
         repo.references()
@@ -231,10 +250,21 @@ fn nfc_collision_loser_omitted_from_status_unstaged() {
             &CancelToken::never(),
         )
         .expect("status");
+    let nfc = "caf\u{00e9}.txt";
     let nfd = "cafe\u{0301}.txt";
+    let unstaged: Vec<&str> = model.unstaged.iter().map(|e| e.path()).collect();
     assert!(
-        !model.unstaged.iter().any(|e| e.path() == nfd),
-        "collision loser must not appear as unstaged: {:?}",
-        model.unstaged.iter().map(|e| e.path()).collect::<Vec<_>>()
+        !unstaged.contains(&nfc),
+        "dentry winner must not appear as unstaged: {unstaged:?}"
     );
+    if aliases_nfc_and_nfd(tmp.path()) {
+        // Both spellings open the one file holding the winner's bytes, so the loser's index
+        // row really differs from the work tree; `git status` lists it as modified too.
+        assert_eq!(unstaged, vec![nfd], "loser with sibling bytes is unstaged");
+    } else {
+        assert!(
+            !unstaged.contains(&nfd),
+            "collision loser must not appear as unstaged: {unstaged:?}"
+        );
+    }
 }

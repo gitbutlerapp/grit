@@ -364,6 +364,9 @@ pub(crate) enum ConcurrentStdinFeed<'a> {
 
 impl RunningCommand {
     /// Build a handle from a spawned OS child and taken stdio pipes.
+    ///
+    /// On Apple targets `stdin` is switched to fail with `EPIPE` instead of raising
+    /// `SIGPIPE` when the child exits without reading it (see `crate::sigpipe`).
     #[must_use]
     pub fn from_system(
         child: Child,
@@ -372,6 +375,7 @@ impl RunningCommand {
         stderr: Option<ChildStderr>,
         kill_process_group: bool,
     ) -> Self {
+        disable_sigpipe_on_stdin(stdin.as_ref());
         Self {
             inner: RunningCommandInner::System {
                 child,
@@ -613,6 +617,19 @@ impl RunningCommand {
             RunningCommandInner::Recording { .. } => Err(CommandHandleError),
         }
     }
+}
+
+/// Best-effort per-descriptor `SIGPIPE` suppression for a child's stdin pipe.
+///
+/// A failure leaves the pipe as it was; writers still get the thread-mask protection
+/// of `crate::sigpipe`, so the error is not worth failing the spawn for.
+fn disable_sigpipe_on_stdin(stdin: Option<&ChildStdin>) {
+    #[cfg(unix)]
+    if let Some(stdin) = stdin {
+        let _ = crate::sigpipe::disable_on_pipe(stdin);
+    }
+    #[cfg(not(unix))]
+    let _ = stdin;
 }
 
 fn write_stdin_feed(feed: ConcurrentStdinFeed<'_>, stdin: &mut dyn Write) {
@@ -941,6 +958,7 @@ impl SystemCommandRunner {
         let mut child = cmd.spawn()?;
 
         let mut stdin = child.stdin.take();
+        disable_sigpipe_on_stdin(stdin.as_ref());
         if let CommandStdin::Pipe(ref bytes) = spec.stdin {
             if let Some(ref mut stdin_handle) = stdin {
                 if !bytes.is_empty() {

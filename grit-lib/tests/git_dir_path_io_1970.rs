@@ -309,12 +309,15 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
         )
         .expect("stage");
 
+    // Entry paths are comparison keys (on macOS `/private/var` is listed as `/var`), so
+    // compare resolved paths rather than spellings.
+    let linked_real = linked_wt.canonicalize().expect("canonical linked worktree");
     let admin = repo
         .worktrees()
         .list()
         .expect("list")
         .into_iter()
-        .find(|e| e.path == linked_wt.canonicalize().unwrap_or(linked_wt.clone()))
+        .find(|e| e.path.canonicalize().is_ok_and(|p| p == linked_real))
         .expect("linked entry")
         .admin_dir;
     chmod_dir_readonly(&admin);

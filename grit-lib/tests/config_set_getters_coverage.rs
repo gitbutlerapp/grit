@@ -70,7 +70,13 @@ fn bool_or_and_core_bool_accessors_read_repo_config() {
     )
     .expect("load");
     assert!(defaults.preload_index());
-    assert!(!defaults.precompose_unicode());
+    // Init records core.precomposeunicode only on volumes that alias NFC and NFD
+    // spellings (APFS/HFS+), like `git init`; elsewhere the accessor defaults to false.
+    assert_eq!(
+        defaults.precompose_unicode(),
+        grit_lib::test_support::fs_probe::is_normalization_insensitive(dir.path())
+    );
+    assert!(!ConfigSet::new().precompose_unicode());
     assert!(support::config_bool_with_default(
         &defaults,
         "grit.missing",

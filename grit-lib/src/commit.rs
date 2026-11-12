@@ -176,8 +176,8 @@ pub fn parse_trailer_command_line_arg(raw: &str) -> Result<(String, String), Tra
 /// Git's stored `<epoch> <±HHMM>` form.
 ///
 /// Canonical raw timestamps pass through unchanged. Other strings are parsed with the
-/// same rules as Git's `parse_date` (invalid zone tokens such as `garbage` become
-/// `+0000`, matching `git commit --date`).
+/// same rules as Git's `parse_date`: an invalid zone token such as `garbage` is ignored and
+/// the process's local time zone supplies the offset, matching `git commit --date`.
 ///
 /// # Errors
 ///
@@ -339,15 +339,26 @@ mod tests {
         assert_eq!(v, "value");
     }
 
+    /// `<epoch> ±HHMM` using the machine's local zone at `epoch`, which is what Git (and
+    /// grit) fall back to when a date override carries no usable zone.
+    fn epoch_with_local_offset(epoch: u64) -> String {
+        let hhmm = crate::git_date::tm::local_tzoffset(epoch);
+        let sign = if hhmm < 0 { '-' } else { '+' };
+        format!("{epoch} {sign}{:04}", hhmm.unsigned_abs())
+    }
+
     #[test]
     fn normalize_commit_date_override_rejects_invalid_tz_suffix() {
+        // An unparsable zone token is ignored and the local zone applies, as with
+        // `GIT_AUTHOR_DATE="946684800 garbage" git var GIT_AUTHOR_IDENT`.
+        let expected = epoch_with_local_offset(946_684_800);
         assert_eq!(
             normalize_commit_date_override("946684800 garbage").unwrap(),
-            "946684800 +0000"
+            expected
         );
         assert_eq!(
             normalize_commit_date_override("@946684800 garbage").unwrap(),
-            "946684800 +0000"
+            expected
         );
         assert_eq!(
             normalize_commit_date_override("946684800 +0000").unwrap(),
@@ -368,7 +379,13 @@ mod tests {
             Some("946684800 garbage"),
             now,
         );
-        assert_eq!(line, "A U Thor <author@example.com> 946684800 +0000");
+        assert_eq!(
+            line,
+            format!(
+                "A U Thor <author@example.com> {}",
+                epoch_with_local_offset(946_684_800)
+            )
+        );
     }
 
     #[test]

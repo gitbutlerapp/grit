@@ -995,9 +995,16 @@ mod tests {
 
         let literal = Path::new(OsStr::from_bytes(b"grit+pathhex:6162"));
         let nested = Path::new(OsStr::from_bytes(b"dir/\xfe.txt"));
-        fs::create_dir_all(root.join("dir")).unwrap();
+        // APFS refuses non-UTF-8 names; the literal pathhex half still runs there.
+        let non_utf8 = crate::test_support::fs_probe::accepts_non_utf8_names(root);
+        if !non_utf8 {
+            eprintln!("skipping non-UTF-8 path: filesystem rejects non-UTF-8 file names");
+        }
         fs::write(root.join(literal), b"lit\n").unwrap();
-        fs::write(root.join(nested), b"nested\n").unwrap();
+        if non_utf8 {
+            fs::create_dir_all(root.join("dir")).unwrap();
+            fs::write(root.join(nested), b"nested\n").unwrap();
+        }
 
         let repo =
             Repository::discover(Some(root), &crate::environment::RepositoryOptions::empty())
@@ -1012,8 +1019,10 @@ mod tests {
         .unwrap();
 
         fs::remove_file(root.join(literal)).unwrap();
-        fs::remove_file(root.join(nested)).unwrap();
-        let _ = fs::remove_dir(root.join("dir"));
+        if non_utf8 {
+            fs::remove_file(root.join(nested)).unwrap();
+            let _ = fs::remove_dir(root.join("dir"));
+        }
 
         restore_workspace_snapshot(
             &repo,
@@ -1025,7 +1034,9 @@ mod tests {
         .unwrap();
 
         assert_eq!(fs::read(root.join(literal)).unwrap(), b"lit\n");
-        assert_eq!(fs::read(root.join(nested)).unwrap(), b"nested\n");
+        if non_utf8 {
+            assert_eq!(fs::read(root.join(nested)).unwrap(), b"nested\n");
+        }
         let pathhex_count = fs::read_dir(root)
             .unwrap()
             .filter_map(|e| e.ok())

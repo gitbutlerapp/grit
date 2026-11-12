@@ -209,13 +209,17 @@ fn switch_path_collisions(repo: &Repository, index: &Index) -> Result<Vec<String
     })
 }
 
-/// [`switch_path_collisions`] of the index on disk, read (and sparse-expanded) only when the
-/// repository uses worktree path collision rules.
+/// [`switch_path_collisions`] of the index on disk, read only when the repository uses
+/// worktree path collision rules.
+///
+/// Sparse-directory placeholders stay collapsed: everything under them is skip-worktree and
+/// has no worktree slot to collide in, and expanding them would read trees the sparse
+/// checkout never needs (and may not have, e.g. in a partial clone).
 fn switch_path_collisions_on_disk(repo: &Repository) -> Result<Vec<String>> {
     if !worktree_path_collision_options(repo)?.active() {
         return Ok(Vec::new());
     }
-    switch_path_collisions(repo, &repo.load_index()?)
+    switch_path_collisions(repo, &repo.load_index_preserving_sparse()?)
 }
 
 fn worktree_path_collision_options(
@@ -602,7 +606,8 @@ fn switch_without_hooks(
         && is_already_on_branch(repo, &branch_ref, target_oid)?
         && repo.index_path_for_env()?.try_exists()?
     {
-        let index = repo.load_index()?;
+        // Only collision detection reads this index; see `switch_path_collisions_on_disk`.
+        let index = repo.load_index_preserving_sparse()?;
         if opts.dry_run {
             let collisions = switch_path_collisions(repo, &index)?;
             return Ok(
@@ -628,7 +633,8 @@ fn switch_without_hooks(
         && is_already_detached_at(repo, target_oid)?
         && repo.index_path_for_env()?.try_exists()?
     {
-        let index = repo.load_index()?;
+        // Only collision detection reads this index; see `switch_path_collisions_on_disk`.
+        let index = repo.load_index_preserving_sparse()?;
         let collisions = switch_path_collisions(repo, &index)?;
         return Ok(SwitchOutcome::new(
             &branch_label,

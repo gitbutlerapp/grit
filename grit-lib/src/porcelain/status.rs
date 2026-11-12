@@ -3988,10 +3988,28 @@ mod status_op_tests {
     fn untracked_listing_drops_only_tracked_files() {
         let tmp = TempDir::new().unwrap();
         let dir = tmp.path().join("sub");
-        for name in ["z.txt", "a.txt", "both.txt", "new.txt", "A.TXT"] {
+        // `A.TXT` must be a separate entry from the tracked `a.txt`; a case-insensitive
+        // volume (default APFS) cannot hold both, so the case-variant check is skipped there.
+        let case_variant = !crate::test_support::fs_probe::is_case_insensitive(tmp.path());
+        if !case_variant {
+            eprintln!("skipping A.TXT case-variant entry: case-insensitive filesystem");
+        }
+        let names: &[&str] = if case_variant {
+            &["z.txt", "a.txt", "both.txt", "new.txt", "A.TXT"]
+        } else {
+            &["z.txt", "a.txt", "both.txt", "new.txt"]
+        };
+        for name in names {
             fs::create_dir_all(&dir).unwrap();
             fs::write(dir.join(name), name).unwrap();
         }
+        let with_variant = |names: &[&'static str]| -> Vec<&'static str> {
+            names
+                .iter()
+                .copied()
+                .filter(|name| case_variant || *name != "A.TXT")
+                .collect()
+        };
         fs::create_dir_all(dir.join("tracked-dir")).unwrap();
         fs::create_dir_all(dir.join(".git")).unwrap();
         let mut index = Index::new();
@@ -4010,7 +4028,7 @@ mod status_op_tests {
             untracked_candidates_sorted(fs::read_dir(&dir).unwrap(), &index, "sub", false);
         assert_eq!(
             listing_names(&listing),
-            vec![".git", "A.TXT", "new.txt", "tracked-dir"],
+            with_variant(&[".git", "A.TXT", "new.txt", "tracked-dir"]),
             "tracked files (any stage) are dropped; directories, case variants and \
              untracked files stay, ordered by name bytes"
         );
@@ -4021,7 +4039,7 @@ mod status_op_tests {
             untracked_candidates_sorted(fs::read_dir(&dir).unwrap(), &index, "sub", false);
         assert_eq!(
             listing_names(&unsorted),
-            vec![
+            with_variant(&[
                 ".git",
                 "A.TXT",
                 "a.txt",
@@ -4029,7 +4047,7 @@ mod status_op_tests {
                 "new.txt",
                 "tracked-dir",
                 "z.txt"
-            ],
+            ]),
             "an index not known to be sorted keeps every entry for the full check"
         );
     }
@@ -4040,6 +4058,10 @@ mod status_op_tests {
         use std::os::unix::ffi::OsStrExt;
 
         let tmp = TempDir::new().unwrap();
+        if !crate::test_support::fs_probe::accepts_non_utf8_names(tmp.path()) {
+            eprintln!("skipping: filesystem rejects non-UTF-8 file names");
+            return;
+        }
         let raw_dir: &[u8] = b"raw-\xff";
         let dir = tmp.path().join(std::ffi::OsStr::from_bytes(raw_dir));
         fs::create_dir_all(&dir).unwrap();

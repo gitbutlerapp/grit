@@ -20,6 +20,10 @@ fn run_grit(dir: &Path, args: &[&str]) -> String {
         .args(args)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_AUTHOR_NAME", "A U Thor")
+        .env("GIT_AUTHOR_EMAIL", "author@example.com")
+        .env("GIT_COMMITTER_NAME", "C O Mitter")
+        .env("GIT_COMMITTER_EMAIL", "committer@example.com")
         .output()
         .expect("spawn grit");
     assert!(

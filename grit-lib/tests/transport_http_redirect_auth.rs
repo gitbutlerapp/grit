@@ -119,6 +119,8 @@ fn spawn_cross_origin_redirect(listen_port: u16, target_port: u16) -> RedirectGu
         while !stop_thread.load(Ordering::SeqCst) {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    // BSD sockets inherit O_NONBLOCK from the listener.
+                    stream.set_nonblocking(false).ok();
                     let _ = handle_redirect_request(&mut stream, target_port);
                 }
                 Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {

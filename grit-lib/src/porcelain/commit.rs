@@ -3600,6 +3600,10 @@ mod tests {
 
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();
+        if !crate::test_support::fs_probe::accepts_non_utf8_names(root) {
+            eprintln!("skipping: filesystem rejects non-UTF-8 file names");
+            return;
+        }
         let repo = init_repo(root);
         fs::create_dir(root.join("dir")).unwrap();
         fs::write(raw(root, b"dir/keep\xff"), b"keep\n").unwrap();

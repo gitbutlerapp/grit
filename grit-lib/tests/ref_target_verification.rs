@@ -765,6 +765,20 @@ fn allowing_failures_prepare_rename_only_commits_case_only_rename() {
         .expect("prepare rename-only allowing_failures");
     assert!(prepared.rejected_updates().is_empty());
     prepared.commit().expect("commit");
-    assert_eq!(fx.raw("refs/heads/topic"), None);
     assert_eq!(fx.raw("refs/heads/Topic"), Some(RawRef::Direct(fx.commit)));
+    // The loose ref file carries the new spelling on every filesystem.
+    let heads: Vec<String> = std::fs::read_dir(fx.repo.git_dir().join("refs/heads"))
+        .expect("read refs/heads")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.eq_ignore_ascii_case("topic"))
+        .collect();
+    assert_eq!(heads, vec!["Topic".to_owned()]);
+    // A case-insensitive volume (default APFS) still resolves the old spelling to the
+    // renamed file, as Git does there; only a case-sensitive one can show it is gone.
+    if grit_lib::test_support::fs_probe::is_case_insensitive(fx.repo.git_dir()) {
+        eprintln!("skipping old-spelling lookup: case-insensitive filesystem");
+    } else {
+        assert_eq!(fx.raw("refs/heads/topic"), None);
+    }
 }

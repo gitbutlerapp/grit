@@ -1421,10 +1421,22 @@ mod tests {
         for oid in [tree_c1, tree_c2] {
             fs::remove_file(loose_object_path(&repo, &oid)).expect("drop c tree");
         }
+        // Worktree path collision checks (on by default on case-insensitive filesystems such
+        // as macOS) must not expand the sparse index either.
+        let config_path = repo.git_dir().join("config");
+        let mut config = fs::read_to_string(&config_path).expect("config");
+        config.push_str("[core]\n\tignorecase = true\n");
+        fs::write(&config_path, config).expect("write config");
         drop(repo);
         let repo =
             Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("reopen");
-        for (commit, tree, c_tree) in [(c1, t1, tree_c1), (c2, t2, tree_c2), (c1, t1, tree_c1)] {
+        // The last switch is a no-op (already detached there).
+        for (commit, tree, c_tree) in [
+            (c1, t1, tree_c1),
+            (c2, t2, tree_c2),
+            (c1, t1, tree_c1),
+            (c1, t1, tree_c1),
+        ] {
             switch_repository(
                 &repo,
                 &SwitchOptions {

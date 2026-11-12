@@ -42,12 +42,25 @@ mod imp {
         }
     }
 
+    /// Apple's `REG_ENHANCED` (`<regex.h>`), absent from the `libc` crate.
+    ///
+    /// Apple libc only understands the GNU-style BRE escapes (`\+`, `\?`, `\|`, `\<`, …)
+    /// when this flag is set. Git's Darwin build sets it for every basic regex
+    /// (`USE_ENHANCED_BASIC_REGULAR_EXPRESSIONS`), so `git log -L '/a\+/'` on macOS
+    /// treats `\+` as "one or more" exactly as glibc does. Passing it here keeps BRE
+    /// semantics identical across glibc and Apple targets.
+    #[cfg(target_vendor = "apple")]
+    const BRE_PLATFORM_CFLAGS: libc::c_int = 0o400;
+    #[cfg(not(target_vendor = "apple"))]
+    const BRE_PLATFORM_CFLAGS: libc::c_int = 0;
+
     impl PosixBre {
         pub(crate) fn compile(pattern: &str) -> Result<Self, String> {
             let c_pat = CString::new(pattern)
                 .map_err(|_| "pattern contains an interior NUL byte".to_owned())?;
             let mut re: regex_t = unsafe { std::mem::zeroed() };
-            let rc = unsafe { regcomp(&mut re, c_pat.as_ptr(), REG_NEWLINE) };
+            let cflags = REG_NEWLINE | BRE_PLATFORM_CFLAGS;
+            let rc = unsafe { regcomp(&mut re, c_pat.as_ptr(), cflags) };
             if rc != 0 {
                 return Err(regcomp_error_message(&re, rc));
             }
@@ -117,21 +130,38 @@ mod imp {
         }
     }
 
+    /// Whether a scan starting at `from` begins mid-line, so `^` must not match there.
+    ///
+    /// Patterns are compiled with `REG_NEWLINE`, so `^` matches at the start of the
+    /// buffer and right after every `\n`, and nowhere else.
+    fn starts_mid_line(haystack: &[u8], from: usize) -> bool {
+        from > 0 && haystack.get(from - 1) != Some(&b'\n')
+    }
+
     /// Length-bounded search from `from` using `REG_STARTEND` (glibc, BSD, …).
+    ///
+    /// glibc derives the context at `rm_so` from the preceding byte, but Apple and the
+    /// BSDs treat `string + rm_so` as the beginning of the line unless `REG_NOTBOL` is
+    /// given. Passing `REG_NOTBOL` whenever the scan starts mid-line makes `^` behave
+    /// the same on every libc (glibc ignores the flag for non-zero `rm_so`).
     #[cfg(not(target_env = "musl"))]
     fn regexec_from(re: &regex_t, haystack: &[u8], from: usize) -> Option<(usize, usize)> {
-        use libc::REG_STARTEND;
+        use libc::{REG_NOTBOL, REG_STARTEND};
 
+        let mut eflags = REG_STARTEND;
+        if starts_mid_line(haystack, from) {
+            eflags |= REG_NOTBOL;
+        }
         let mut pmatch = regmatch_t { rm_so: 0, rm_eo: 0 };
         pmatch.rm_so = from as _;
         pmatch.rm_eo = haystack.len() as _;
-        let rc = unsafe { regexec(re, haystack.as_ptr().cast(), 1, &mut pmatch, REG_STARTEND) };
+        let rc = unsafe { regexec(re, haystack.as_ptr().cast(), 1, &mut pmatch, eflags) };
         decode_regexec(haystack.len(), rc, &pmatch)
     }
 
     /// musl's Rust `libc` bindings omit `REG_STARTEND`. Copy the suffix into a
-    /// NUL-terminated buffer and clear `REG_NOTBOL` only for the first scan so `^`
-    /// does not re-anchor on continuation offsets.
+    /// NUL-terminated buffer and set `REG_NOTBOL` when the suffix starts mid-line so
+    /// `^` does not re-anchor on continuation offsets.
     #[cfg(target_env = "musl")]
     fn regexec_from(re: &regex_t, haystack: &[u8], from: usize) -> Option<(usize, usize)> {
         const REG_NOTBOL: i32 = 1;
@@ -142,7 +172,7 @@ mod imp {
         nul_terminated.push(0);
 
         let mut eflags = 0;
-        if from > 0 {
+        if starts_mid_line(haystack, from) {
             eflags |= REG_NOTBOL;
         }
 
@@ -202,6 +232,21 @@ mod imp {
             let re = PosixEre::compile("a|^b", false).expect("compile");
             assert_eq!(re.find_from(b"ab", 0), Some((0, 1)));
             assert_eq!(re.find_from(b"ab", 1), None);
+        }
+
+        #[test]
+        fn anchored_branch_matches_at_continuation_offset_after_newline() {
+            let re = PosixEre::compile("^b", false).expect("compile");
+            assert_eq!(re.find_from(b"a\nb", 2), Some((2, 3)));
+            assert_eq!(re.count_nonoverlapping(b"b\nb\nab"), 2);
+        }
+
+        #[test]
+        fn bre_plus_escape_is_one_or_more_on_every_libc() {
+            let re = PosixBre::compile("a\\+").expect("compile");
+            assert_eq!(re.find_from(b"xaaa", 0), Some((1, 4)));
+            let literal = PosixBre::compile("a+").expect("compile");
+            assert_eq!(literal.find_from(b"aaa a+", 0), Some((4, 6)));
         }
 
         #[test]

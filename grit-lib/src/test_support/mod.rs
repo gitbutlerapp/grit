@@ -59,3 +59,7 @@ pub mod refs;
 /// Worktree admin helpers not exposed on [`crate::repo_handles::RepositoryWorktrees`].
 #[cfg(any(test, feature = "test-support"))]
 pub mod worktree;
+
+/// Runtime probes for filesystem behavior (case folding, Unicode normalization,
+/// non-UTF-8 names) so tests can adapt to the host volume.
+pub mod fs_probe;

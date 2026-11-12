@@ -211,7 +211,13 @@ fn supporting_and_submodule_gitdir_sweep() -> grit_lib::error::Result<()> {
     };
 
     let dir = tempdir().map_err(grit_lib::error::Error::Io)?;
-    let (repo, _) = Repository::init(dir.path(), &InitOptions::default())?;
+    // The repository reports a canonical git dir (`/var` is `/private/var` on macOS), so use
+    // the canonical work tree too and keep the paths below comparable.
+    let root = dir
+        .path()
+        .canonicalize()
+        .map_err(grit_lib::error::Error::Io)?;
+    let (repo, _) = Repository::init(&root, &InitOptions::default())?;
     let git_dir = repo.git_dir();
     fs::write(
         git_dir.join("config"),
@@ -226,10 +232,10 @@ fn supporting_and_submodule_gitdir_sweep() -> grit_lib::error::Result<()> {
         ConfigScope::Local,
     )?;
     let mut cfg_mut = cfg.clone();
-    let gitdir_rel = ensure_submodule_gitdir_config(dir.path(), git_dir, &mut cfg_mut, "lib/foo")?;
+    let gitdir_rel = ensure_submodule_gitdir_config(&root, git_dir, &mut cfg_mut, "lib/foo")?;
     assert!(!gitdir_rel.is_empty());
-    let fs_path = submodule_gitdir_filesystem_path(dir.path(), git_dir, &cfg_mut, "lib/foo")?;
-    assert!(fs_path.exists() || fs_path.starts_with(dir.path()));
+    let fs_path = submodule_gitdir_filesystem_path(&root, git_dir, &cfg_mut, "lib/foo")?;
+    assert!(fs_path.exists() || fs_path.starts_with(&root));
     let mut set = ConfigSet::new();
     set.merge(&cfg_mut);
     let crlf = ConversionConfig::from_config(&set);

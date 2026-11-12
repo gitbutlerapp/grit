@@ -173,13 +173,14 @@ fn clone_absolute_path_prefix(env: &Environment) -> PathBuf {
     cwd
 }
 
-/// Cwd string for config storage: logical absolute [`Environment::cwd`] when set, otherwise discovery resolution.
+/// Physical working directory for config storage, as `getcwd` would report it.
+///
+/// [`Environment::cwd`] may be injected as a path through symlinks (on macOS the temp dir
+/// `/var/...` is really `/private/var/...`); a process sitting in that directory would see the
+/// resolved path, so Git stores that unless `$PWD` names the same directory (handled by
+/// [`clone_absolute_path_prefix`]).
 fn clone_prefix_cwd(env: &Environment) -> PathBuf {
-    if env.cwd.is_absolute() {
-        env.cwd.clone()
-    } else {
-        env.discovery_cwd()
-    }
+    env.discovery_cwd()
 }
 
 fn paths_differ(a: &Path, b: &Path) -> bool {

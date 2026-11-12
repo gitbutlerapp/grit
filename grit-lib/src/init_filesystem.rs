@@ -340,12 +340,29 @@ mod tests {
     use tempfile::TempDir;
 
     #[test]
-    fn case_insensitive_detection_false_on_normal_fs() {
+    fn case_insensitive_detection_matches_the_volume() {
         let td = TempDir::new().expect("tempdir");
         let git_dir = td.path().join(".git");
         fs::create_dir_all(&git_dir).expect("mkdir");
         fs::write(git_dir.join("config"), "[core]\n").expect("config");
-        assert!(!FilesystemCapabilities::detect_case_insensitive(&git_dir).expect("detect"));
+        // False on case-sensitive volumes (Linux), true on default APFS/NTFS.
+        let expected = crate::test_support::fs_probe::is_case_insensitive(td.path());
+        assert_eq!(
+            FilesystemCapabilities::detect_case_insensitive(&git_dir).expect("detect"),
+            expected
+        );
+    }
+
+    #[test]
+    fn precompose_detection_matches_the_volume() {
+        let td = TempDir::new().expect("tempdir");
+        let git_dir = td.path().join(".git");
+        fs::create_dir_all(&git_dir).expect("mkdir");
+        let expected = crate::test_support::fs_probe::is_normalization_insensitive(td.path());
+        assert_eq!(
+            FilesystemCapabilities::detect_precomposes_unicode(&git_dir).expect("detect"),
+            expected
+        );
     }
 
     #[test]

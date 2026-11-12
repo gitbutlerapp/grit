@@ -2161,6 +2161,10 @@ mod tests {
 
         let (_dir, repo) = init_repo();
         let wt = repo.work_tree().unwrap();
+        if !crate::test_support::fs_probe::accepts_non_utf8_names(wt) {
+            eprintln!("skipping: filesystem rejects non-UTF-8 file names");
+            return;
+        }
         let rel = b"\xff";
         let abs = wt.join(OsStr::from_bytes(rel));
         fs::write(&abs, b"v1").unwrap();

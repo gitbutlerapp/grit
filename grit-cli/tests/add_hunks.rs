@@ -18,6 +18,10 @@ fn run_grit(grit: &str, dir: &std::path::Path, args: &[&str]) -> std::process::O
         .args(args)
         .env("GIT_CONFIG_GLOBAL", null_config())
         .env("GIT_CONFIG_SYSTEM", null_config())
+        .env("GIT_AUTHOR_NAME", "A U Thor")
+        .env("GIT_AUTHOR_EMAIL", "author@example.com")
+        .env("GIT_COMMITTER_NAME", "C O Mitter")
+        .env("GIT_COMMITTER_EMAIL", "committer@example.com")
         .output()
         .expect("run grit")
 }

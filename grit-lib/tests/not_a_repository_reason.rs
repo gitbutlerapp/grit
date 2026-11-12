@@ -25,10 +25,12 @@ fn reason(err: Error) -> NotARepositoryReason {
 #[test]
 fn gitfile_without_gitdir_line_is_missing_gitdir() {
     let td = TempDir::new().expect("tempdir");
-    let dot_git = td.path().join(".git");
+    // Discovery reports canonical paths (`/var` is `/private/var` on macOS).
+    let root = td.path().canonicalize().expect("canonical tempdir");
+    let dot_git = root.join(".git");
     fs::write(&dot_git, "not a gitdir line\n").expect("write");
 
-    let err = discover(td.path()).expect_err("invalid gitfile");
+    let err = discover(&root).expect_err("invalid gitfile");
     assert_eq!(
         err.to_string(),
         "not a git repository (or any of the parent directories): invalid gitfile format"
@@ -126,9 +128,11 @@ fn special_file_dot_git_is_not_a_regular_file() {
     use std::os::unix::net::UnixListener;
 
     let td = TempDir::new().expect("tempdir");
-    let sub = td.path().join("sub");
+    // Discovery reports canonical paths (`/var` is `/private/var` on macOS).
+    let root = td.path().canonicalize().expect("canonical tempdir");
+    let sub = root.join("sub");
     fs::create_dir(&sub).expect("mkdir");
-    let dot_git = td.path().join(".git");
+    let dot_git = root.join(".git");
     let _socket = UnixListener::bind(&dot_git).expect("bind socket");
 
     let err = discover(&sub).expect_err("socket .git");
@@ -142,7 +146,7 @@ fn special_file_dot_git_is_not_a_regular_file() {
         NotARepositoryReason::GitfileNotRegularFile { .. }
     ));
 
-    let linked = td.path().join("linked");
+    let linked = root.join("linked");
     fs::create_dir(&linked).expect("mkdir");
     std::os::unix::fs::symlink(&dot_git, linked.join(".git")).expect("symlink");
     match reason(discover(&linked).expect_err("symlink to socket")) {

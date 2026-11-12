@@ -64,6 +64,8 @@ fn spawn_slow_info_refs_server(body: Vec<u8>) -> (u16, Arc<AtomicUsize>) {
                 thread::sleep(Duration::from_millis(10));
                 continue;
             };
+            // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+            stream.set_nonblocking(false).ok();
             let n = requests_server.fetch_add(1, Ordering::SeqCst) + 1;
             if n > 1 {
                 stream
@@ -124,6 +126,8 @@ fn discover_cancels_while_info_refs_stalls() {
                     thread::sleep(Duration::from_millis(10));
                     continue;
                 };
+                // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+                stream.set_nonblocking(false).ok();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
                 let stop_conn = Arc::clone(&stop_server);
                 thread::spawn(move || {
@@ -222,6 +226,8 @@ fn discover_cancels_with_deadline_cancel_without_shared_watch() {
                         thread::sleep(Duration::from_millis(10));
                         continue;
                     };
+                    // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+                    stream.set_nonblocking(false).ok();
                     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
                     let stop_conn = Arc::clone(&stop_server);
                     thread::spawn(move || {
@@ -288,6 +294,8 @@ fn remote_fetch_cancels_during_stalled_discovery_without_shared_watch() {
                         thread::sleep(Duration::from_millis(10));
                         continue;
                     };
+                    // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+                    stream.set_nonblocking(false).ok();
                     stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
                     let stop_conn = Arc::clone(&stop_server);
                     thread::spawn(move || {
@@ -423,6 +431,8 @@ fn remote_fetch_cancels_during_stalled_upload_pack_post_without_shared_watch() {
                         thread::sleep(Duration::from_millis(10));
                         continue;
                     };
+                    // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+                    stream.set_nonblocking(false).ok();
                     let ad = ad.clone();
                     let stop_conn = Arc::clone(&stop_server);
                     thread::spawn(move || handle_upload_pack_stall_server(stream, ad, stop_conn));
@@ -480,6 +490,8 @@ fn stateless_upload_pack_post_wait_cancels_without_full_fetch() {
                         thread::sleep(Duration::from_millis(10));
                         continue;
                     };
+                    // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+                    stream.set_nonblocking(false).ok();
                     let ad = ad.clone();
                     let stop_conn = Arc::clone(&stop_server);
                     thread::spawn(move || handle_upload_pack_stall_server(stream, ad, stop_conn));
@@ -542,6 +554,8 @@ fn clone_cancels_during_stalled_bundle_uri_probe() {
                     thread::sleep(Duration::from_millis(10));
                     continue;
                 };
+                // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+                stream.set_nonblocking(false).ok();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
                 let stop_conn = Arc::clone(&stop_server);
                 thread::spawn(move || {
@@ -607,6 +621,8 @@ fn clone_times_out_on_low_speed_stall_without_cancel() {
                     thread::sleep(Duration::from_millis(10));
                     continue;
                 };
+                // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+                stream.set_nonblocking(false).ok();
                 stream.set_read_timeout(Some(Duration::from_secs(5))).ok();
                 let stop_conn = Arc::clone(&stop_server);
                 thread::spawn(move || {
@@ -735,6 +751,8 @@ fn spawn_silent_stall_server(mode: SilentStallMode) -> (u16, Arc<AtomicBool>, Ar
                 thread::sleep(Duration::from_millis(10));
                 continue;
             };
+            // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+            stream.set_nonblocking(false).ok();
             connections_server.fetch_add(1, Ordering::SeqCst);
             thread::spawn(move || {
                 stream.set_read_timeout(Some(Duration::from_secs(30))).ok();

@@ -1901,6 +1901,8 @@ mod tests {
                 std::thread::sleep(Duration::from_millis(10));
                 continue;
             };
+            // BSD sockets inherit O_NONBLOCK from the listener; reads below rely on timeouts.
+            stream.set_nonblocking(false).ok();
             count.fetch_add(1, Ordering::Relaxed);
             serve_delayed_http(&mut stream, delay, status, body);
             return;
