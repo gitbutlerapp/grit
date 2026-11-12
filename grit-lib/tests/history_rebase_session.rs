@@ -947,7 +947,7 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
     use grit_lib::porcelain::pull::{pull, PullOptions};
     use grit_lib::porcelain::replay::ReplayDirection;
     use grit_lib::progress::NullProgress;
-    use grit_lib::remote::fetch::NoProgress;
+    use grit_lib::progress::NullProgress;
     use grit_test_support::start_replay_sequence;
 
     let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();

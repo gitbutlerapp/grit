@@ -2168,7 +2168,7 @@ eval "$cmd"
                 .fetch_from(
                     crate::transfer::TransferEndpoint::Connection(conn.as_mut()),
                     &mut fetch,
-                    &mut crate::fetch::NoProgress,
+                    &mut crate::progress::NullProgress,
                     &crate::progress::CancelToken::never(),
                 )
                 .expect_err("git refuses a want for an object it does not have");

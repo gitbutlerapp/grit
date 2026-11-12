@@ -145,43 +145,86 @@ impl<'repo> Maintenance<'repo> {
     /// Delete unreachable loose objects older than the cutoff in `opts` (`gc.pruneExpire`
     /// when unset).
     ///
+    /// `cancel` is polled before the reachability walk and between batches of deletions;
+    /// objects already deleted stay deleted (they were unreachable). No progress phases are
+    /// reported yet; `progress` is accepted for future use.
+    ///
     /// # Errors
     ///
-    /// Ref, reflog, index and I/O failures while collecting roots or deleting objects.
-    pub fn prune_loose_objects(&self, opts: &PruneOptions) -> Result<PruneStats> {
-        super::prune_loose_objects(self.repo, opts)
+    /// Ref, reflog, index and I/O failures while collecting roots or deleting objects, and
+    /// [`crate::error::Error::Cancelled`] when `cancel` fires.
+    pub fn prune_loose_objects(
+        &self,
+        opts: &PruneOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<PruneStats> {
+        super::prune_loose_objects(self.repo, opts, progress, cancel)
     }
 
     /// Build a reachable commit-graph in memory, for any object store.
     ///
+    /// The commit walk reports [`crate::progress::ProgressPhase::WalkingHistory`] through
+    /// `progress` and polls `cancel` every few hundred commits.
+    ///
     /// # Errors
     ///
-    /// Ref and object read failures while walking commits.
-    pub fn build_commit_graph(&self, opts: &CommitGraphOptions) -> Result<CommitGraphBuild> {
-        super::build_commit_graph(self.repo, opts)
+    /// Ref and object read failures while walking commits, and
+    /// [`crate::error::Error::Cancelled`] when `cancel` fires.
+    pub fn build_commit_graph(
+        &self,
+        opts: &CommitGraphOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<CommitGraphBuild> {
+        super::build_commit_graph(self.repo, opts, progress, cancel)
     }
 
     /// Write `objects/info/commit-graph` for every commit reachable from refs.
     ///
+    /// The commit walk reports [`crate::progress::ProgressPhase::WalkingHistory`] through
+    /// `progress`. `cancel` is polled during the walk and once more before the new graph
+    /// replaces the old one; a cancelled run leaves the existing graph in place.
+    ///
     /// # Errors
     ///
     /// [`crate::repo::RepositoryError::UnsupportedObjectStore`] without a files-backed
-    /// object store, plus walk and I/O failures.
-    pub fn write_commit_graph(&self, opts: &CommitGraphOptions) -> Result<CommitGraphWriteReport> {
-        super::write_commit_graph(self.repo, opts)
+    /// object store, walk and I/O failures, and [`crate::error::Error::Cancelled`] when
+    /// `cancel` fires.
+    pub fn write_commit_graph(
+        &self,
+        opts: &CommitGraphOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<CommitGraphWriteReport> {
+        super::write_commit_graph(self.repo, opts, progress, cancel)
     }
 
     /// Write or refresh the multi-pack-index for the pack directory.
     ///
+    /// `cancel` is polled before the index is built; once writing starts it runs to
+    /// completion, so the pack directory never holds a half-written index. No progress
+    /// phases are reported yet; `progress` is accepted for future use.
+    ///
     /// # Errors
     ///
     /// [`crate::repo::RepositoryError::UnsupportedObjectStore`] without a files-backed
-    /// object store, an invalid `midx.version`, and pack read and I/O failures.
-    pub fn write_midx(&self, opts: &MidxOptions) -> Result<MidxWriteReport> {
-        super::write_midx(self.repo, opts)
+    /// object store, an invalid `midx.version`, pack read and I/O failures, and
+    /// [`crate::error::Error::Cancelled`] when `cancel` fires.
+    pub fn write_midx(
+        &self,
+        opts: &MidxOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<MidxWriteReport> {
+        super::write_midx(self.repo, opts, progress, cancel)
     }
 
     /// Pack loose refs into `packed-refs` (files backend) or compact reftable stacks.
+    ///
+    /// Unlike the other maintenance steps this takes no progress sink or cancel token:
+    /// it rewrites one file (or one reftable stack) under a single lock, and stopping
+    /// half way would gain nothing over letting it finish.
     ///
     /// # Errors
     ///
@@ -193,25 +236,42 @@ impl<'repo> Maintenance<'repo> {
     /// Move blobs the filter in `opts` leaves out to a large-object promisor remote and drop
     /// them locally.
     ///
+    /// Copying the blobs into the large-object promisor's pack reports
+    /// [`crate::progress::ProgressPhase::IndexingObjects`] and
+    /// [`crate::progress::ProgressPhase::ResolvingDeltas`] through `progress`. `cancel` is
+    /// polled until the blobs are safely in the promisor; once this repository starts
+    /// dropping its copies the run completes.
+    ///
     /// # Errors
     ///
-    /// [`crate::error::ObjectError::Offload`] for the [`super::OffloadError`] cases, plus read,
-    /// write and config failures.
-    pub fn offload_blobs(&self, opts: &OffloadOptions) -> Result<OffloadReport> {
-        crate::offload::offload_blobs(self.repo, opts)
+    /// [`crate::error::ObjectError::Offload`] for the [`super::OffloadError`] cases, read,
+    /// write and config failures, and [`crate::error::Error::Cancelled`] when `cancel` fires.
+    pub fn offload_blobs(
+        &self,
+        opts: &OffloadOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<OffloadReport> {
+        crate::offload::offload_blobs(self.repo, opts, progress, cancel)
     }
 
     /// Drop large promised blobs that no recent checkout needed.
     ///
+    /// `cancel` is polled per promisor pack while scanning and before any pack is
+    /// rewritten; once rewriting starts the run completes. No progress phases are reported
+    /// yet; `progress` is accepted for future use.
+    ///
     /// # Errors
     ///
-    /// [`crate::repo::RepositoryError::MaintenanceRunning`] when `gc.pid` is held, plus read, write and
-    /// config failures.
+    /// [`crate::repo::RepositoryError::MaintenanceRunning`] when `gc.pid` is held, read, write
+    /// and config failures, and [`crate::error::Error::Cancelled`] when `cancel` fires.
     pub fn drop_promised_blobs(
         &self,
         opts: &DropPromisedBlobsOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<DropPromisedBlobsReport> {
-        super::drop_blobs::drop_promised_blobs(self.repo, opts)
+        super::drop_blobs::drop_promised_blobs(self.repo, opts, progress, cancel)
     }
 
     /// Object ids that must stay reachable during repack, prune and fsck walks: ref tips,

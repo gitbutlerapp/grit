@@ -110,7 +110,7 @@ fn fetch_heads(dest: &Path, url: &str) {
         .fetch(
             &repo,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -141,7 +141,7 @@ fn file_url_push_sends_only_objects_reachable_from_pushed_ref() {
                 .with_src(Some(main))
                 .with_dst("refs/heads/main".to_owned())],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -234,7 +234,7 @@ fn file_url_clone_matches_git_and_plain_path_clone_links_whole_store() {
     let clone = |url: String, dest: PathBuf| {
         clone_repo(
             CloneOptions::new(url, dest),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

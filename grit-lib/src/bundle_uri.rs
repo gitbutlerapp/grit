@@ -26,7 +26,6 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use crate::error::{Error, Result};
-use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line::{self, Packet};
 use crate::progress::{CancelToken, ProgressPhase, ProgressSink, ProgressUnit};
@@ -328,7 +327,7 @@ pub(crate) fn seed_from_bundle_uri(
     client: Arc<dyn HttpClient>,
     repo_url: &str,
     cache_dir: &Path,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> BundleSeed {
     if cancel.is_cancelled() {
@@ -371,7 +370,7 @@ fn seed_from(
     client: &dyn HttpClient,
     uri: &str,
     cache_dir: &Path,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<SeededBundle> {
     let shared_dest = bundle_cache_path(cache_dir, uri);
@@ -436,7 +435,7 @@ fn seed_from(
 
 /// Forwards progress except the [`ProgressPhase::ReceivingObjects`] phase.
 struct WithoutReceiving<'a> {
-    inner: &'a mut dyn Progress,
+    inner: &'a mut dyn ProgressSink,
     muted: bool,
 }
 
@@ -570,7 +569,7 @@ mod tests {
         use std::path::PathBuf;
 
         use crate::config::environment::RepositoryOptions;
-        use crate::fetch::NoProgress;
+        use crate::progress::NullProgress;
         use crate::repo::{InitOptions, Repository};
         use crate::transport::http::{HttpClient, HttpRequest, HttpResponse};
 
@@ -630,7 +629,7 @@ mod tests {
             url: url.clone(),
             data,
         };
-        let mut progress = NoProgress;
+        let mut progress = NullProgress;
         let seeded = seed_from(
             &repo,
             &client,

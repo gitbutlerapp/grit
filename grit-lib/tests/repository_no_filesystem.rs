@@ -21,7 +21,6 @@ use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::{parse_tree, HashAlgo, NewCommit, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::Remote;
 use grit_lib::repo::{InitOptions, Repository};
@@ -435,7 +434,13 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
     fetch.refspecs = vec!["+refs/heads/*:refs/remotes/upstream/*".to_owned()];
     let fetched = repo
         .remotes()
-        .fetch(&remote, fetch, &mut NoProgress, &CancelToken::never(), None)
+        .fetch(
+            &remote,
+            fetch,
+            &mut NullProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("fetch");
     assert_eq!(fetched.branch_count(), 1);
     assert!(objects.contains(&upstream_tip).expect("contains fetched"));

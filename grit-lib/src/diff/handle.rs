@@ -175,15 +175,23 @@ impl<'repo> Diff<'repo> {
     /// [`TreeDiffOptions::refresh_index_stat`] unchanged entries adopt fresh stat data in
     /// `index`; nothing is written to disk.
     ///
+    /// `cancel` is polled throughout the work-tree scan (every few hundred entries) and
+    /// before rename pairing. No progress phases are reported yet; `progress` is accepted
+    /// for future use.
+    ///
     /// # Errors
     ///
-    /// Returns [`RepositoryError::RequiresWorkTree`] in a bare repository, and work-tree I/O,
-    /// ODB, pathspec and rename detection errors.
+    /// Returns [`RepositoryError::RequiresWorkTree`] in a bare repository, work-tree I/O,
+    /// ODB, pathspec and rename detection errors, and [`crate::error::Error::Cancelled`] when
+    /// `cancel` fires.
     pub fn index_to_worktree(
         &self,
         index: &mut Index,
         options: &TreeDiffOptions,
+        progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &crate::progress::CancelToken,
     ) -> Result<DiffEntriesResult> {
+        crate::progress::poll_cancel(progress, cancel)?;
         let work_tree = self.work_tree()?;
         let config = self.repo.config().snapshot()?;
         let restrict_to_paths = crate::diff::changes::pathspec_restrict_paths_for_scan(
@@ -208,10 +216,12 @@ impl<'repo> Diff<'repo> {
             refresh_fsmonitor: restrict_to_paths.is_none(),
             command_runner: Some(self.repo.command_runner()),
             restrict_to_paths,
+            cancel: Some(cancel.clone()),
             ..DiffIndexToWorktreeOptions::default()
         };
         let (mut entries, index_stat_refreshed) =
             diff_index_to_worktree_with_options(self.repo.odb(), index, work_tree, scan)?;
+        crate::progress::poll_cancel(progress, cancel)?;
         self.retain_pathspec(&mut entries, options)?;
         retain_submodule_entries(&mut entries, submodules);
         let mut result = if options.copies == crate::diff::CopyDetection::Off {
@@ -248,17 +258,24 @@ impl<'repo> Diff<'repo> {
     /// - `tree` - the old side, or `None` for the empty tree.
     /// - `index` - the index tracking the work tree.
     /// - `options` - pathspec, pairing and submodule policy.
+    /// - `progress` - accepted for future use; no phases are reported yet.
+    /// - `cancel` - polled throughout the scan (every few hundred entries) and before
+    ///   rename pairing.
     ///
     /// # Errors
     ///
-    /// Returns [`RepositoryError::RequiresWorkTree`] in a bare repository, and work-tree I/O,
-    /// ODB, pathspec and rename detection errors.
+    /// Returns [`RepositoryError::RequiresWorkTree`] in a bare repository, work-tree I/O,
+    /// ODB, pathspec and rename detection errors, and [`crate::error::Error::Cancelled`] when
+    /// `cancel` fires.
     pub fn tree_to_worktree(
         &self,
         tree: Option<&ObjectId>,
         index: &Index,
         options: &TreeDiffOptions,
+        progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &crate::progress::CancelToken,
     ) -> Result<DiffEntriesResult> {
+        crate::progress::poll_cancel(progress, cancel)?;
         let work_tree = self.work_tree()?;
         let config = self.repo.config().snapshot()?;
         let restrict_to_paths = crate::diff::changes::pathspec_restrict_paths_for_scan(
@@ -277,9 +294,11 @@ impl<'repo> Diff<'repo> {
             None,
             DiffTreeToWorktreeExtras {
                 restrict_to_paths,
+                cancel: Some(cancel.clone()),
                 ..DiffTreeToWorktreeExtras::default()
             },
         )?;
+        crate::progress::poll_cancel(progress, cancel)?;
         self.retain_pathspec(&mut entries, options)?;
         retain_submodule_entries(&mut entries, options.submodules);
         let worktree = DiffPostprocessWorktree { index };

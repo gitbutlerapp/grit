@@ -18,7 +18,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result};
 use grit_lib::objects::{parse_commit, serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::pkt_line;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::serve::{ReceivePack, ReceivePolicy, ServeOptions};
@@ -136,7 +136,7 @@ fn push_file(
             local,
             &[main_spec(tip)],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             cancel,
             None,
         )
@@ -437,7 +437,7 @@ fn push_over_http(
         },
         &[main_spec(tip)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         cancel,
     )
     .map(|outcome| outcome.results.into_iter().map(|r| r.status).collect())

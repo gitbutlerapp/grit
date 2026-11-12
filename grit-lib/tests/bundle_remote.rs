@@ -6,9 +6,9 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{ProgressPhase, ProgressSink, ProgressUnit};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::{Remote, RemoteUrl};
 use grit_lib::repo::{InitOptions, Repository};
@@ -141,7 +141,7 @@ fn range_bundle_fetch_without_refspec_errors_before_ingest() {
         .with_url(full_bundle.to_str().unwrap().to_owned())
         .with_dest(dest.path().to_path_buf())
         .with_environment(grit_lib::config::environment::Environment::empty());
-    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone full bundle");
+    clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone full bundle");
 
     let git_dir = dest.path().join(".git");
     let objects_before = count_in_pack_objects(&git_dir);
@@ -159,7 +159,7 @@ fn range_bundle_fetch_without_refspec_errors_before_ingest() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -234,7 +234,7 @@ fn range_bundle_fetch_with_explicit_refspec_updates_tracking_ref() {
         .with_url(full_bundle.to_str().unwrap().to_owned())
         .with_dest(dest.path().to_path_buf())
         .with_environment(grit_lib::config::environment::Environment::empty());
-    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone full bundle");
+    clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone full bundle");
 
     let remote = Remote::from_url(incr_bundle.to_str().unwrap()).expect("bundle url");
     let repo = Repository::open(
@@ -249,7 +249,7 @@ fn range_bundle_fetch_with_explicit_refspec_updates_tracking_ref() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -316,7 +316,7 @@ fn literal_bundle_fetch_writes_fetch_head() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -419,7 +419,7 @@ fn clone_from_bundle_matches_git_default_branch_when_head_not_first() {
     .with_url(bundle_path.to_str().unwrap().to_owned())
     .with_dest(grit_dest.path().to_path_buf())
     .with_environment(Environment::empty());
-    let outcome = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None)
+    let outcome = clone_repo(opts, &mut NullProgress, &CancelToken::never(), None)
         .expect("grit clone from bundle");
 
     assert_eq!(outcome.head.branch_name(), Some(git_branch.as_str()));
@@ -446,8 +446,8 @@ fn clone_from_bundle_reports_transfer_stats() {
         .with_url(bundle_path.to_str().unwrap().to_owned())
         .with_dest(dest.path().to_path_buf())
         .with_environment(Environment::empty());
-    let outcome =
-        clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone from bundle");
+    let outcome = clone_repo(opts, &mut NullProgress, &CancelToken::never(), None)
+        .expect("clone from bundle");
 
     let count_out = Command::new("git")
         .args(["count-objects", "-v"])
@@ -500,7 +500,7 @@ fn clone_from_bundle_passes_git_fsck() {
         .with_url(bundle_path.to_str().unwrap().to_owned())
         .with_dest(dest.path().to_path_buf())
         .with_environment(Environment::empty());
-    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone from bundle");
+    clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone from bundle");
 
     assert!(git_in(dest.path(), &["fsck"]));
 }
@@ -513,8 +513,6 @@ struct PhaseRecorder {
     active: Option<ProgressPhase>,
     current: u64,
 }
-
-impl grit_lib::remote::fetch::Progress for PhaseRecorder {}
 
 impl ProgressSink for PhaseRecorder {
     fn start(&mut self, phase: ProgressPhase, total: Option<u64>) {

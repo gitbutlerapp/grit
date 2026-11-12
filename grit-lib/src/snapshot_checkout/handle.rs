@@ -524,12 +524,12 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
     /// [`CheckoutError::OperationInProgress`] before anything is fetched, the
     /// errors of fetching the snapshot, and pull or history errors when the branch
     /// could not be integrated (the new snapshot is fetched and recorded by then).
-    pub fn refresh<P: Progress>(
+    pub fn refresh(
         &self,
         marker: &CheckoutMarker,
         info: &CheckoutInfo,
         options: &PullOptions,
-        progress: &mut P,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> Result<RefreshOutcome> {
@@ -615,7 +615,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
         &self,
         marker: &CheckoutMarker,
         branches: &[(String, ObjectId)],
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> Result<PushOutcome> {
@@ -661,7 +661,7 @@ impl<'repo> RepositorySnapshotCheckouts<'repo> {
         marker: &CheckoutMarker,
         info: &BranchInfo,
         fetch: FetchOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> Result<TransferStats> {

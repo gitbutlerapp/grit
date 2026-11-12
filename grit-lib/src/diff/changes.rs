@@ -466,6 +466,7 @@ pub(crate) fn worktree_entries_in(
                 skip_inaccessible_paths: true,
                 diagnostics: Some(repo.diagnostics()),
                 restrict_to_paths: restrict_to_paths.clone(),
+                cancel: None,
             },
         )?
     };

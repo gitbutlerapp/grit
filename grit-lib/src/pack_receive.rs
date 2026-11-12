@@ -17,10 +17,10 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crate::error::{Error, Result};
-use crate::fetch::Progress;
 use crate::objects::HashAlgo;
 use crate::pack_stream_scan::PackStreamScanner;
 use crate::pkt_line;
+use crate::progress::ProgressSink;
 use crate::progress::{poll_cancel, CancelToken, ProgressPhase, ProgressUnit, ReceivedObjects};
 use crate::remote::RemoteError;
 
@@ -171,7 +171,7 @@ impl ObjectCounter {
     }
 
     /// Hand `progress` the latest counts if they moved since the last report.
-    fn report(&mut self, progress: &mut dyn Progress) {
+    fn report(&mut self, progress: &mut dyn ProgressSink) {
         if !self.state.header_seen.load(Ordering::Acquire) {
             return;
         }
@@ -201,7 +201,7 @@ fn find_pack_magic(buf: &[u8]) -> Option<usize> {
     buf.windows(4).position(|w| w == b"PACK")
 }
 
-fn note_received_pack_bytes(progress: &mut dyn Progress, active: &mut bool, nbytes: u64) {
+fn note_received_pack_bytes(progress: &mut dyn ProgressSink, active: &mut bool, nbytes: u64) {
     if nbytes == 0 {
         return;
     }
@@ -213,7 +213,7 @@ fn note_received_pack_bytes(progress: &mut dyn Progress, active: &mut bool, nbyt
 }
 
 fn note_received_pack_bytes_coalesced(
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     active: &mut bool,
     pending: &mut u64,
     nbytes: u64,
@@ -229,14 +229,14 @@ fn note_received_pack_bytes_coalesced(
     }
 }
 
-fn flush_coalesced_progress(progress: &mut dyn Progress, active: &mut bool, pending: &mut u64) {
+fn flush_coalesced_progress(progress: &mut dyn ProgressSink, active: &mut bool, pending: &mut u64) {
     if *pending > 0 {
         note_received_pack_bytes(progress, active, *pending);
         *pending = 0;
     }
 }
 
-fn finish_receiving(progress: &mut dyn Progress, active: bool) {
+fn finish_receiving(progress: &mut dyn ProgressSink, active: bool) {
     if active {
         progress.finish();
     }
@@ -247,7 +247,7 @@ fn finish_receiving(progress: &mut dyn Progress, active: bool) {
 pub fn read_sideband_pack_to(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<()> {
     crate::trace::trace_span!("grit.pack.receive");
@@ -387,7 +387,7 @@ impl SidebandStreamBuf {
 pub fn read_sideband_pack_tail(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
@@ -409,7 +409,7 @@ pub fn read_sideband_pack_tail(
 fn read_sideband_pack_tail_buffered(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
@@ -525,7 +525,7 @@ fn read_sideband_pack_tail_buffered(
 fn read_sideband_pack_tail_read_exact_loop(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
     payload_buf: &mut Vec<u8>,
@@ -814,7 +814,7 @@ impl TempPackReceive {
     pub fn read_sideband(
         &mut self,
         reader: &mut dyn Read,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<()> {
         let mut target = PackReceiveTarget::File(&mut self.file);
@@ -878,7 +878,6 @@ impl Write for TempPackReceive {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fetch::Progress;
     use crate::progress::ProgressPhase;
     use std::io::Cursor;
 
@@ -889,8 +888,6 @@ mod tests {
         increments: Vec<u64>,
         finished: bool,
     }
-
-    impl Progress for ReceiveRecorder {}
 
     impl crate::progress::ProgressSink for ReceiveRecorder {
         fn start(&mut self, phase: ProgressPhase, total: Option<u64>) {
@@ -1019,9 +1016,7 @@ mod tests {
         counts: Vec<ReceivedObjects>,
     }
 
-    impl crate::progress::ProgressSink for CountRecorder {}
-
-    impl Progress for CountRecorder {
+    impl crate::progress::ProgressSink for CountRecorder {
         fn wants_received_objects(&self) -> bool {
             true
         }

@@ -63,7 +63,7 @@ fn parallel_clone_library_exactly_one_winner() {
         handles.push(thread::spawn(move || {
             clone_repo(
                 CloneOptions::new(url, dest),
-                &mut NoProgress,
+                &mut NullProgress,
                 &CancelToken::never(),
                 None,
             )

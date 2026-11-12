@@ -188,7 +188,7 @@ fn fetch_over_git_daemon_v2_lands_refs_and_objects() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("v2 fetch_remote over git daemon");
@@ -369,7 +369,7 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("seed v2 fetch");
@@ -412,7 +412,7 @@ fn fetch_over_git_daemon_v2_incremental_with_haves() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("incremental v2 fetch");

@@ -80,9 +80,12 @@ fn main() -> Result<()> {
         let mut index = repo
             .index()
             .load(&grit_lib::index::IndexLoadOptions::default())?;
-        let wt_changes = repo
-            .diff()
-            .index_to_worktree(&mut index, &TreeDiffOptions::default())?;
+        let wt_changes = repo.diff().index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )?;
         println!("index_worktree_dirty={}", !wt_changes.entries.is_empty());
     }
 

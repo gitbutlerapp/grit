@@ -70,13 +70,17 @@ pub struct WorktreeRepair {
 /// Returns [`LinkedWorktreeError::NotRegistered`] for an unknown `from`,
 /// [`LinkedWorktreeError::MainWorktree`] for the main worktree, [`LinkedWorktreeError::Locked`] unless
 /// [`MoveWorktreeOptions::force`] is set, [`LinkedWorktreeError::PathExists`] for an existing
-/// destination, [`LinkedWorktreeError::HasSubmodules`] for populated submodules, and I/O failures.
+/// destination, [`LinkedWorktreeError::HasSubmodules`] for populated submodules, I/O failures,
+/// and [`crate::error::Error::Cancelled`] when `cancel` fires before the move starts.
 pub(crate) fn move_linked_worktree(
     repo: &Repository,
     from: &Path,
     to: &Path,
     options: &MoveWorktreeOptions,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<()> {
+    crate::progress::poll_cancel(progress, cancel)?;
     let entry = find_linked_worktree(repo, from, LinkedWorktreeOperation::Move)?;
     if entry.is_locked && !options.force {
         return Err(LinkedWorktreeError::Locked {
@@ -98,6 +102,7 @@ pub(crate) fn move_linked_worktree(
         return Ok(());
     }
 
+    crate::progress::poll_cancel(progress, cancel)?;
     rename_worktree_directory(&entry.path, &dest)?;
 
     let dotgit = dest.join(".git");

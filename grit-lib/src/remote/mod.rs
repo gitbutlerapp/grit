@@ -41,11 +41,6 @@ pub use inspect::{
     InspectOptions, RemoteBranchState, RemoteBranchStateKind, RemotePullBranch, RemoteSummary,
 };
 
-pub mod fetch {
-    //! fetch API (re-exported at this path).
-
-    pub use crate::fetch::{FetchMilestone, NoProgress, Progress};
-}
 pub mod fetch_request {
     //! Explicit fetch refspec resolution.
     pub use crate::fetch_request::{

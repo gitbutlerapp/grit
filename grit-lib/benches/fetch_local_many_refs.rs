@@ -38,7 +38,7 @@ fn bench(c: &mut Criterion) {
                 .fetch_from(
                     grit_lib::remote::transfer::TransferEndpoint::Local(black_box(&remote)),
                     &mut black_box(&opts).clone(),
-                    &mut grit_lib::remote::fetch::NoProgress,
+                    &mut grit_lib::progress::NullProgress,
                     grit_lib::progress::CancelToken::never_ref(),
                 )
                 .unwrap();

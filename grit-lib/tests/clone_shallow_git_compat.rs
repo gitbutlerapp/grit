@@ -117,7 +117,7 @@ fn clone_depth_one_lightweight_tag_matches_git() {
         CloneOptions::new(url, grit_dest.clone())
             .with_depth(Some(1))
             .with_branch(Some("v1".to_owned())),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -182,7 +182,7 @@ fn clone_depth_one_annotated_tag_matches_git() {
         CloneOptions::new(url, grit_dest.clone())
             .with_depth(Some(1))
             .with_branch(Some("v2".to_owned())),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -231,7 +231,7 @@ fn clone_depth_one_records_shallow_boundary_and_limits_history() {
     let dest = tmp.path().join("grit-shallow");
     let outcome = clone_repo(
         CloneOptions::new(bare.to_string_lossy(), dest.clone()).with_depth(Some(1)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -362,7 +362,7 @@ fn shallow_clone_matches_git_single_branch_on_multi_branch_remote() {
     let grit_dest = tmp.path().join("grit-clone");
     clone_repo(
         CloneOptions::new(url, grit_dest.clone()).with_depth(Some(1)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -462,7 +462,7 @@ fn shallow_clone_with_root_annotated_tag_matches_git_shallow_file() {
     let grit_dest = tmp.path().join("grit-clone");
     let outcome = clone_repo(
         CloneOptions::new(url, grit_dest.clone()).with_depth(Some(1)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -507,7 +507,7 @@ fn shallow_clone_includes_annotated_tag_on_tip_not_on_old_commit() {
     let grit_dest = tmp.path().join("grit-clone");
     clone_repo(
         CloneOptions::new(url, grit_dest.clone()).with_depth(Some(1)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -568,7 +568,7 @@ fn shallow_depth_two_keeps_annotated_tag_on_fetched_parent() {
     let dest = tmp.path().join("grit-shallow-d2");
     let outcome = clone_repo(
         CloneOptions::new(bare.to_string_lossy(), dest.clone()).with_depth(Some(2)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

@@ -8,10 +8,10 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::RefName;
 use grit_lib::remote::clone::{clone_into, CloneIntoOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::{InitOptions, Repository};
 
 /// Objects of [`tagged_history`]: a commit, its tree, and tags of each peel shape.
@@ -146,7 +146,7 @@ pub fn clone_upstream(
     clone_into(
         open_repo(dir.path(), store.clone()),
         CloneIntoOptions::new(upstream.to_string_lossy().into_owned()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

@@ -88,7 +88,7 @@ fn clone_local_mixed_packed_tree_and_loose_blob() {
     let dest = tmp.path().join("pc");
     let outcome = clone_repo(
         CloneOptions::new(remote.to_string_lossy(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

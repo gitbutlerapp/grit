@@ -22,7 +22,7 @@ use crate::porcelain::checkout_reflog::{
     create_branch_ref_with_reflog, reset_branch_ref_with_reflog,
 };
 use crate::porcelain::status::{status, StatusOptions};
-use crate::progress::{CancelToken, NullProgress};
+use crate::progress::{CancelToken, ProgressSink};
 use crate::refs;
 use crate::repo::{common_git_dir_for_config, Repository};
 use crate::rev_parse::resolve_revision;
@@ -530,7 +530,7 @@ fn strip_worktree_config_keys(path: &Path, keys: &[&str]) -> Result<()> {
     fs::write(path, out).map_err(Error::Io)
 }
 
-/// How [`add_linked_worktree`] attaches `HEAD` to a branch.
+/// How [`RepositoryWorktrees::add`](crate::repo_handles::RepositoryWorktrees::add) attaches `HEAD` to a branch.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum WorktreeBranch {
@@ -548,7 +548,7 @@ pub enum WorktreeBranch {
     Orphan(String),
 }
 
-/// Options for [`add_linked_worktree`].
+/// Options for [`RepositoryWorktrees::add`](crate::repo_handles::RepositoryWorktrees::add).
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct AddLinkedWorktreeOptions {
@@ -637,7 +637,7 @@ impl AddLinkedWorktreeOptions {
     }
 }
 
-/// Options for locking during [`add_linked_worktree`] or
+/// Options for locking during [`RepositoryWorktrees::add`](crate::repo_handles::RepositoryWorktrees::add) or
 /// [`Worktrees::lock`](crate::repo_handles::Worktrees::lock).
 #[derive(Debug, Clone, Default)]
 #[non_exhaustive]
@@ -697,27 +697,37 @@ pub struct PrunedWorktreeEntry {
 ///
 /// Fails when the path is occupied, the branch is already checked out in a non-bare
 /// worktree, or checkout cannot complete.
+#[cfg(test)]
 pub(crate) fn add_linked_worktree(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
 ) -> Result<WorktreeEntry> {
-    add_linked_worktree_with_cancel(repo, opts, &CancelToken::never())
+    add_linked_worktree_with_cancel(
+        repo,
+        opts,
+        &mut crate::progress::NullProgress,
+        &CancelToken::never(),
+    )
 }
 
 /// Register and populate a linked worktree, stopping when `cancel` is set.
 ///
 /// On cancel or any failure after registration begins, removes the new admin directory,
 /// removes the working tree directory when this call created it, and rolls back a newly
-/// created branch ([`add_linked_worktree`]).
+/// created branch ([`RepositoryWorktrees::add`](crate::repo_handles::RepositoryWorktrees::add)).
 ///
 /// # Errors
 ///
-/// Same as [`add_linked_worktree`], plus [`Error::Cancelled`](crate::error::Error::Cancelled).
+/// Same as [`RepositoryWorktrees::add`](crate::repo_handles::RepositoryWorktrees::add), plus [`Error::Cancelled`](crate::error::Error::Cancelled).
+/// Populating the work tree reports [`crate::progress::ProgressPhase::CheckingOutFiles`] on
+/// `progress`.
 pub(crate) fn add_linked_worktree_with_cancel(
     repo: &Repository,
     opts: &AddLinkedWorktreeOptions,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<WorktreeEntry> {
+    cancel.poll_result()?;
     // Like Git, a bare repository can have linked worktrees.
     let common = common_git_dir(repo.git_dir());
 
@@ -829,7 +839,7 @@ pub(crate) fn add_linked_worktree_with_cancel(
                 &linked,
                 None,
                 &tree_oid,
-                &mut NullProgress,
+                &mut *progress,
                 cancel,
             )?;
         }
@@ -1236,7 +1246,7 @@ fn linked_worktree_prunable_reason_when_missing(admin: &Path) -> PrunableReason 
     PrunableReason::WorktreePathMissing
 }
 
-/// Resolve `path` for [`add_linked_worktree`].
+/// Resolve `path` for [`RepositoryWorktrees::add`](crate::repo_handles::RepositoryWorktrees::add).
 ///
 /// Relative paths are interpreted from `relative_to` (typically the process working
 /// directory at the CLI boundary). The result is absolute and stable for registry
@@ -1463,8 +1473,17 @@ fn plan_admin_dir_for_add(
 ///
 /// Returns [`LinkedWorktreeError::NotRegistered`] for an unknown `path`,
 /// [`LinkedWorktreeError::MainWorktree`] for the main worktree, and, unless `force` is set,
-/// [`LinkedWorktreeError::Locked`] or [`LinkedWorktreeError::HasLocalChanges`].
-pub(crate) fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Result<()> {
+/// [`LinkedWorktreeError::Locked`] or [`LinkedWorktreeError::HasLocalChanges`], and
+/// [`Error::Cancelled`] when `cancel` fires during the local-changes check (nothing is
+/// removed then; once deletion starts it runs to completion).
+pub(crate) fn remove_linked_worktree(
+    repo: &Repository,
+    path: &Path,
+    force: bool,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<()> {
+    cancel.poll_result()?;
     let entry = find_linked_worktree(repo, path, LinkedWorktreeOperation::Remove)?;
     if entry.is_locked && !force {
         return Err(LinkedWorktreeError::Locked {
@@ -1474,9 +1493,10 @@ pub(crate) fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool
     }
 
     let linked = repo.open_linked_worktree(&entry.admin_dir, &entry.path)?;
-    if !force && worktree_has_local_changes(&linked)? {
+    if !force && worktree_has_local_changes(&linked, progress, cancel)? {
         return Err(LinkedWorktreeError::HasLocalChanges.into());
     }
+    cancel.poll_result()?;
 
     fs::remove_dir_all(&entry.admin_dir).map_err(Error::Io)?;
     if entry.path.exists() {
@@ -1571,13 +1591,12 @@ fn ensure_empty_or_missing(path: &Path) -> Result<()> {
     Ok(())
 }
 
-fn worktree_has_local_changes(repo: &Repository) -> Result<bool> {
-    let model = status(
-        repo,
-        &StatusOptions::default(),
-        &mut NullProgress,
-        &crate::progress::CancelToken::never(),
-    )?;
+fn worktree_has_local_changes(
+    repo: &Repository,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<bool> {
+    let model = status(repo, &StatusOptions::default(), progress, cancel)?;
     Ok(!model.staged.is_empty()
         || !model.unstaged.is_empty()
         || !model.conflicts.is_empty()
@@ -1798,18 +1817,29 @@ mod tests {
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         let linked = tmp.path().join("linked");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked.clone(),
-                branch: Some(WorktreeBranch::Create("wt".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked.clone(),
+                    branch: Some(WorktreeBranch::Create("wt".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: false,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .unwrap();
         assert_eq!(repo.worktrees().list().unwrap().len(), 2);
-        repo.worktrees().remove(&linked, false).unwrap();
+        repo.worktrees()
+            .remove(
+                &linked,
+                false,
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
+            .unwrap();
         assert_eq!(repo.worktrees().list().unwrap().len(), 1);
     }
 
@@ -1947,15 +1977,19 @@ mod tests {
         let wt = tmp.path().join("wt");
         let entry = repo
             .worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: wt.clone(),
-                branch: Some(WorktreeBranch::Orphan("wt".into())),
-                start_point: None,
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: wt.clone(),
+                    branch: Some(WorktreeBranch::Orphan("wt".into())),
+                    start_point: None,
+                    force: false,
+                    lock: None,
+                    no_checkout: false,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .unwrap();
         assert_eq!(
             entry.admin_dir,
@@ -2099,15 +2133,19 @@ mod tests {
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         let linked = tmp.path().join("linked");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked.clone(),
-                branch: Some(WorktreeBranch::Create("wt".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked.clone(),
+                    branch: Some(WorktreeBranch::Create("wt".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: false,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .unwrap();
 
         let linked_repo =
@@ -2157,15 +2195,19 @@ mod tests {
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         let linked = tmp.path().join("linked");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked.clone(),
-                branch: Some(WorktreeBranch::Create("feature".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked.clone(),
+                    branch: Some(WorktreeBranch::Create("feature".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: false,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .unwrap();
 
         let linked_repo =
@@ -2215,28 +2257,36 @@ mod tests {
                 .unwrap();
         let linked = tmp.path().join("linked");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked.clone(),
-                branch: Some(WorktreeBranch::Create("a".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
-            .unwrap();
-        fs::remove_dir_all(&linked).unwrap();
-        assert!(matches!(
-            repo.worktrees()
-                .add(&AddLinkedWorktreeOptions {
+            .add(
+                &AddLinkedWorktreeOptions {
                     path: linked.clone(),
-                    branch: Some(WorktreeBranch::Create("b".into())),
+                    branch: Some(WorktreeBranch::Create("a".into())),
                     start_point: Some("HEAD".into()),
                     force: false,
                     lock: None,
                     no_checkout: false,
                     track: false,
-                },)
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
+            .unwrap();
+        fs::remove_dir_all(&linked).unwrap();
+        assert!(matches!(
+            repo.worktrees()
+                .add(
+                    &AddLinkedWorktreeOptions {
+                        path: linked.clone(),
+                        branch: Some(WorktreeBranch::Create("b".into())),
+                        start_point: Some("HEAD".into()),
+                        force: false,
+                        lock: None,
+                        no_checkout: false,
+                        track: false,
+                    },
+                    &mut crate::progress::NullProgress,
+                    &crate::progress::CancelToken::never()
+                )
                 .unwrap_err(),
             Error::Worktree(WorktreeError::Linked(
                 LinkedWorktreeError::PathRegisteredMissing { .. }
@@ -2274,7 +2324,12 @@ mod tests {
 
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
         assert!(matches!(
-            repo.worktrees().remove(&main, false),
+            repo.worktrees().remove(
+                &main,
+                false,
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never()
+            ),
             Err(Error::Worktree(WorktreeError::Linked(
                 LinkedWorktreeError::MainWorktree {
                     operation: LinkedWorktreeOperation::Remove
@@ -2284,15 +2339,19 @@ mod tests {
 
         let linked = tmp.path().join("linked");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked.clone(),
-                branch: Some(WorktreeBranch::Create("wt".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked.clone(),
+                    branch: Some(WorktreeBranch::Create("wt".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: false,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .unwrap();
         let common = common_git_dir(repo.git_dir());
         let admin = fs::read_dir(common.join("worktrees"))
@@ -2302,14 +2361,27 @@ mod tests {
             .expect("admin");
         fs::write(admin.join("locked"), "hold\n").unwrap();
         assert!(matches!(
-            repo.worktrees().remove( &linked, false),
+            repo.worktrees().remove( &linked, false, &mut crate::progress::NullProgress, &crate::progress::CancelToken::never()),
             Err(Error::Worktree(WorktreeError::Linked(LinkedWorktreeError::Locked {
                 reason: Some(r)
             }))) if r == "hold"
         ));
-        assert!(repo.worktrees().remove(&linked, true).is_ok());
+        assert!(repo
+            .worktrees()
+            .remove(
+                &linked,
+                true,
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never()
+            )
+            .is_ok());
         assert!(matches!(
-            repo.worktrees().remove(&linked, false),
+            repo.worktrees().remove(
+                &linked,
+                false,
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never()
+            ),
             Err(Error::Worktree(WorktreeError::Linked(
                 LinkedWorktreeError::NotRegistered { .. }
             )))

@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use anyhow::Result;
 use grit_lib::objects::index_pack::ObjectKindCounts;
+use grit_lib::progress::FetchMilestone;
 use grit_lib::progress::{ProgressPhase, ProgressUnit};
-use grit_lib::remote::fetch::FetchMilestone;
 use grit_lib::remote::redact_url_for_display;
 use grit_lib::remote::transfer::TransferStats;
 use schemars::JsonSchema;

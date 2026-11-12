@@ -16,7 +16,6 @@
 use std::collections::HashSet;
 
 use crate::change_id::ChangeId;
-use crate::fetch::NoProgress;
 use crate::merge_base::{
     count_symmetric_ahead_behind, is_ancestor, merge_bases_first_vs_rest,
     walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
@@ -28,6 +27,7 @@ use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::pull::{pull, FetchedUpstream, PullMode, PullOptions, PullResult};
 use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use crate::progress::CancelToken;
+use crate::progress::NullProgress;
 use crate::remote::transfer::FetchOptions;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -275,7 +275,13 @@ pub(crate) fn refresh_branch(
         },
         ..Default::default()
     };
-    let pulled = pull(repo, &options, &mut NoProgress, &CancelToken::never(), None);
+    let pulled = pull(
+        repo,
+        &options,
+        &mut NullProgress,
+        &CancelToken::never(),
+        None,
+    );
     // A rebase that failed or refused changed nothing, so HEAD goes back
     // where it was, as if the branch had never been switched to.
     let nothing_done = match &pulled {
@@ -470,7 +476,7 @@ mod tests {
             &marker(repo),
             &info,
             FetchOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -594,7 +600,7 @@ mod tests {
             &marker(&repo),
             &newer,
             &options,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

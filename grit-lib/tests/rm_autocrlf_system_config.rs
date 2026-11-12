@@ -95,6 +95,7 @@ fn remove_paths_succeeds_with_system_inherited_autocrlf_only() {
         .checkout()
         .remove_paths(
             &RemoveOptions::default().with_pathspecs(vec!["f.txt".into()]),
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("remove must not treat CRLF smudge as local changes");

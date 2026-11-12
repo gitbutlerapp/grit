@@ -58,7 +58,7 @@ fn fetch_literal_path_leaves_origin_tracking_refs_unchanged() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&o2.join(".git")),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch o2");
@@ -156,7 +156,7 @@ fn explicit_url_refspec_fetch_head_records_fetched_branch_not_default() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&o2.join(".git")),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch otherbr");

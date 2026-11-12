@@ -3,10 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::Result;
-use crate::progress::CancelToken;
+use crate::progress::{CancelToken, ProgressSink};
 use crate::repo::Repository;
 use crate::worktree::{
-    add_linked_worktree, add_linked_worktree_with_cancel, ensure_branch_not_checked_out_elsewhere,
+    add_linked_worktree_with_cancel, ensure_branch_not_checked_out_elsewhere,
     ensure_branch_not_checked_out_in_any_worktree, find_worktree_with_branch_checked_out,
     list_worktrees, lock_linked_worktree, move_linked_worktree, prune_linked_worktrees,
     remove_linked_worktree, repair_worktrees, unlock_linked_worktree, worktree_admin_dir,
@@ -57,13 +57,21 @@ impl<'repo> RepositoryWorktrees<'repo> {
 
     /// Register and populate a linked worktree at `options.path`.
     ///
+    /// Populating the work tree reports
+    /// [`ProgressPhase::CheckingOutFiles`](crate::progress::ProgressPhase::CheckingOutFiles)
+    /// through `progress` and polls `cancel`. On cancel or any failure after registration
+    /// begins, the new admin directory, a work tree directory this call created, and a newly
+    /// created branch are removed again.
+    ///
     /// # Errors
     ///
-    /// Propagates [`add_linked_worktree`] failures (bare repo, occupied path, branch conflicts).
+    /// Bare repository, occupied path and branch conflict failures,
+    /// and [`crate::error::Error::Cancelled`] when `cancel` fires.
     ///
     /// # Examples
     ///
     /// ```
+    /// # use grit_lib::progress::{CancelToken, NullProgress};
     /// # use grit_lib::repo::Repository;
     /// # use grit_lib::worktree::AddLinkedWorktreeOptions;
     /// # use std::path::PathBuf;
@@ -71,21 +79,17 @@ impl<'repo> RepositoryWorktrees<'repo> {
     /// # let repo = grit_lib::repo::Repository::discover(None, &grit_lib::config::environment::RepositoryOptions::empty())?;
     /// let opts = AddLinkedWorktreeOptions::new(PathBuf::from("/tmp/wt"))
     ///     .with_branch(Some(grit_lib::worktree::WorktreeBranch::Create("feature".into())));
-    /// let _ = repo.worktrees().add(&opts);
+    /// let _ = repo.worktrees().add(&opts, &mut NullProgress, &CancelToken::never());
     /// # Ok(())
     /// # }
     /// ```
-    pub fn add(&self, options: &AddLinkedWorktreeOptions) -> Result<WorktreeEntry> {
-        add_linked_worktree(self.repo, options)
-    }
-
-    /// Like [`Self::add`], but observes cancellation while populating the worktree.
-    pub fn add_with_cancel(
+    pub fn add(
         &self,
         options: &AddLinkedWorktreeOptions,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<WorktreeEntry> {
-        add_linked_worktree_with_cancel(self.repo, options, cancel)
+        add_linked_worktree_with_cancel(self.repo, options, progress, cancel)
     }
 
     /// Admin directory for linked worktrees under this repository.
@@ -114,11 +118,22 @@ impl<'repo> RepositoryWorktrees<'repo> {
 
     /// Remove a linked worktree at `path`.
     ///
+    /// Unless `force` is set, the worktree is first checked for local changes (a status
+    /// scan that polls `cancel`); nothing is removed when that check is cancelled, and once
+    /// deletion starts it runs to completion. No progress phases are reported yet.
+    ///
     /// # Errors
     ///
-    /// Propagates [`remove_linked_worktree`] failures.
-    pub fn remove(&self, path: &Path, force: bool) -> Result<()> {
-        remove_linked_worktree(self.repo, path, force)
+    /// Propagates [`remove_linked_worktree`] failures, and [`crate::error::Error::Cancelled`]
+    /// when `cancel` fires.
+    pub fn remove(
+        &self,
+        path: &Path,
+        force: bool,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<()> {
+        remove_linked_worktree(self.repo, path, force, progress, cancel)
     }
 
     /// Create the `locked` file for the linked worktree at `path`.
@@ -161,11 +176,22 @@ impl<'repo> RepositoryWorktrees<'repo> {
 
     /// Move a linked worktree to `to` and rewrite admin `gitdir` / worktree `.git` links.
     ///
+    /// `cancel` is polled before the directory is moved; the move itself is a rename and is
+    /// not interrupted. No progress phases are reported yet.
+    ///
     /// # Errors
     ///
-    /// Propagates [`move_linked_worktree`] failures.
-    pub fn move_linked(&self, from: &Path, to: &Path, options: &MoveWorktreeOptions) -> Result<()> {
-        move_linked_worktree(self.repo, from, to, options)
+    /// Propagates [`move_linked_worktree`] failures, and [`crate::error::Error::Cancelled`]
+    /// when `cancel` fires before the move.
+    pub fn move_linked(
+        &self,
+        from: &Path,
+        to: &Path,
+        options: &MoveWorktreeOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<()> {
+        move_linked_worktree(self.repo, from, to, options, progress, cancel)
     }
 
     /// Repair `.git` / `gitdir` links for linked worktrees.

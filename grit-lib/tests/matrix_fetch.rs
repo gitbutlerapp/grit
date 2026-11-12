@@ -317,7 +317,7 @@ fn daemon_driver(protocol: u8) -> Driver {
             .fetch_from(
                 grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
                 opts,
-                &mut NoProgress,
+                &mut NullProgress,
                 &CancelToken::never(),
             )
         }),
@@ -363,7 +363,7 @@ fn ssh_driver(protocol: u8, scratch: PathBuf) -> Option<Driver> {
             .fetch_from(
                 grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
                 opts,
-                &mut NoProgress,
+                &mut NullProgress,
                 &CancelToken::never(),
             )
         }),

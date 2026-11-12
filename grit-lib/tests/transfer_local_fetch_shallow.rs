@@ -73,7 +73,7 @@ fn fetch_local_in_git_shallow_clone_does_not_create_broken_tags() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local");
@@ -152,7 +152,7 @@ fn fetch_local_clone_from_shallow_source_propagates_shallow_file() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&shallow_src.join(".git")),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local from shallow");
@@ -226,7 +226,7 @@ fn fetch_local_initial_fetch_following_imports_reachable_tags() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&upstream_git),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("initial fetch");
@@ -322,7 +322,7 @@ fn unshallow_follows_historical_tags_in_one_fetch() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&source),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -426,7 +426,7 @@ fn shallow_tag_following_uses_requested_history_and_tag_mode() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Local(&source),
             &mut fetch_opts.clone(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
         )
         .unwrap();
@@ -479,7 +479,7 @@ fn unshallow_follows_tags_only_as_far_as_shallow_source_can_supply() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&source),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -519,7 +519,7 @@ fn unshallow_preserves_negative_refspecs_and_existing_tags() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Local(&source),
             &mut fetch_opts.clone(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
         )
         .unwrap();
@@ -657,7 +657,7 @@ fn unshallow_from_repacked_remote_with_deltas_matches_git() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("unshallow fetch_local");

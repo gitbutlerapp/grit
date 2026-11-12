@@ -162,7 +162,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec_update(main_oid, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_remote over ssh");
@@ -246,7 +246,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn2),
         &[spec_update(diverged, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push_remote over ssh completes");
@@ -292,7 +292,7 @@ fn push_over_ssh_lands_ref_and_objects_and_reports_nonff_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn3),
         &[spec_update(diverged, "refs/heads/main", true)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push_remote over ssh completes");
@@ -384,7 +384,7 @@ fn incremental_ssh_push_with_advertised_blob_and_tree_tags() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec_update(tip, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("incremental push with non-commit tags");
@@ -463,7 +463,7 @@ fn one_commit_ssh_push_over_many_advertised_tips_sends_a_thin_pack() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec_update(tip, "refs/heads/main", false)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push one commit");

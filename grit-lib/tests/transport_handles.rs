@@ -14,7 +14,6 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::pack_objects::{PackBuildOptions, UploadPackStream};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{ForceMode, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::serve::{
@@ -213,7 +212,7 @@ fn remotes_fetch_from_and_push_to_a_local_endpoint() {
         .fetch_from(
             TransferEndpoint::Local(upstream.git_dir()),
             &mut fetch,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("fetch_from");
@@ -236,7 +235,7 @@ fn remotes_fetch_from_and_push_to_a_local_endpoint() {
             TransferEndpoint::Local(upstream.git_dir()),
             &push_main(tip),
             &PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("push_to");
@@ -259,7 +258,7 @@ fn remotes_fetch_from_and_push_to_a_local_endpoint() {
         .fetch_from(
             TransferEndpoint::Local(upstream.git_dir()),
             &mut tracking_fetch(),
-            &mut NoProgress,
+            &mut NullProgress,
             &cancel,
         )
         .expect_err("cancelled");
@@ -356,7 +355,7 @@ fn remotes_fetch_from_and_push_to_a_connection_served_in_process() {
         .fetch_from(
             TransferEndpoint::Connection(&mut conn),
             &mut tracking_fetch(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("fetch over connection");
@@ -396,7 +395,7 @@ fn remotes_fetch_from_and_push_to_a_connection_served_in_process() {
             TransferEndpoint::Connection(&mut conn),
             &specs,
             &PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("push over connection");
@@ -467,7 +466,7 @@ fn remotes_fetch_all_applies_the_prune_override_to_every_remote() {
             &FetchAllOptions::new(FetchOptions::default())
                 .with_prune(Some(true))
                 .with_tags(Some(false)),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -521,7 +520,7 @@ fn remotes_plan_a_push_and_record_its_upstream() {
         .fetch_from(
             TransferEndpoint::Local(upstream.git_dir()),
             &mut tracking_fetch(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("fetch");
@@ -569,7 +568,7 @@ fn remotes_plan_a_push_and_record_its_upstream() {
             TransferEndpoint::Local(upstream.git_dir()),
             &plan.specs,
             &PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("push");
@@ -599,7 +598,12 @@ fn upload_pack_stream_writes_the_objects_a_client_lacks() {
 
     let mut full = Vec::new();
     let stats = UploadPackStream::new(&[c2], options)
-        .write(&repo, &mut NullProgress, &mut full)
+        .write(
+            &repo,
+            &mut full,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("full pack");
     assert_eq!(stats.object_count, 6);
     assert!(full.starts_with(b"PACK"));
@@ -608,7 +612,12 @@ fn upload_pack_stream_writes_the_objects_a_client_lacks() {
     let mut thin = Vec::new();
     let stats = UploadPackStream::new(&[c2], options)
         .with_haves(&haves)
-        .write(&repo, &mut NullProgress, &mut thin)
+        .write(
+            &repo,
+            &mut thin,
+            &mut NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("incremental pack");
     assert_eq!(stats.object_count, 3);
 }

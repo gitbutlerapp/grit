@@ -24,9 +24,7 @@ use grit_lib::objects::index_pack::{
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore, ObjectStream, WritableObjectStore};
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
 use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
-use grit_lib::objects::unpack_objects::{
-    ingest_pack_into, ingest_pack_into_with_progress, pack_is_thin, UnpackOptions,
-};
+use grit_lib::objects::unpack_objects::{ingest_pack_into, pack_is_thin, UnpackOptions};
 use grit_lib::objects::{hash::hash_object, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
 use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::refs::store::MemoryRefStore;
@@ -439,13 +437,13 @@ fn progress_reports_indexing_and_resolving_and_cancel_stops() {
     let total = rev_list_objects(upstream.path(), &["main"]).len() as u64;
     let store = MemoryStore::new(HashAlgo::Sha1);
     let mut progress = PhaseRecorder::default();
-    ingest_pack_into_with_progress(
+    ingest_pack_into(
         &mut Cursor::new(&pack),
         &store,
         &store,
         &UnpackOptions::default(),
-        Some(&mut progress),
-        None,
+        &mut progress,
+        &CancelToken::never(),
     )
     .expect("ingest");
     assert_eq!(
@@ -461,13 +459,13 @@ fn progress_reports_indexing_and_resolving_and_cancel_stops() {
     let cancel = CancelToken::new();
     cancel.cancel();
     let fresh = MemoryStore::new(HashAlgo::Sha1);
-    let err = ingest_pack_into_with_progress(
+    let err = ingest_pack_into(
         &mut Cursor::new(&pack),
         &fresh,
         &fresh,
         &UnpackOptions::default(),
-        None,
-        Some(&cancel),
+        &mut grit_lib::progress::NullProgress,
+        &cancel,
     )
     .expect_err("cancelled");
     assert!(matches!(err, Error::Cancelled), "{err:?}");

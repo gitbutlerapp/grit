@@ -84,7 +84,7 @@ fn fetch_opts(env: &Environment) -> FetchOptions {
 }
 
 fn pull_grit(repo: &Repository, options: &PullOptions) -> grit_lib::porcelain::pull::PullOutcome {
-    let mut progress = NoProgress;
+    let mut progress = NullProgress;
     pull(repo, options, &mut progress, &CancelToken::never(), None).expect("grit pull")
 }
 
@@ -92,7 +92,7 @@ fn try_pull_grit(
     repo: &Repository,
     options: &PullOptions,
 ) -> grit_lib::error::Result<grit_lib::porcelain::pull::PullOutcome> {
-    let mut progress = NoProgress;
+    let mut progress = NullProgress;
     pull(repo, options, &mut progress, &CancelToken::never(), None)
 }
 

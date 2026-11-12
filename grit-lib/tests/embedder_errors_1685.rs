@@ -50,7 +50,12 @@ fn bare_repo_common_failures_use_requires_work_tree() {
         .expect("index");
     assert_requires_work_tree(
         bare.diff()
-            .index_to_worktree(&mut idx, &TreeDiffOptions::default())
+            .index_to_worktree(
+                &mut idx,
+                &TreeDiffOptions::default(),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
             .map(|r| r.entries)
             .map(|_| ()),
     );

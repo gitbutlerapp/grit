@@ -105,7 +105,7 @@ fn push_set_upstream_writes_same_config_as_git() {
             grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
             &plan.specs,
             &PushOptions::default().with_tracking_remote(Some("origin".into())),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push");
@@ -170,7 +170,7 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &[good.clone(), bad],
         &atomic,
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("atomic push returns outcome");
@@ -194,7 +194,7 @@ fn atomic_push_aborts_all_updates_on_bare_remote() {
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &[good, spec(&side_oid, "refs/heads/main")],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-atomic");
@@ -330,7 +330,7 @@ fn follow_tags_custom_dst_matches_git() {
             grit_lib::remote::transfer::TransferEndpoint::Local(&bare_grit),
             &branch_specs,
             &PushOptions::default().with_tracking_remote(Some("grit".into())),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("grit push");
@@ -429,7 +429,7 @@ fn push_local_push_options_follow_advertise_push_options() {
             grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
             &[spec],
             &PushOptions::default().with_push_options(vec!["ci.skip".into()]),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         );
         let created = git_cmd(&["show-ref", "--verify", "refs/heads/main"])

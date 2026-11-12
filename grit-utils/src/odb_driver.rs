@@ -720,7 +720,11 @@ pub fn pack_build_all_stdout(repo: &Repository, delta_threads: usize) -> Result<
     let mut stdout = io::stdout().lock();
     PackObjects::new(repo.odb(), opts)
         .wants(&wants)
-        .write_to(&mut stdout, &mut grit_lib::progress::NullProgress)
+        .write_to(
+            &mut stdout,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .context("pack-objects --all")?;
     Ok(())
 }
@@ -781,8 +785,11 @@ fn resolve_rev(repo: &Repository, rev: &str) -> Result<ObjectId> {
 
 /// Write a reachable commit-graph with changed-path Bloom filters (maintenance API).
 pub fn commit_graph_write(repo: &Repository) -> Result<()> {
-    repo.maintenance()
-        .write_commit_graph(&CommitGraphOptions::with_changed_paths(true))?;
+    repo.maintenance().write_commit_graph(
+        &CommitGraphOptions::with_changed_paths(true),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )?;
     Ok(())
 }
 

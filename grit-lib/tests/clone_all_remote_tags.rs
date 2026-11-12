@@ -118,7 +118,7 @@ fn clone_fetches_tags_on_unreachable_commits() {
             upstream.path().to_string_lossy(),
             grit_dest.path().to_path_buf(),
         ),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -156,7 +156,7 @@ fn clone_file_url_fetches_unreachable_tags() {
     );
     clone_repo(
         CloneOptions::new(url, grit_dest.path().to_path_buf()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

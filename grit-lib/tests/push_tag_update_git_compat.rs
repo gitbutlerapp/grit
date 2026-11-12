@@ -45,7 +45,7 @@ fn push_local_rejects_moving_existing_lightweight_tag_without_force() {
             .with_dst("refs/tags/v1".to_owned())
             .with_src_ref(Some("refs/tags/v1".to_owned()))],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -83,7 +83,7 @@ fn push_local_force_moves_existing_tag_and_marks_forced() {
             .with_dst("refs/tags/v1".to_owned())
             .with_force(true)],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -120,7 +120,7 @@ fn push_local_identical_tag_is_up_to_date() {
             .with_src(Some(oid))
             .with_dst("refs/tags/v1".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -163,7 +163,7 @@ fn push_local_rejects_annotated_to_lightweight_on_same_commit_without_force() {
             .with_src(Some(lightweight))
             .with_dst("refs/tags/v1".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -226,7 +226,7 @@ fn push_local_rejects_diverged_tag_as_already_exists_not_non_ff() {
             .with_src(Some(ObjectId::from_hex(&side_tip).unwrap()))
             .with_dst("refs/tags/v1".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");
@@ -264,7 +264,7 @@ fn push_local_branch_fast_forward_unchanged() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");

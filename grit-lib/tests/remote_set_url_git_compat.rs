@@ -287,7 +287,7 @@ fn push_after_set_url_uses_new_pushurl() {
                 .with_src_ref(Some("refs/heads/main".to_owned()))
                 .with_dst("refs/heads/main".to_owned())],
             grit_lib::remote::transfer::PushOptions::default(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
             None,
         )

@@ -56,7 +56,7 @@ fn grit_fetch(local: &Path, up: &Path, spec: &str) -> FetchOutcome {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&up.join(".git")),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("grit fetch")
@@ -227,7 +227,7 @@ fn ssh_fetch(
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(conn.as_mut()),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("ssh fetch")

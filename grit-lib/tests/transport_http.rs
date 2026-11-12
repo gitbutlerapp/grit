@@ -30,7 +30,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NullProgress;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode, UpdateMode};
 use grit_lib::remote::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
@@ -1210,7 +1210,7 @@ fn push_over_smart_http_initial_pack_is_delta_compressed() {
         },
         &[spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_http initial deep history");
@@ -1304,7 +1304,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         },
         &[spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_http over grit-http-server");
@@ -1395,7 +1395,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         },
         &[spec_topic],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_http topic over grit-http-server");
@@ -1450,7 +1450,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         },
         &[nonff],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push_http completes");
@@ -1507,7 +1507,7 @@ fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
         },
         &[forced],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push_http completes");
@@ -1636,7 +1636,7 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         },
         &specs,
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_http main+topic over grit-http-server");
@@ -1791,7 +1791,7 @@ fn push_then_fetch_roundtrip_and_server_side_rejection_over_http() {
         },
         &[forced_spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push against denyNonFastForwards completes");

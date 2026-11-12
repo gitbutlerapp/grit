@@ -7,7 +7,7 @@ use grit_lib::config::environment::Environment;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_plan::{
     open_push_destination, resolve_push_invocation, PushPlanContext, PushPlanError, PushRequest,
 };
@@ -118,7 +118,7 @@ fn dry_run_push_local(local_git: &Path, bare: &Path, specs: &[PushRefSpec]) {
         grit_lib::remote::transfer::TransferEndpoint::Local(bare),
         specs,
         &PushOptions::default().with_dry_run(true),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local dry-run");
@@ -279,7 +279,7 @@ fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
             &repo,
             &plan.specs,
             PushOptions::default().with_remote_ref_tips(ctx.remote_tips.clone()),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -596,7 +596,7 @@ fn real_push_matches_git_file_remote() {
         grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &specs,
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("grit push");
@@ -639,7 +639,7 @@ fn dry_run_leaves_bare_refs_unchanged() {
         grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &specs,
         &PushOptions::default().with_dry_run(true),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("dry-run");
@@ -694,7 +694,7 @@ fn push_from_positionals_is_readable_by_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -738,7 +738,7 @@ fn push_to_literal_path_remote_is_readable_by_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -784,7 +784,7 @@ fn push_to_relative_path_remote_is_readable_by_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -974,7 +974,7 @@ fn glob_push_roundtrip_fsck_with_git() {
         grit_lib::remote::transfer::TransferEndpoint::Local(&fx.bare),
         &specs,
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )
     .expect("push");

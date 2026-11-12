@@ -234,7 +234,7 @@ fn fetch_v0_sideband_band3_fatal_is_typed_error_not_hang() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect_err("a band-3 fatal must surface as an error")
@@ -290,7 +290,7 @@ fn fetch_v0_err_after_done_is_typed_remote_error() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect_err("an ERR after done must surface as an error")
@@ -386,7 +386,7 @@ fn push_remote_rejects_protocol_v2_typed_before_touching_refs() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &[spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("a v2 push must be rejected in this phase");
@@ -455,7 +455,7 @@ fn push_remote_unpack_failure_report_demotes_all_sent_refs() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &[spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_remote completes and parses the report");
@@ -590,7 +590,7 @@ fn push_http_rejects_v2_receive_pack_advertisement_typed() {
         },
         &[spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("a v2 receive-pack advertisement must be rejected");
@@ -643,7 +643,7 @@ fn push_http_propagates_discovery_transport_error_typed() {
         },
         &[spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("a discovery transport failure must surface as an error");
@@ -888,7 +888,7 @@ fn shallow_depth1_with_all_tags_over_git_daemon() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("shallow+tags fetch over git daemon");

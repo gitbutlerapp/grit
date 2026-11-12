@@ -9,8 +9,8 @@ use std::time::{Duration, Instant};
 
 use grit_lib::error::Error;
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, FetchOutcome, TagMode};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -136,7 +136,7 @@ fn grit_fetch_local(
             opts
         }
         .clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .map(|_| ())
@@ -242,7 +242,7 @@ fn unshallow_on_complete_repo_errors_typed() {
             opts
         }
         .clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect_err("unshallow on full repo");
@@ -341,7 +341,7 @@ fn grit_fetch_daemon_refspec(
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("fetch_remote")

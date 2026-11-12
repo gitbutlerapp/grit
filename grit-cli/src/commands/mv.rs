@@ -28,6 +28,7 @@ pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> 
             &MoveOptions::new(resolved_srcs, resolved_dst)
                 .with_force(force)
                 .with_dry_run(dry_run),
+            &mut grit_lib::progress::NullProgress,
             &cancel,
         )
         .map_err(crate::json_error::map_lib_error)?;

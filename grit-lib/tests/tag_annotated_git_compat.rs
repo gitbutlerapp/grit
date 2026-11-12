@@ -135,7 +135,7 @@ fn git_non_utf8_annotated_tag_message_is_not_corrupt() {
     let clone_dest = tmp.path().join("clone");
     clone_repo(
         CloneOptions::new(format!("file://{}", host.display()), clone_dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

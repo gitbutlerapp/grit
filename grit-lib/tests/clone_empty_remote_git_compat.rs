@@ -33,7 +33,7 @@ fn clone_empty_bare_matches_git_fsck_and_config() {
     let grit_dest = root.path().join("grit-clone");
     clone(
         CloneOptions::new(bare.to_string_lossy(), grit_dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -122,7 +122,7 @@ fn clone_unborn_advertised_trunk_with_populated_feature_matches_git() {
     let grit_dest = root.path().join("grit-clone");
     clone(
         CloneOptions::new(bare.to_string_lossy(), grit_dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

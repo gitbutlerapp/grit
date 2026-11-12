@@ -256,15 +256,19 @@ mod tests {
 
         let linked_path = dir.path().join("linked");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked_path.clone(),
-                branch: Some(WorktreeBranch::Create("linked".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked_path.clone(),
+                    branch: Some(WorktreeBranch::Create("linked".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: false,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("linked");
 
         let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
@@ -312,15 +316,19 @@ mod tests {
 
         let linked_path = dir.path().join("linked");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked_path.clone(),
-                branch: Some(WorktreeBranch::Create("linked".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked_path.clone(),
+                    branch: Some(WorktreeBranch::Create("linked".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: false,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("linked");
 
         let linked_repo = Repository::discover(Some(&linked_path), &RepositoryOptions::empty())
@@ -347,7 +355,13 @@ mod tests {
 
         let mut opts = PruneOptions::default();
         opts.older_than = Some(SystemTime::now());
-        let stats = prune_loose_objects(&repo, &opts).expect("prune");
+        let stats = prune_loose_objects(
+            &repo,
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("prune");
         assert_eq!(stats.pruned, 0, "linked index blob must stay reachable");
 
         let status = Command::new("git")
@@ -439,7 +453,13 @@ mod tests {
 
         let mut opts = PruneOptions::default();
         opts.older_than = Some(SystemTime::now());
-        prune_loose_objects(&repo, &opts).expect("prune with gitlink REUC");
+        prune_loose_objects(
+            &repo,
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("prune with gitlink REUC");
 
         git(&["fsck", "--strict"]);
     }
@@ -453,15 +473,19 @@ mod tests {
         let linked_path = dir.path().join("linked");
         let entry = repo
             .worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked_path,
-                branch: Some(WorktreeBranch::Create("linked".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: true,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked_path,
+                    branch: Some(WorktreeBranch::Create("linked".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: true,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("linked");
         assert!(!entry.admin_dir.join("index").exists());
         reachability_roots(&repo).expect("roots with missing linked index");

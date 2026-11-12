@@ -69,7 +69,7 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local");
@@ -155,7 +155,7 @@ fn fetch_local_copies_refs_and_objects_then_fast_forwards() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("second fetch");
@@ -344,7 +344,7 @@ fn fetch_local_from_loose_remote_links_loose_objects() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local");
@@ -423,7 +423,7 @@ fn fetch_local_into_empty_repo_links_remote_pack() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local");
@@ -494,7 +494,7 @@ fn fetch_into_repo_holding_the_empty_tree_still_links_the_source_pack() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local");

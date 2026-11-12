@@ -278,7 +278,6 @@ impl From<UnbundledRef> for BundleHead {
 mod tests {
     use super::*;
     use crate::config::environment::RepositoryOptions;
-    use crate::fetch::NoProgress;
     use crate::progress::NullProgress;
     use crate::transfer::TagMode;
     use std::process::Command;
@@ -451,14 +450,14 @@ mod tests {
         let incomplete = repo.bundles().fetch(
             &incremental,
             &options,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         );
         assert!(incomplete.is_err(), "the prerequisite is missing");
 
         let fetched = repo
             .bundles()
-            .fetch(&full, &options, &mut NoProgress, &CancelToken::never())
+            .fetch(&full, &options, &mut NullProgress, &CancelToken::never())
             .expect("fetch full");
         assert!(fetched.changed_ref_count() >= 1);
         assert_eq!(
@@ -471,7 +470,7 @@ mod tests {
             .fetch(
                 &incremental,
                 &options,
-                &mut NoProgress,
+                &mut NullProgress,
                 &CancelToken::never(),
             )
             .expect("fetch incremental");

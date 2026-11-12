@@ -116,7 +116,7 @@ fn packed_annotated_tags_push_is_up_to_date_and_preserves_remote_tag() {
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &specs,
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push --tags");

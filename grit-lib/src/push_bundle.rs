@@ -23,9 +23,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::{Error, Result};
-use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
+use crate::progress::ProgressSink;
 use crate::remote::RemoteError;
 use crate::resumable::{resolve_url, ResumableError, TusUpload};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
@@ -230,7 +230,7 @@ pub(crate) fn push(
     commands: &[u8],
     sent_refs: &[&str],
     sideband: bool,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
 ) -> crate::error::Result<Vec<u8>> {
     let bundle = session.bundle_path();
     let length = std::fs::metadata(&bundle).map_err(Error::Io)?.len();
@@ -309,7 +309,7 @@ mod tests {
         );
     }
 
-    use crate::fetch::NoProgress;
+    use crate::progress::NullProgress;
     use crate::transport::http::HttpResponse;
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::sync::Mutex;
@@ -422,7 +422,7 @@ mod tests {
             b"commands",
             &["refs/heads/main"],
             false,
-            &mut NoProgress,
+            &mut NullProgress,
         );
         assert!(first.is_err(), "the connection kept dropping");
         let kept = server
@@ -441,7 +441,7 @@ mod tests {
             b"commands",
             &["refs/heads/main"],
             false,
-            &mut NoProgress,
+            &mut NullProgress,
         );
         let report = match report {
             Ok(r) => String::from_utf8_lossy(&r).into_owned(),

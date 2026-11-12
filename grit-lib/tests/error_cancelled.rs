@@ -8,8 +8,8 @@ use grit_lib::error::Error;
 use grit_lib::porcelain::commit_error::CommitError;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::remote::RemoteError;
 use grit_lib::revwalk::history::{HistoryEngineError, HistoryError, RebaseSessionError};
@@ -87,7 +87,7 @@ fn fetch_local_cancelled_at_start_is_classified() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &mut opts.clone(),
-        &mut NoProgress,
+        &mut NullProgress,
         &flag,
     )
     .expect_err("cancelled before fetch");
@@ -109,7 +109,7 @@ fn clone_cancelled_at_start_is_classified_and_needs_cleanup() {
     flag.cancel();
 
     let opts = CloneOptions::new(upstream.to_string_lossy(), dest.clone());
-    let err = clone(opts, &mut NoProgress, &flag, None).expect_err("cancelled before clone");
+    let err = clone(opts, &mut NullProgress, &flag, None).expect_err("cancelled before clone");
     assert!(matches!(
         err,
         CloneError::Remote(grit_lib::error::Error::Cancelled)

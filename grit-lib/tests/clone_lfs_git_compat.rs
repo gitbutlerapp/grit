@@ -71,7 +71,7 @@ fn clone_lfs_repo_materializes_smudged_blob() {
         .with_url(remote.to_string_lossy().into_owned())
         .with_dest(dest.clone())
         .with_environment(env);
-    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
+    clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).expect("grit clone");
 
     let len = std::fs::metadata(dest.join("a.dat"))
         .expect("a.dat exists")

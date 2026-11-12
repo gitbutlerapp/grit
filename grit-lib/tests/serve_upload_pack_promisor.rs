@@ -112,7 +112,14 @@ impl Offloaded {
         let mut opts = OffloadOptions::new("lop", 1_700_000_000);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(5 * 1024));
         opts.configure_lop = true;
-        let report = repo.maintenance().offload_blobs(&opts).expect("offload");
+        let report = repo
+            .maintenance()
+            .offload_blobs(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
+            .expect("offload");
         assert_eq!(report.dropped_from_main, 1);
         Self {
             _dir: dir,
@@ -222,9 +229,15 @@ fn read_sideband_pack(r: &mut Cursor<Vec<u8>>) -> Vec<u8> {
 fn pack_objects(pack: Vec<u8>) -> HashSet<ObjectId> {
     let dir = tempfile::tempdir().unwrap();
     let scratch = init_bare(dir.path());
-    ingest_received_pack(pack, scratch.odb(), &IngestPackOptions::default())
-        .unwrap()
-        .object_ids
+    ingest_received_pack(
+        pack,
+        scratch.odb(),
+        &IngestPackOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )
+    .unwrap()
+    .object_ids
 }
 
 fn serve(

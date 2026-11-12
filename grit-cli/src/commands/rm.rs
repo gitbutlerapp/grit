@@ -62,7 +62,7 @@ fn rm(
         .with_dry_run(dry_run)
         .with_ignore_unmatch(ignore_unmatch);
     repo.checkout()
-        .remove_paths(&opts, cancel)
+        .remove_paths(&opts, &mut grit_lib::progress::NullProgress, cancel)
         .map_err(|err| crate::error_map::map_remove_paths_error(err, cached, path_display))
 }
 

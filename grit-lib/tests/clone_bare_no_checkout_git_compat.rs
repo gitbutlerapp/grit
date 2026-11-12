@@ -103,7 +103,7 @@ fn clone_bare_matches_git_layout() {
             grit_bare.path().to_path_buf(),
         )
         .with_bare(true),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -180,7 +180,7 @@ fn clone_no_checkout_leaves_no_index() {
             grit_dest.path().to_path_buf(),
         )
         .with_checkout(false),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -220,7 +220,7 @@ fn clone_checkout_counts_files() {
     let dest = tempfile::tempdir().expect("dest");
     let outcome = clone_repo(
         CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -260,7 +260,7 @@ fn local_clone_checkout_honors_thread_policy_on_repository() {
     let outcome = clone_repo(
         CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
             .with_thread_policy(policy),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

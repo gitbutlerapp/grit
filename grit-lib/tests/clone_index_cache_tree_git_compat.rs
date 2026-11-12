@@ -42,7 +42,7 @@ fn grit_clone_index_has_cache_tree_matching_head() {
             upstream.path().to_string_lossy(),
             grit_dest.path().to_path_buf(),
         ),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

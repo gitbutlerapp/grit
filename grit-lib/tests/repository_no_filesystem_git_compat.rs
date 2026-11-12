@@ -12,9 +12,9 @@ use grit_lib::config::environment::{ConfigOverride, Environment, RepositoryOptio
 use grit_lib::ident::Signature;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::{HashAlgo, NewCommit, ObjectKind, TreeEntry};
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::store::{MemoryRefStore, RefName};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::Remote;
 use grit_lib::repo::Repository;
@@ -59,7 +59,13 @@ fn git_history_fetched_into_memory_round_trips_through_an_in_memory_bundle() {
     let mut fetch = FetchOptions::default();
     fetch.refspecs = vec!["+refs/heads/main:refs/heads/main".to_owned()];
     repo.remotes()
-        .fetch(&remote, fetch, &mut NoProgress, &CancelToken::never(), None)
+        .fetch(
+            &remote,
+            fetch,
+            &mut NullProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("fetch from a repository git wrote");
     let fetched = repo
         .revwalk()

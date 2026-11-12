@@ -14,10 +14,10 @@ use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::environment::Environment;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, ErrorSummary, PromisorFetchFailure, Result};
-use crate::fetch::{fetch_operation_identity, Progress};
+use crate::fetch::fetch_operation_identity;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::partial_clone::{ObjectFilterSpec, PartialCloneConfig};
-use crate::progress::CancelToken;
+use crate::progress::{CancelToken, ProgressSink};
 use crate::promisor_fetch::PromisorFetcher;
 use crate::refs;
 use crate::remote::{
@@ -929,7 +929,7 @@ pub struct CloneIntoOutcome {
 pub fn clone_into(
     repo: Repository,
     opts: CloneIntoOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> crate::error::Result<CloneIntoOutcome> {
@@ -968,7 +968,7 @@ pub fn clone_into(
 /// Returns [`CloneError`] when the destination is invalid or fetch fails.
 pub fn clone(
     opts: CloneOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> crate::error::Result<CloneOutcome> {
@@ -1024,7 +1024,7 @@ pub fn clone(
 fn populate_repo_from_remote(
     repo: Repository,
     opts: CloneOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> crate::error::Result<CloneOutcome> {
@@ -1057,7 +1057,7 @@ fn ensure_clone_remote_object_format(
 fn clone_after_claim(
     mut repo: Repository,
     opts: CloneOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
     bare: bool,
@@ -1276,7 +1276,7 @@ type CloneCheckoutStats = (u64, u64, Vec<String>, Vec<String>, Vec<String>);
 fn perform_clone_checkout(
     repo: &Repository,
     commit: ObjectId,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<CloneCheckoutStats> {
     let tree = crate::diff::tree_oid_of_commit_in_repo(repo, &commit)?;
@@ -1946,7 +1946,7 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let outcome = clone(
             CloneOptions::new(upstream_wt.to_string_lossy(), dest.path().to_path_buf()),
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -2061,7 +2061,7 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let outcome = clone(
             CloneOptions::new(bare.to_string_lossy(), dest.path().to_path_buf()),
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -2109,7 +2109,7 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let outcome = clone(
             CloneOptions::new(bare.to_string_lossy(), dest.path().to_path_buf()),
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -2168,7 +2168,7 @@ mod tests {
         let dest = tempfile::tempdir().expect("dest");
         let outcome = clone(
             CloneOptions::new(bare.to_string_lossy(), dest.path().to_path_buf()),
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -2293,7 +2293,7 @@ mod tests {
                 depth: Some(3),
                 ..CloneOptions::new(url.clone(), grit_dest.clone())
             },
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -2344,7 +2344,7 @@ mod tests {
                     branch: Some("feature".to_owned()),
                     ..CloneOptions::new(url.clone(), grit_dest.clone())
                 },
-                &mut crate::fetch::NoProgress,
+                &mut crate::progress::NullProgress,
                 &CancelToken::never(),
                 None,
             )
@@ -2423,7 +2423,7 @@ mod tests {
                 branch: Some("v1".to_owned()),
                 ..CloneOptions::new(url, grit_dest.clone())
             },
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -2455,7 +2455,7 @@ mod tests {
                 branch: Some("no-such-ref".to_owned()),
                 ..CloneOptions::new(url, dest.clone())
             },
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -2475,7 +2475,7 @@ mod tests {
         fs::write(dest.path().join("notes.txt"), b"keep").expect("write");
         let err = clone(
             CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf()),
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &CancelToken::never(),
             None,
         )

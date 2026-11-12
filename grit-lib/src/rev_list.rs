@@ -11648,7 +11648,12 @@ mod tests {
             "git commit-graph write: {}",
             String::from_utf8_lossy(&cg_out.stderr)
         );
-        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        write_commit_graph(
+            &repo,
+            &CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
         let hide_predicate =
             RangeWalkHide::try_for_dense_path_hide(&repo, &[tip], &[hide], true, false)?;
@@ -11759,7 +11764,12 @@ mod tests {
             "git commit-graph write: {}",
             String::from_utf8_lossy(&cg_out.stderr)
         );
-        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        write_commit_graph(
+            &repo,
+            &CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
         assert!(
             RangeWalkHide::try_for_dense_path_hide(&repo, &[tip], &[hide], true, false)?
@@ -11807,7 +11817,12 @@ mod tests {
         use crate::maintenance::{write_commit_graph, CommitGraphOptions};
 
         let (dir, repo, hide, tip) = seed_hide_chain_range_path_repo(300, 8)?;
-        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        write_commit_graph(
+            &repo,
+            &CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
         let hide_predicate =
             RangeWalkHide::try_for_dense_path_hide(&repo, &[tip], &[hide], true, false)?;
@@ -11838,7 +11853,12 @@ mod tests {
         };
 
         let (dir, repo, hide, tip) = seed_hide_chain_range_path_repo(300, 8)?;
-        write_commit_graph(&repo, &CommitGraphOptions::default())?;
+        write_commit_graph(
+            &repo,
+            &CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
         let opts = RevListOptions {
             max_count: Some(1),

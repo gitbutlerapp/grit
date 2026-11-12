@@ -179,8 +179,16 @@ fn diff_index_worktree_and_patch_parse_sweep() -> grit_lib::error::Result<()> {
     let _ = diff.index_to_worktree(
         &mut index,
         &TreeDiffOptions::default().with_refresh_index_stat(true),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
     )?;
-    let _ = diff.tree_to_worktree(Some(&head_tree), &index, &TreeDiffOptions::default())?;
+    let _ = diff.tree_to_worktree(
+        Some(&head_tree),
+        &index,
+        &TreeDiffOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )?;
     let patch = "diff --git a/f.txt b/f.txt\n--- a/f.txt\n+++ b/f.txt\n@@ -1 +1 @@\n-one\n+two\n";
     let _ = parse_patch(patch, 1, "p", false, None)?;
     let specs = parse_pathspecs_from_source(b"*.txt\0dir/\0", true)?;

@@ -9,8 +9,8 @@ use std::string::String;
 use grit_lib::config::environment::Environment;
 use grit_lib::prelude::ConfigSet;
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
@@ -62,7 +62,7 @@ fn local_clone_stores_origin_url_matching_git() {
     let grit_dest = sub.join("grit-clone");
     let mut opts = CloneOptions::new(String::from("../src"), grit_dest.clone());
     opts.environment = env;
-    clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
+    clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("grit clone");
     let config = ConfigSet::load(
         &Environment::empty(),
         Some(&grit_dest.join(".git")),
@@ -139,7 +139,7 @@ fn local_clone_stored_url_prefers_pwd_prefix() {
     let grit_dest = sub.join("grit-clone");
     let mut opts = CloneOptions::new(String::from("../src"), grit_dest.clone());
     opts.environment = env;
-    clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
+    clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("grit clone");
     let config = ConfigSet::load(
         &Environment::empty(),
         Some(&grit_dest.join(".git")),

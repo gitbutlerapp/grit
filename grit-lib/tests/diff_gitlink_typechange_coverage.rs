@@ -32,6 +32,8 @@ fn gitlink_replaced_by_regular_file_reports_typechange() -> grit_lib::error::Res
         .index_to_worktree(
             &mut index,
             &TreeDiffOptions::default().with_submodules(SubmoduleIgnoreMode::Dirty),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )?
         .entries;
     assert!(
@@ -48,7 +50,12 @@ fn gitlink_replaced_by_regular_file_reports_typechange() -> grit_lib::error::Res
         .map_err(grit_lib::error::Error::Io)?;
     let clean = repo
         .diff()
-        .index_to_worktree(&mut index, &TreeDiffOptions::default())?
+        .index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )?
         .entries;
     assert!(clean.is_empty(), "matching file should not diff: {clean:?}");
 
@@ -57,8 +64,11 @@ fn gitlink_replaced_by_regular_file_reports_typechange() -> grit_lib::error::Res
         .entries_mut()
         .push(gitlink_entry("linked", submodule_tip));
     std::fs::create_dir_all(dir.path().join("linked")).map_err(grit_lib::error::Error::Io)?;
-    let _ = repo
-        .diff()
-        .index_to_worktree(&mut index, &TreeDiffOptions::default())?;
+    let _ = repo.diff().index_to_worktree(
+        &mut index,
+        &TreeDiffOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )?;
     Ok(())
 }

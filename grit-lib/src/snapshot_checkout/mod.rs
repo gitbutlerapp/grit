@@ -120,12 +120,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::fetch::Progress;
 use crate::objects::{
     parse_commit, parse_tree, serialize_tree, tree_name_cmp, ObjectId, ObjectKind, TreeEntry,
 };
 use crate::odb::Odb;
 use crate::progress::CancelToken;
+use crate::progress::ProgressSink;
 use crate::repo::{InitOptions, Repository};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest};
 use crate::transport_path::redact_url_for_display;
@@ -1616,7 +1616,7 @@ pub struct MaterializeRequest<'a> {
 /// download that is not the described snapshot, and repository failures.
 pub fn materialize(
     request: &MaterializeRequest<'_>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<Materialized> {
     let MaterializeRequest {

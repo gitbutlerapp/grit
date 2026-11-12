@@ -22,7 +22,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use crate::fetch::Progress;
+use crate::progress::ProgressSink;
 use crate::progress::{CancelToken, ProgressPhase, ProgressUnit};
 use crate::transport::http::{HttpClient, HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
@@ -52,7 +52,7 @@ pub enum TransferDirection {
 }
 
 /// Progress of a resumable transfer, reported through
-/// [`Progress::resumable_transfer`].
+/// [`ProgressSink::resumable_transfer`](crate::progress::ProgressSink::resumable_transfer).
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum ResumableEvent {
@@ -309,7 +309,7 @@ pub fn download_resumable(
     client: &dyn HttpClient,
     url: &str,
     dest: &Path,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<DownloadOutcome> {
     let (part, state_path) = download_paths(dest);
@@ -428,9 +428,9 @@ fn download_attempt(
     part: &Path,
     state: &mut DownloadState,
     state_path: &Path,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
-    mut on_start: impl FnMut(&mut dyn Progress, &AttemptStart),
+    mut on_start: impl FnMut(&mut dyn ProgressSink, &AttemptStart),
 ) -> Result<AttemptOutcome> {
     let have = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
     let mut request = HttpRequest::new(HttpMethod::Get, url).with_long_running(true);
@@ -654,7 +654,7 @@ impl TusUpload {
         &self,
         client: &dyn HttpClient,
         file: &Path,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
     ) -> Result<()> {
         let gone = |status| ResumableError::Status {
             url: self.url.clone(),
@@ -771,8 +771,8 @@ pub(crate) fn resolve_url(base: &str, reference: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fetch::NoProgress;
     use crate::progress::CancelToken;
+    use crate::progress::NullProgress;
     use crate::remote::RemoteError;
     use std::collections::VecDeque;
     use std::sync::Mutex;
@@ -879,8 +879,7 @@ mod tests {
 
     #[derive(Default)]
     struct Events(Vec<ResumableEvent>);
-    impl crate::progress::ProgressSink for Events {}
-    impl Progress for Events {
+    impl crate::progress::ProgressSink for Events {
         fn resumable_transfer(&mut self, event: &ResumableEvent) {
             if !matches!(event, ResumableEvent::Advanced { .. }) {
                 self.0.push(event.clone());
@@ -969,7 +968,7 @@ mod tests {
                 &failing,
                 "http://h/b",
                 &dest,
-                &mut NoProgress,
+                &mut NullProgress,
                 &CancelToken::never()
             ),
             Err(crate::error::Error::Remote(crate::remote::RemoteError::Resumable(ref r)))
@@ -1002,7 +1001,7 @@ mod tests {
             &again,
             "http://h/b",
             &dest,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         );
         assert_eq!(outcome.ok().map(|o| o.resumed_from), Some(200_000));
@@ -1022,7 +1021,7 @@ mod tests {
             &failing,
             "http://h/b",
             &dest,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         );
 
@@ -1032,7 +1031,7 @@ mod tests {
             &changed,
             "http://h/b",
             &dest,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         );
         assert_eq!(outcome.ok().map(|o| o.bytes), Some(200_000));
@@ -1043,7 +1042,7 @@ mod tests {
             &other,
             "http://h/other",
             &dest,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         );
         assert_eq!(outcome.ok().map(|o| o.resumed_from), Some(0));
@@ -1062,8 +1061,7 @@ mod tests {
         flag: CancelToken,
         after: u64,
     }
-    impl crate::progress::ProgressSink for CancelAfter {}
-    impl Progress for CancelAfter {
+    impl crate::progress::ProgressSink for CancelAfter {
         fn resumable_transfer(&mut self, event: &ResumableEvent) {
             if let ResumableEvent::Advanced { done, .. } = event {
                 if *done >= self.after {
@@ -1099,7 +1097,7 @@ mod tests {
             &srv,
             "http://h/b",
             &dest,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         );
         assert_eq!(outcome.ok().map(|o| o.resumed_from), Some(kept));
@@ -1163,7 +1161,7 @@ mod tests {
             &AuthClient,
             "http://h/b",
             &dest,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         );
         assert!(
@@ -1193,7 +1191,7 @@ mod tests {
         let flag = CancelToken::new();
         flag.cancel();
         assert!(matches!(
-            download_resumable(&srv, "http://h/b", &dest, &mut NoProgress, &flag),
+            download_resumable(&srv, "http://h/b", &dest, &mut NullProgress, &flag),
             Err(crate::error::Error::Cancelled)
         ));
         assert!(srv

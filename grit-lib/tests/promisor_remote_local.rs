@@ -13,7 +13,6 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError};

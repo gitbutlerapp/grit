@@ -33,10 +33,10 @@ use std::collections::HashSet;
 use std::io::{Cursor, Read};
 
 use crate::error::{Error, RemoteUnreadableReason, Result};
-use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line;
 use crate::progress::CancelToken;
+use crate::progress::ProgressSink;
 use crate::remote::RemoteError;
 use crate::transfer::{FetchOptions, FetchOutcome};
 use crate::transport::pending_http::PendingHttp;
@@ -1188,7 +1188,7 @@ pub(crate) fn http_fetch(
     local: &crate::repo::Repository,
     repo_url: &str,
     opts: &mut FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<FetchOutcome> {
     use crate::transport::Transport;

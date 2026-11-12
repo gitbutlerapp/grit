@@ -7,9 +7,9 @@ use std::collections::{BTreeSet, HashSet};
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Error;
 use crate::error::Result;
-use crate::fetch::Progress;
 use crate::fetch_request::FetchRefspecError;
 use crate::progress::CancelToken;
+use crate::progress::ProgressSink;
 use crate::refs::store::{Expected, RefName, RefNameRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{commit_ref_updates_on_store, list_refs_for_repository};
 use crate::refspec::{fetch_specs_bind_local_ref, parse_fetch_refspec, RefspecItem};
@@ -274,7 +274,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     ///
     /// ```
     /// # use grit_lib::progress::CancelToken;
-    /// # use grit_lib::remote::fetch::NoProgress;
+    /// # use grit_lib::progress::NullProgress;
     /// # use grit_lib::remote::Remote;
     /// # use grit_lib::repo::Repository;
     /// # use grit_lib::remote::transfer::FetchOptions;
@@ -282,7 +282,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
     /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
     /// let remote = Remote::from_url("/path/to/upstream.git")?;
-    /// let mut progress = NoProgress;
+    /// let mut progress = NullProgress;
     /// let _out = repo
     ///     .remotes()
     ///     .fetch(&remote, FetchOptions::default(), &mut progress, &CancelToken::never(), None)?;
@@ -293,7 +293,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         &self,
         remote: &Remote,
         options: FetchOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> crate::error::Result<FetchOutcome> {
@@ -319,7 +319,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     ///
     /// ```
     /// # use grit_lib::progress::CancelToken;
-    /// # use grit_lib::remote::fetch::NoProgress;
+    /// # use grit_lib::progress::NullProgress;
     /// # use grit_lib::remote::transfer::{FetchOptions, TransferEndpoint};
     /// # use grit_lib::repo::{InitOptions, Repository};
     /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -331,7 +331,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// let outcome = repo.remotes().fetch_from(
     ///     TransferEndpoint::Local(upstream.git_dir()),
     ///     &mut options,
-    ///     &mut NoProgress,
+    ///     &mut NullProgress,
     ///     &CancelToken::never(),
     /// )?;
     /// assert_eq!(outcome.transfer.objects, 0);
@@ -342,7 +342,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         &self,
         endpoint: TransferEndpoint<'_>,
         options: &mut FetchOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<FetchOutcome> {
         match endpoint {
@@ -380,7 +380,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         endpoint: TransferEndpoint<'_>,
         refs: &[PushRefSpec],
         options: &PushOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<PushOutcome> {
         match endpoint {
@@ -418,7 +418,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     pub fn fetch_all(
         &self,
         options: &FetchAllOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> Result<Vec<(String, crate::error::Result<FetchOutcome>)>> {
@@ -470,7 +470,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     ///
     /// ```
     /// # use grit_lib::progress::CancelToken;
-    /// # use grit_lib::remote::fetch::NoProgress;
+    /// # use grit_lib::progress::NullProgress;
     /// # use grit_lib::remote::Remote;
     /// # use grit_lib::repo::Repository;
     /// # use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
@@ -478,7 +478,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
     /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
     /// let remote = Remote::from_url("/path/to/upstream.git")?;
-    /// let mut progress = NoProgress;
+    /// let mut progress = NullProgress;
     /// let refs: Vec<PushRefSpec> = Vec::new();
     /// let _out = repo
     ///     .remotes()
@@ -491,7 +491,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         remote: &Remote,
         refs: &[PushRefSpec],
         options: PushOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> crate::error::Result<PushOutcome> {

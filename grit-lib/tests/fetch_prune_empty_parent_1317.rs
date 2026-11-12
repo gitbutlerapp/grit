@@ -54,7 +54,7 @@ fn fetch_prune_removes_empty_parent_then_fetch_succeeds() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut wildcard.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("initial fetch");
@@ -81,7 +81,7 @@ fn fetch_prune_removes_empty_parent_then_fetch_succeeds() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut pruning.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("prune fetch");
@@ -116,7 +116,7 @@ fn fetch_prune_removes_empty_parent_then_fetch_succeeds() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut wildcard.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch after remote republished feature at former parent path");

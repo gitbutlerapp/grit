@@ -177,7 +177,12 @@ impl HotPathsFixture {
         let _ = self
             .repo
             .diff()
-            .index_to_worktree(&mut index, &options)
+            .index_to_worktree(
+                &mut index,
+                &options,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
             .expect("refresh index stat cache");
         let path = self.repo.index().path();
         index.write(&path).expect("write refreshed index");
@@ -208,6 +213,8 @@ impl HotPathsFixture {
             .index_to_worktree(
                 &mut index,
                 &TreeDiffOptions::default().with_for_status(true),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
             )
             .expect("diff index worktree clean");
     }

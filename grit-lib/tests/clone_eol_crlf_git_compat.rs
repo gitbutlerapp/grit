@@ -63,7 +63,7 @@ fn grit_clone_and_checkout(source: &std::path::Path, dest: &std::path::Path) {
         .with_dest(dest.to_path_buf())
         .with_environment(Environment::empty());
     let outcome =
-        clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
+        clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).expect("grit clone");
     let commit = outcome
         .repo
         .odb()

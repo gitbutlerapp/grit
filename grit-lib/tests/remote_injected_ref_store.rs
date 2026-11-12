@@ -114,7 +114,7 @@ fn fetch(repo: &Repository, remote: &str, opts: FetchOptions) {
     repo.remotes()
         .get(remote)
         .expect("remote")
-        .fetch(repo, opts, &mut NoProgress, &CancelToken::never(), None)
+        .fetch(repo, opts, &mut NullProgress, &CancelToken::never(), None)
         .expect("fetch");
 }
 
@@ -301,7 +301,7 @@ fn push_updates_tracking_refs_in_the_injected_store() {
             &repo,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -424,7 +424,7 @@ fn files_backend_fetch_prune_and_push_round_trip_with_git() {
             &repo,
             &[spec],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

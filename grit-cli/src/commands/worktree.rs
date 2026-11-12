@@ -72,7 +72,7 @@ pub fn run_add(
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let entry = repo
         .worktrees()
-        .add_with_cancel(
+        .add(
             &AddLinkedWorktreeOptions::new(path)
                 .with_branch(branch_mode)
                 .with_start_point(start_point)
@@ -82,6 +82,7 @@ pub fn run_add(
                 )
                 .with_no_checkout(no_checkout)
                 .with_track(track),
+            &mut grit_lib::progress::NullProgress,
             &crate::interrupt::process_cancel_token(),
         )
         .map_err(anyhow::Error::new)?;
@@ -98,8 +99,14 @@ pub fn run_add(
 pub fn run_remove(path: PathBuf, force: bool) -> Result<WorktreeOutcome> {
     let repo = context::discover()?;
     let canonical = path_for_disk_compare(&path);
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     repo.worktrees()
-        .remove(&canonical, force)
+        .remove(
+            &canonical,
+            force,
+            &mut grit_lib::progress::NullProgress,
+            &crate::interrupt::process_cancel_token(),
+        )
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Remove {
         path: user_display_path(&canonical),
@@ -152,6 +159,8 @@ pub fn run_move(from: PathBuf, to: PathBuf, force: bool, dry_run: bool) -> Resul
             &MoveWorktreeOptions::default()
                 .with_force(force)
                 .with_dry_run(dry_run),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Move {

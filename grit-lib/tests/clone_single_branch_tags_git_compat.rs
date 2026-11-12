@@ -213,7 +213,7 @@ fn grit_clone_with(case: CloneCase, url: String, dest: PathBuf) {
         .with_depth(case.depth)
         .with_branch(case.branch.map(str::to_owned))
         .with_single_branch(case.single_branch);
-    clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("grit clone");
+    clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).expect("grit clone");
 }
 
 #[test]
@@ -294,7 +294,7 @@ fn clone_no_tags_sets_tagopt_and_fetches_no_tags() {
 
     clone_repo(
         CloneOptions::new(url, grit_dest.clone()).with_tags(Some(CloneTags::None)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -332,7 +332,7 @@ fn clone_origin_name_used_for_tracking_refs() {
     let dest = tmp.path().join("upstream-clone");
     clone_repo(
         CloneOptions::new(url, dest.clone()).with_remote_name("upstream".to_owned()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -373,7 +373,7 @@ fn clone_invalid_remote_on_nonempty_destination_preserves_files() {
     let err = clone_repo(
         CloneOptions::new(bare.to_string_lossy(), dest.clone())
             .with_remote_name("bad name".to_owned()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -462,7 +462,7 @@ fn clone_rejects_invalid_remote_name() {
     let err = clone_repo(
         CloneOptions::new(bare.to_string_lossy(), tmp.path().join("dest"))
             .with_remote_name("bad name".to_owned()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -502,7 +502,7 @@ fn assert_single_branch_tag_parity(url: &str, branch: &str, bare: bool) {
             .with_branch(Some(branch.to_owned()))
             .with_single_branch(Some(true))
             .with_bare(bare),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -572,7 +572,7 @@ fn clone_depth_no_single_branch_fetches_all_tags() {
         CloneOptions::new(url, grit_dest.clone())
             .with_depth(Some(1))
             .with_single_branch(Some(false)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

@@ -1082,15 +1082,19 @@ mod subprocess_context_tests {
 
         let entry = main_repo
             .worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked_wt.clone(),
-                branch: Some(WorktreeBranch::Create("linked".into())),
-                start_point: None,
-                force: false,
-                lock: None,
-                no_checkout: true,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked_wt.clone(),
+                    branch: Some(WorktreeBranch::Create("linked".into())),
+                    start_point: None,
+                    force: false,
+                    lock: None,
+                    no_checkout: true,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("add linked worktree");
 
         let linked_repo = main_repo

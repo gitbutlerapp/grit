@@ -4,9 +4,9 @@
 //! explicit refspecs, so renaming or re-pointing `origin` can't send raw
 //! snapshot-based commits elsewhere or fetch from the wrong place.
 
-use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::progress::CancelToken;
+use crate::progress::ProgressSink;
 use crate::remote::{HttpClientFactory, Remote};
 use crate::repo::Repository;
 use crate::transfer::{
@@ -37,7 +37,7 @@ pub(crate) fn push_for_checkin(
     repo: &Repository,
     marker: &CheckoutMarker,
     branches: &[(String, ObjectId)],
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<PushOutcome> {
@@ -113,7 +113,7 @@ pub(crate) fn fetch_snapshot(
     marker: &CheckoutMarker,
     info: &CheckoutInfo,
     fetch: FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<FetchedSnapshot> {
@@ -170,7 +170,7 @@ pub(crate) fn fetch_branch(
     marker: &CheckoutMarker,
     info: &BranchInfo,
     fetch: FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<TransferStats> {

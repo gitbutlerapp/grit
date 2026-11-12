@@ -85,7 +85,7 @@ fn grit_clone_local_git_sha256_repo() {
         CloneOptions::new(source.to_string_lossy().into_owned(), dest.clone())
             .with_url(source.to_string_lossy().into_owned())
             .with_dest(dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -199,7 +199,7 @@ fn grit_clone_git_daemon_sha256_repo_after_sha1_init() {
     let dest = tmp.path().join("clone");
     let outcome = clone(
         CloneOptions::new(url, dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

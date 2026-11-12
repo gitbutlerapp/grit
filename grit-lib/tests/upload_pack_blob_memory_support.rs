@@ -79,8 +79,9 @@ pub fn stream_blob_to_sink(
         .with_have_shallow(&HashSet::new())
         .write(
             repo,
-            &mut grit_lib::progress::NullProgress,
             &mut std::io::sink(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("upload-pack stream")
 }
@@ -96,6 +97,11 @@ pub fn write_blob_pack_file(
         .with_haves(&[])
         .with_source_shallow(&HashSet::new())
         .with_have_shallow(&HashSet::new())
-        .write(repo, &mut grit_lib::progress::NullProgress, &mut file)
+        .write(
+            repo,
+            &mut file,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("upload-pack stream");
 }

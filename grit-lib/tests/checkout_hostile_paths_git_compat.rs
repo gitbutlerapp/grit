@@ -257,7 +257,7 @@ fn grit_lib_clone_hostile_path_rejected(
     // also skips clone-failure assertions for this case (see below).
     if case_label == "hfs dotgit" {
         opts.checkout = false;
-        let outcome = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None)
+        let outcome = clone_repo(opts, &mut NullProgress, &CancelToken::never(), None)
             .unwrap_or_else(|e| panic!("{case_label}: clone fetch: {e:?}"));
         if !local_config.is_empty() {
             append_local_config(outcome.repo.git_dir(), local_config);
@@ -276,7 +276,7 @@ fn grit_lib_clone_hostile_path_rejected(
         );
         return checkout_result.unwrap_err();
     }
-    match clone_repo(opts, &mut NoProgress, &CancelToken::never(), None) {
+    match clone_repo(opts, &mut NullProgress, &CancelToken::never(), None) {
         Ok(outcome) => panic!(
             "{case_label}: clone should not succeed with hostile default branch (checked out {} files)",
             outcome.files
@@ -335,7 +335,7 @@ fn open_cloned_main(parent: &Path, upstream: &Path) -> Repository {
         .with_dest(dest.clone())
         .with_environment(Environment::empty());
     let outcome =
-        clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone main");
+        clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone main");
     let commit = outcome
         .repo
         .odb()
@@ -376,7 +376,7 @@ fn dotdot_tree_rejected_at_index_population() {
             .with_url(upstream.path().to_string_lossy().into_owned())
             .with_dest(dest.path().to_path_buf())
             .with_environment(Environment::empty()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -552,7 +552,7 @@ fn win32_only_names_check_out_off_windows_like_git() {
         let dest = parent.path().join("grit-clone");
         let url = upstream.to_string_lossy().into_owned();
         let opts = CloneOptions::new(url, dest.clone()).with_environment(Environment::empty());
-        clone_repo(opts, &mut NoProgress, &CancelToken::never(), None)
+        clone_repo(opts, &mut NullProgress, &CancelToken::never(), None)
             .unwrap_or_else(|e| panic!("{label}: grit clone should succeed: {e:?}"));
         assert_eq!(
             dir_bytes_snapshot(&dest)

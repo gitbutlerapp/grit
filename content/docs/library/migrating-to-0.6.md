@@ -75,11 +75,13 @@ Cancellation and progress are always the last parameters, in that order: `progre
 // 0.5.x
 worktree::add_linked_worktree_with_cancel(&repo, &opts, &cancel)?;
 
-// 0.6 — linked worktrees still expose `add` and `add_with_cancel`; progress/cancel are trailing args
-repo.worktrees().add_with_cancel(&opts, &cancel)?;
+// 0.6 — one method, trailing progress and cancel
+repo.worktrees().add(&opts, &mut NullProgress, &cancel)?;
 ```
 
-Many porcelain calls dropped separate `_with_progress` / `_with_cancel` free functions in favour of one method with trailing `progress` and `cancel`. Some handles still keep a dedicated `_with_cancel` when the default entry point does not take cancellation (for example [`RepositoryWorktrees::add`](rustdoc:grit_lib::repo_handles::RepositoryWorktrees::add) vs [`add_with_cancel`](rustdoc:grit_lib::repo_handles::RepositoryWorktrees::add_with_cancel)). Prefer the plain method when it already accepts [`CancelToken`](rustdoc:grit_lib::progress::CancelToken).
+There are no separate `_with_progress` / `_with_cancel` variants: every long-running operation takes both trailing parameters, including the ones that took neither in 0.5 (maintenance steps such as `prune_loose_objects`, `write_commit_graph`, `write_midx`, `offload_blobs` and `drop_promised_blobs`; `ingest_received_pack`, `ingest_pack_into`, `PackObjects::write_to` and `UploadPackStream::write`, whose `out` argument now comes before `progress`; `Diff::{index_to_worktree, tree_to_worktree}`; linked worktree `add`, `remove` and `move_linked`; and `Checkout::{remove_paths, move_path, move_paths, preview_reset}`). Pass `&mut NullProgress` and `&CancelToken::never()` to keep the 0.5 behaviour. `Maintenance::pack_refs` and the ref-listing remote calls (`ls_remote`, `inspect`, `prune`, `set_head`) take neither; `grit-lib/API.md` says why.
+
+The fetch-only `remote::fetch::Progress` subtrait is gone: its methods (`message`, `remote_sideband_progress`, `wants_received_objects`, `received_objects`, `resumable_transfer`, `milestone`) are provided no-op methods on [`ProgressSink`](rustdoc:grit_lib::progress::ProgressSink), so implement `ProgressSink` and override what you need. `remote::fetch::NoProgress` is replaced by [`NullProgress`](rustdoc:grit_lib::progress::NullProgress), and `FetchMilestone` moved to [`grit_lib::progress::FetchMilestone`](rustdoc:grit_lib::progress::FetchMilestone). `pull` and `RepositorySnapshotCheckouts::refresh` take `&mut dyn ProgressSink` instead of a generic sink.
 
 ### `RefName` and `Pathspec` instead of bare strings
 
@@ -692,6 +694,10 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::prelude::MidxError::eq` | `grit_lib::prelude::MidxError (unchanged; the snapshot lists this member under grit_lib::error::MidxError)` |  |
 | `grit_lib::prelude::MidxError::fmt` | `grit_lib::prelude::MidxError (unchanged; the snapshot lists this member under grit_lib::error::MidxError)` |  |
 | `grit_lib::prelude::Odb::bulk_stage_write_options` | `removed (crate-internal in 0.6: staging-only policy; build WriteOptions with its with_* setters)` |  |
+| `grit_lib::progress::Cancelled` | `removed (crate-internal in 0.6: cancellation surfaces as grit_lib::error::Error::Cancelled)` |  |
+| `grit_lib::progress::Cancelled::clone` | `removed (crate-internal in 0.6: cancellation surfaces as grit_lib::error::Error::Cancelled)` |  |
+| `grit_lib::progress::Cancelled::eq` | `removed (crate-internal in 0.6: cancellation surfaces as grit_lib::error::Error::Cancelled)` |  |
+| `grit_lib::progress::Cancelled::fmt` | `removed (crate-internal in 0.6: cancellation surfaces as grit_lib::error::Error::Cancelled)` |  |
 | `grit_lib::refs::branch_tracking::apply_push_remote_tracking_updates` | `grit_lib::repo_handles::Branches::apply_push_remote_tracking_updates` |  |
 | `grit_lib::refs::branch_tracking::compare_with_target_optional` | `grit_lib::repo_handles::Branches::compare_with_target` |  |
 | `grit_lib::refs::branch_tracking::list_branches` | `grit_lib::repo_handles::Branches::list` |  |
@@ -748,6 +754,32 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::refs::store::backend::verify_create_conflicts` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::refs::store::paths::packed_refs_rel` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::remote::RemoteError::Snapshot` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
+| `grit_lib::remote::fetch` | `grit_lib::progress (the progress types moved there)` |  |
+| `grit_lib::remote::fetch::FetchMilestone` | `grit_lib::progress::FetchMilestone` |  |
+| `grit_lib::remote::fetch::FetchMilestone::Connected` | `grit_lib::progress::FetchMilestone::Connected` |  |
+| `grit_lib::remote::fetch::FetchMilestone::PackRequested` | `grit_lib::progress::FetchMilestone::PackRequested` |  |
+| `grit_lib::remote::fetch::FetchMilestone::clone` | `grit_lib::progress::FetchMilestone::clone` |  |
+| `grit_lib::remote::fetch::FetchMilestone::eq` | `grit_lib::progress::FetchMilestone::eq` |  |
+| `grit_lib::remote::fetch::FetchMilestone::fmt` | `grit_lib::progress::FetchMilestone::fmt` |  |
+| `grit_lib::remote::fetch::NoProgress` | `grit_lib::progress::NullProgress` |  |
+| `grit_lib::remote::fetch::NoProgress::finish` | `grit_lib::progress::ProgressSink::finish (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::inc` | `grit_lib::progress::ProgressSink::inc (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::message` | `grit_lib::progress::ProgressSink::message (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::milestone` | `grit_lib::progress::ProgressSink::milestone (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::received_objects` | `grit_lib::progress::ProgressSink::received_objects (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::remote_sideband_progress` | `grit_lib::progress::ProgressSink::remote_sideband_progress (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::resumable_transfer` | `grit_lib::progress::ProgressSink::resumable_transfer (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::set` | `grit_lib::progress::ProgressSink::set (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::start` | `grit_lib::progress::ProgressSink::start (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::start_with_unit` | `grit_lib::progress::ProgressSink::start_with_unit (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::NoProgress::wants_received_objects` | `grit_lib::progress::ProgressSink::wants_received_objects (NullProgress uses the provided no-op)` |  |
+| `grit_lib::remote::fetch::Progress` | `grit_lib::progress::ProgressSink` |  |
+| `grit_lib::remote::fetch::Progress::message` | `grit_lib::progress::ProgressSink::message` |  |
+| `grit_lib::remote::fetch::Progress::milestone` | `grit_lib::progress::ProgressSink::milestone` |  |
+| `grit_lib::remote::fetch::Progress::received_objects` | `grit_lib::progress::ProgressSink::received_objects` |  |
+| `grit_lib::remote::fetch::Progress::remote_sideband_progress` | `grit_lib::progress::ProgressSink::remote_sideband_progress` |  |
+| `grit_lib::remote::fetch::Progress::resumable_transfer` | `grit_lib::progress::ProgressSink::resumable_transfer` |  |
+| `grit_lib::remote::fetch::Progress::wants_received_objects` | `grit_lib::progress::ProgressSink::wants_received_objects` |  |
 | `grit_lib::remote::github_auth` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
 | `grit_lib::remote::github_auth::DeviceAuthorization` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
 | `grit_lib::remote::github_auth::DeviceAuthorization::clone` | `removed from the default build (unstable-hosting feature only, outside semver)` |  |
@@ -1668,7 +1700,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::worktree::LockWorktreeOptions::default` | `grit_lib::worktree::LockWorktreeOptions (unchanged; the snapshot lists this member under grit_lib::repo_handles::LockWorktreeOptions)` |  |
 | `grit_lib::worktree::LockWorktreeOptions::fmt` | `grit_lib::worktree::LockWorktreeOptions (unchanged; the snapshot lists this member under grit_lib::repo_handles::LockWorktreeOptions)` |  |
 | `grit_lib::worktree::add_linked_worktree` | `grit_lib::repo_handles::RepositoryWorktrees::add` |  |
-| `grit_lib::worktree::add_linked_worktree_with_cancel` | `grit_lib::repo_handles::RepositoryWorktrees::add_with_cancel` |  |
+| `grit_lib::worktree::add_linked_worktree_with_cancel` | `grit_lib::repo_handles::RepositoryWorktrees::add` |  |
 | `grit_lib::worktree::allocate_worktree_admin_dir` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::worktree::common_git_dir` | `grit_lib::repo::Repository::common_git_dir` |  |
 | `grit_lib::worktree::copy_filtered_worktree_config` | `removed (crate-internal worktree setup)` |  |

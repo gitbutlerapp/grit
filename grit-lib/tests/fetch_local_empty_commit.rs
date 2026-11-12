@@ -65,7 +65,7 @@ fn fetch_local_empty_commit_bare_remote() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local");

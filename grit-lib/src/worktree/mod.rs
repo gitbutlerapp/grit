@@ -19,14 +19,15 @@ pub(crate) mod linked_worktree_error;
 mod move_repair;
 pub(crate) mod symlink;
 
+#[cfg(test)]
+pub(crate) use core::add_linked_worktree;
 #[cfg(feature = "test-support")]
 pub(crate) use core::copy_filtered_worktree_config;
 pub(crate) use core::{
-    add_linked_worktree, add_linked_worktree_with_cancel, admin_dirs_match,
-    ensure_branch_not_checked_out_elsewhere, ensure_branch_not_checked_out_in_any_worktree,
-    find_worktree_with_branch_checked_out, list_worktrees, lock_linked_worktree,
-    prune_linked_worktrees, read_worktree_path, remove_linked_worktree, unlock_linked_worktree,
-    worktree_admin_dir,
+    add_linked_worktree_with_cancel, admin_dirs_match, ensure_branch_not_checked_out_elsewhere,
+    ensure_branch_not_checked_out_in_any_worktree, find_worktree_with_branch_checked_out,
+    list_worktrees, lock_linked_worktree, prune_linked_worktrees, read_worktree_path,
+    remove_linked_worktree, unlock_linked_worktree, worktree_admin_dir,
 };
 pub use core::{
     resolve_linked_worktree_add_path, AddLinkedWorktreeOptions, LockWorktreeOptions,

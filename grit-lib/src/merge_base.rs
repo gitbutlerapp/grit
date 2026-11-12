@@ -4830,6 +4830,8 @@ mod tests {
         crate::maintenance::write_commit_graph(
             &repo,
             &crate::maintenance::CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
         )?;
         let mut lookups = Vec::new();
         for low_level in [false, true] {
@@ -5008,6 +5010,8 @@ mod tests {
                 crate::maintenance::write_commit_graph(
                     &repo,
                     &crate::maintenance::CommitGraphOptions::default(),
+                    &mut crate::progress::NullProgress,
+                    &crate::progress::CancelToken::never(),
                 )?;
             }
             for (filter, expected) in cases {
@@ -5618,8 +5622,11 @@ mod tests {
         for (name, oid) in refs {
             crate::refs::write_ref(repo.git_dir(), name, oid)?;
         }
-        repo.maintenance()
-            .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())?;
+        repo.maintenance().write_commit_graph(
+            &crate::maintenance::CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         drop(repo);
         Repository::open(dir.path(), &RepositoryOptions::empty())
     }

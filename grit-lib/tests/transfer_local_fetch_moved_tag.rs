@@ -43,7 +43,7 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("initial fetch");
@@ -72,7 +72,7 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch after tag move");
@@ -111,7 +111,7 @@ fn fetch_local_following_ignores_moved_tag_without_force() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("repeat fetch");
@@ -161,7 +161,7 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut base.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("seed");
@@ -191,7 +191,7 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut all_tags.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch --tags");
@@ -225,7 +225,7 @@ fn fetch_local_all_tags_rejects_moved_tag_until_force() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut forced.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch --tags --force");

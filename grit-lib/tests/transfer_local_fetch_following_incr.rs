@@ -36,7 +36,7 @@ fn fetch_local_incremental_following_imports_reachable_tag() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("initial fetch");
@@ -57,7 +57,7 @@ fn fetch_local_incremental_following_imports_reachable_tag() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("incremental fetch");
@@ -140,7 +140,7 @@ fn fetch_local_incremental_following_with_existing_tags_matches_git() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("initial fetch");
@@ -162,7 +162,7 @@ fn fetch_local_incremental_following_with_existing_tags_matches_git() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("incremental fetch");
@@ -250,7 +250,7 @@ fn fetch_local_incremental_following_imports_lightweight_tag_on_existing_tip() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("initial fetch");
@@ -268,7 +268,7 @@ fn fetch_local_incremental_following_imports_lightweight_tag_on_existing_tip() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("noop-object fetch");

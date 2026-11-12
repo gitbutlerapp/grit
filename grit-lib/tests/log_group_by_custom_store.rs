@@ -240,7 +240,11 @@ fn memory_store_author_groups_match_the_files_backend() {
 
     let graph = match memory
         .maintenance()
-        .build_commit_graph(&CommitGraphOptions::default())
+        .build_commit_graph(
+            &CommitGraphOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("build commit-graph")
     {
         CommitGraphBuild::Built(graph) => graph,

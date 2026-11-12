@@ -79,7 +79,7 @@ fn delete_push_removes_every_named_ref_like_git() {
             &repo,
             &plan.specs,
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -193,7 +193,7 @@ fn push_delete_tag_on_local_remote() {
             .with_src(Some(tag_oid))
             .with_dst("refs/tags/v1".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push tag");
@@ -214,7 +214,7 @@ fn push_delete_tag_on_local_remote() {
             .with_dst("refs/tags/v1".to_owned())
             .with_delete(true)],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("delete tag");

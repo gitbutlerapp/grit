@@ -144,7 +144,7 @@ fn fetch_local_prune_slash_remote_name_no_phantom_head_delete() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
             &mut opts.clone(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
         )
         .expect("fetch");
@@ -184,7 +184,7 @@ fn fetch_local_prune_twice_reports_no_updates_when_up_to_date() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("first fetch");
@@ -209,7 +209,7 @@ fn fetch_local_prune_twice_reports_no_updates_when_up_to_date() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("second fetch");

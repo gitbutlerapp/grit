@@ -198,7 +198,7 @@ fn fetch_main(git_dir: &Path, srv: &Server) -> Result<(), grit_lib::error::Error
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )?;
     Ok(())

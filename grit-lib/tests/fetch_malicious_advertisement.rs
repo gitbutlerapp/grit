@@ -156,7 +156,7 @@ fn fetch_v0_malicious_advertisement_preserves_config() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("fetch completes");
@@ -199,7 +199,7 @@ fn fetch_v2_malicious_ls_refs_preserves_config() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("v2 fetch completes");

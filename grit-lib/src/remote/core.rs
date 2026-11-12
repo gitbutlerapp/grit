@@ -16,7 +16,7 @@ use crate::credentials::{
 #[cfg(feature = "http-ureq")]
 use crate::environment::Environment;
 use crate::error::Error;
-use crate::fetch::{fetch_remote_into, Progress};
+use crate::fetch::fetch_remote_into;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::push::push_remote_from;
@@ -36,7 +36,7 @@ use crate::transport_path::{
 };
 use crate::url_rewrite;
 
-use crate::progress::CancelToken;
+use crate::progress::{CancelToken, ProgressSink};
 #[cfg(feature = "http-ureq")]
 use crate::transport::http::ureq_client::UreqHttpClient;
 
@@ -562,7 +562,7 @@ impl Remote {
         &self,
         repo: &Repository,
         mut opts: FetchOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> crate::error::Result<FetchOutcome> {
@@ -630,7 +630,7 @@ impl Remote {
         repo: &Repository,
         refs: &[PushRefSpec],
         mut opts: PushOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> crate::error::Result<PushOutcome> {
@@ -702,7 +702,7 @@ impl Remote {
         &self,
         repo: &Repository,
         cache_dir: &Path,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> crate::bundle_uri::BundleSeed {
@@ -820,7 +820,7 @@ impl Remote {
         repo: &Repository,
         url: &RemoteUrl,
         opts: &mut FetchOptions,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
         connect: ConnectOptions,
@@ -906,7 +906,7 @@ impl Remote {
         refs: &[PushRefSpec],
         opts: &PushOptions,
         pre_push: Option<&PrePushGate<'_>>,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
         cancel: &crate::progress::CancelToken,
         http_factory: Option<&dyn HttpClientFactory>,
         connect: ConnectOptions,

@@ -679,7 +679,12 @@ fn upload_pack_thin(repo_dir: &Path, want: ObjectId, have: ObjectId) -> Vec<u8> 
         .with_haves(&[have])
         .with_source_shallow(&HashSet::new())
         .with_have_shallow(&HashSet::new())
-        .write(&repo, &mut grit_lib::progress::NullProgress, &mut pack)
+        .write(
+            &repo,
+            &mut pack,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("upload-pack stream");
     pack
 }

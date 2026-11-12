@@ -28,7 +28,7 @@ use crate::pack_object_select::{
     append_included_tags, HaveBoundary, NameTrees, PackObjectSelection, TagCandidate,
 };
 use crate::parallel::{try_par_map_force, ParallelHashError};
-use crate::progress::CancelSignal;
+use crate::progress::{CancelSignal, CancelToken};
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
 
@@ -465,19 +465,25 @@ impl<'a> PackObjects<'a> {
 
     /// Write a PACK v2 stream to `w` and return statistics.
     ///
+    /// Enumeration, compression and writing report through `progress`; `cancel` is polled
+    /// while objects are enumerated and before the pack is written. A build cancelled once
+    /// writing started leaves an incomplete pack in `w`.
+    ///
     /// # Errors
     ///
-    /// Missing wants, corrupt objects, or I/O failures while writing.
+    /// Missing wants, corrupt objects, I/O failures while writing, and [`Error::Cancelled`]
+    /// when `cancel` fires.
     pub fn write_to(
         self,
         w: &mut dyn Write,
         progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<PackStats> {
-        self.write_to_with_cancel(w, progress, &CancelSignal::never())
+        self.write_to_signal(w, progress, &CancelSignal::new(cancel))
     }
 
     /// [`Self::write_to`], stopping with [`Error::Cancelled`] once `stop` fires.
-    pub(crate) fn write_to_with_cancel(
+    pub(crate) fn write_to_signal(
         self,
         w: &mut dyn Write,
         progress: &mut dyn crate::progress::ProgressSink,
@@ -906,16 +912,19 @@ impl<'a> UploadPackStream<'a> {
     /// Write the pack for `repo` to `out`, reporting progress through `progress`.
     ///
     /// The whole build runs in the odb's pack read context, so planning and the pack-write
-    /// workers share one set of pack caches.
+    /// workers share one set of pack caches. `cancel` is polled while objects are
+    /// enumerated; once streaming starts the pack is written to the end.
     ///
     /// # Errors
     ///
-    /// Missing wants, corrupt objects, or I/O failures while writing to `out`.
+    /// Missing wants, corrupt objects, I/O failures while writing to `out`, and
+    /// [`Error::Cancelled`] when `cancel` fires.
     pub fn write(
         &self,
         repo: &Repository,
-        progress: &mut dyn crate::progress::ProgressSink,
         out: &mut dyn Write,
+        progress: &mut dyn crate::progress::ProgressSink,
+        cancel: &CancelToken,
     ) -> Result<PackStats> {
         let none = HashSet::new();
         write_upload_pack_stream_with_cancel(
@@ -929,7 +938,7 @@ impl<'a> UploadPackStream<'a> {
             &self.options,
             progress,
             out,
-            &CancelSignal::never(),
+            &CancelSignal::new(cancel),
         )
     }
 
@@ -1638,7 +1647,7 @@ pub(crate) fn write_pack_for_local_fetch(
         .haves(haves)
         .have_shallow_grafts(have_shallow)
         .source_shallow_grafts(source_shallow)
-        .write_to_with_cancel(w, &mut crate::progress::NullProgress, stop)
+        .write_to_signal(w, &mut crate::progress::NullProgress, stop)
 }
 
 fn collect_reachable_excluding(

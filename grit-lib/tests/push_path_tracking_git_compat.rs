@@ -4,7 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
@@ -37,7 +37,7 @@ fn push_with_backslash_path_tracking_name_succeeds_without_tracking_ref() {
             &repo,
             &[spec],
             PushOptions::default().with_tracking_remote(Some(name.to_owned())),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

@@ -2,7 +2,7 @@
 
 use grit_lib::error::Error;
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_test_support::git;
 
@@ -38,7 +38,7 @@ fn fetch_local_returns_cancelled_when_signalled_before_start() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &mut opts.clone(),
-        &mut NoProgress,
+        &mut NullProgress,
         &flag,
     )
     .expect_err("cancelled before fetch");

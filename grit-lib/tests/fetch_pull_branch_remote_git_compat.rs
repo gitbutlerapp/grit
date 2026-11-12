@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::porcelain::pull::{pull, PullOptions, PullResult};
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::fetch_request::{resolve_fetch_invocation, resolve_remote_argument};
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::repo::Repository;
@@ -85,7 +85,7 @@ fn pull_default_options_fast_forward_from_branch_remote_like_git() {
     let outcome = pull(
         &repo,
         &options,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -121,7 +121,7 @@ fn fetch_without_remote_updates_branch_remote_tracking_ref_like_git() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

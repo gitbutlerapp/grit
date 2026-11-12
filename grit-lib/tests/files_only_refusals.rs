@@ -123,8 +123,11 @@ fn maintenance_gc_without_prune_capability_refuses_with_prune() {
 fn prune_loose_objects_without_prune_capability_refuses_with_prune() {
     let (_dir, repo) = unprunable_repo();
     assert_refused(
-        repo.maintenance()
-            .prune_loose_objects(&PruneOptions::default()),
+        repo.maintenance().prune_loose_objects(
+            &PruneOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         FilesOnlyOperation::Prune,
     );
 }
@@ -172,8 +175,11 @@ fn commit_graph_write_refuses_with_commit_graph_write() {
         FilesOnlyOperation::CommitGraphWrite,
     );
     assert_refused(
-        repo.maintenance()
-            .write_commit_graph(&CommitGraphOptions::default()),
+        repo.maintenance().write_commit_graph(
+            &CommitGraphOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         FilesOnlyOperation::CommitGraphWrite,
     );
 }
@@ -182,7 +188,11 @@ fn commit_graph_write_refuses_with_commit_graph_write() {
 fn write_midx_refuses_with_midx_write() {
     let (_dir, repo) = memory_repo();
     assert_refused(
-        repo.maintenance().write_midx(&MidxOptions::default()),
+        repo.maintenance().write_midx(
+            &MidxOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         FilesOnlyOperation::MidxWrite,
     );
 }
@@ -259,8 +269,11 @@ fn primary_refuses_with_files_source() {
 fn offload_refuses_with_offload() {
     let (_dir, repo) = memory_repo();
     assert_refused(
-        repo.maintenance()
-            .offload_blobs(&OffloadOptions::new("lop", 1024)),
+        repo.maintenance().offload_blobs(
+            &OffloadOptions::new("lop", 1024),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         FilesOnlyOperation::Offload,
     );
 }
@@ -270,7 +283,11 @@ fn drop_promised_blobs_refuses_with_drop_large_blobs() {
     let (_dir, repo) = memory_repo();
     let opts = DropPromisedBlobsOptions::new(OffsetDateTime::UNIX_EPOCH, 1024, None);
     assert_refused(
-        repo.maintenance().drop_promised_blobs(&opts),
+        repo.maintenance().drop_promised_blobs(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         FilesOnlyOperation::DropLargeBlobs,
     );
 }

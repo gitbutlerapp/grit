@@ -95,7 +95,7 @@ fn clone_empty_bare_trunk_over_git_daemon_v2() {
     let grit_dest = tmp.path().join("grit-clone");
     let outcome = clone(
         CloneOptions::new(url.clone(), grit_dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

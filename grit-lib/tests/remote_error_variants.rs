@@ -7,8 +7,8 @@ use grit_lib::bundle::{Bundle, BundleError};
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::RemoteUnreadableReason;
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone, CloneError, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
 use grit_lib::remote::{ListRefsOptions, Remote, RemoteError};
 use grit_lib::repo::{InitOptions, Repository};
@@ -49,7 +49,7 @@ fn remote_error_variants() {
         .fetch(
             &work,
             FetchOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -94,7 +94,7 @@ fn remote_error_variants() {
                     .fetch(
                         &wt_repo,
                         fetch_opts,
-                        &mut NoProgress,
+                        &mut NullProgress,
                         &CancelToken::never(),
                         None,
                     )
@@ -184,7 +184,7 @@ fn remote_error_variants() {
                                     url: &url,
                                 },
                                 &mut FetchOptions::new(),
-                                &mut NoProgress,
+                                &mut NullProgress,
                                 grit_lib::progress::CancelToken::never_ref(),
                             )
                             .expect_err("401 without credentials");
@@ -294,7 +294,8 @@ fn bundle_missing_prerequisites() {
 fn clone_errors_report_remote_failures_in_the_remote_area() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let opts = CloneOptions::new("file:///nope.git", tmp.path().join("x"));
-    let err = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect_err("clone missing");
+    let err =
+        clone(opts, &mut NullProgress, &CancelToken::never(), None).expect_err("clone missing");
     assert_eq!(err.area(), "remote");
     assert!(
         matches!(err, grit_lib::error::Error::Remote(ref remote) if remote.is_remote_unreadable()),

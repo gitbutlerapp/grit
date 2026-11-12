@@ -19,8 +19,8 @@ use grit_lib::porcelain::pull::{pull, PullMode, PullOptions};
 use grit_lib::porcelain::reset::{ResetMode, ResetOptions};
 use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::porcelain::switch::{SwitchMode, SwitchOptions};
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_test_support::integrate_branch;
@@ -482,7 +482,7 @@ fn grit_pull(dir: &Path, mode: PullMode) {
         &PullOptions::default()
             .with_mode(Some(mode))
             .with_fetch(fetch_opts),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

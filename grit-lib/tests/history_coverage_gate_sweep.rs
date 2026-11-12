@@ -172,7 +172,18 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
     index.write_to_path(&repo.git_dir().join("index"), false)?;
     let head_tree = write_tree_from_index(repo.odb(), &index, "")?;
     let _ = diff.index_to_tree(&index, Some(&head_tree), &TreeDiffOptions::default())?;
-    let _ = diff.index_to_worktree(&mut index.clone(), &TreeDiffOptions::default())?;
-    let _ = diff.tree_to_worktree(Some(&head_tree), &index, &TreeDiffOptions::default())?;
+    let _ = diff.index_to_worktree(
+        &mut index.clone(),
+        &TreeDiffOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )?;
+    let _ = diff.tree_to_worktree(
+        Some(&head_tree),
+        &index,
+        &TreeDiffOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )?;
     Ok(())
 }

@@ -12,7 +12,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_plan::{open_push_destination, PushRequest};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushOutcome, PushRefSpec};
@@ -191,7 +191,7 @@ fn grit_push(
         repo,
         &plan.specs,
         opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -536,7 +536,7 @@ fn push_local_runs_receive_hooks() {
             .with_src_ref(Some("refs/heads/main".to_owned()))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )
     .expect("push_local");

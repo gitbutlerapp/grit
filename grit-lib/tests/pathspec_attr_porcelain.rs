@@ -188,6 +188,7 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
                 .with_pathspecs(vec![spec.into()])
                 .with_pathspec_sources(vec![spec.into()])
                 .with_cached(true),
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm --cached executable");
@@ -207,6 +208,7 @@ fn rm_cached_attr_pathspec() {
                 .with_pathspecs(vec![":(attr:vendored)src".into()])
                 .with_pathspec_sources(vec![":(attr:vendored)src".into()])
                 .with_cached(true),
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm --cached");

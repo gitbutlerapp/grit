@@ -729,7 +729,12 @@ pub fn index_to_worktree_raw(
 ) -> Vec<String> {
     let result = repo
         .diff()
-        .index_to_worktree(index, opts)
+        .index_to_worktree(
+            index,
+            opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("index_to_worktree");
     grit_raw_lines(&result.entries)
 }
@@ -742,7 +747,13 @@ pub fn tree_to_worktree_raw(
 ) -> Vec<String> {
     let result = repo
         .diff()
-        .tree_to_worktree(tree, index, opts)
+        .tree_to_worktree(
+            tree,
+            index,
+            opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("tree_to_worktree");
     grit_raw_lines(&result.entries)
 }
@@ -757,7 +768,13 @@ pub fn tree_to_worktree_raw_abbrev(
 ) -> Vec<String> {
     let result = repo
         .diff()
-        .tree_to_worktree(tree, index, opts)
+        .tree_to_worktree(
+            tree,
+            index,
+            opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("tree_to_worktree");
     grit_raw_lines_abbrev(&result.entries, abbrev)
 }

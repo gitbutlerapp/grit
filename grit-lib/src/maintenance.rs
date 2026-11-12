@@ -650,13 +650,17 @@ pub enum CommitGraphBuild {
 pub(crate) fn build_commit_graph(
     repo: &Repository,
     opts: &CommitGraphOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<CommitGraphBuild> {
+    poll_cancel(progress, cancel)?;
     if let Some(reason) = CommitGraphSkipReason::detect_for_repository(repo)? {
         return Ok(CommitGraphBuild::Skipped(reason));
     }
     let odb = repo.odb();
     let existing = odb.commit_graph_chain();
-    let commits = collect_reachable_commit_infos_for_repository(repo)?;
+    let commits = collect_reachable_commit_infos_for_repository(repo, progress, cancel)?;
+    poll_cancel(progress, cancel)?;
     build_commit_graph_for_commits(
         odb,
         &commits,
@@ -741,7 +745,10 @@ pub(crate) fn build_commit_graph_for_commits(
 pub(crate) fn write_commit_graph(
     repo: &Repository,
     opts: &CommitGraphOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<CommitGraphWriteReport> {
+    poll_cancel(progress, cancel)?;
     let odb = repo.odb();
     odb.primary_store()
         .require_files_primary(FilesOnlyOperation::CommitGraphWrite)?;
@@ -769,7 +776,7 @@ pub(crate) fn write_commit_graph(
         });
     }
 
-    let commits = collect_reachable_commit_infos_for_repository(repo)?;
+    let commits = collect_reachable_commit_infos_for_repository(repo, progress, cancel)?;
     if opts.dry_run {
         return Ok(CommitGraphWriteReport {
             path,
@@ -797,6 +804,7 @@ pub(crate) fn write_commit_graph(
         opts.changed_paths,
         existing.as_ref(),
     )?;
+    poll_cancel(progress, cancel)?;
 
     let written_path = atomic_replace_commit_graph(objects_dir, &built.bytes)?;
     let removed_chain = remove_commit_graph_chain_dir(objects_dir);
@@ -820,7 +828,13 @@ pub(crate) fn write_commit_graph(
 /// Returns [`RepositoryError::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
 /// `midx.version` is not an integer, [`crate::error::MidxError::UnknownWriteVersion`] (as
 /// [`crate::error::ObjectError::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
-pub(crate) fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
+pub(crate) fn write_midx(
+    repo: &Repository,
+    opts: &MidxOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<MidxWriteReport> {
+    poll_cancel(progress, cancel)?;
     let odb = repo.odb();
     odb.primary_store()
         .require_files_primary(FilesOnlyOperation::MidxWrite)?;
@@ -857,6 +871,7 @@ pub(crate) fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWr
         version,
         ..WriteMultiPackIndexOptions::default()
     };
+    poll_cancel(progress, cancel)?;
     let WriteMultiPackIndexResult { bitmap } = write_multi_pack_index(&pack_dir, &write_opts)?;
     Ok(MidxWriteReport {
         path,
@@ -1343,11 +1358,14 @@ fn repack_detail(
         installed_pack = Some(pack_path);
 
         if opts.write_commit_graph {
+            // The new pack is installed by now: finish the run rather than stop half way.
             write_commit_graph(
                 repo,
                 &CommitGraphOptions::with_changed_paths(existing_commit_graph_has_changed_paths(
                     repo,
                 )),
+                &mut crate::progress::NullProgress,
+                CancelToken::never_ref(),
             )?;
         }
     }
@@ -1357,7 +1375,13 @@ fn repack_detail(
     if !opts.keep_unreachable {
         let keep_newer_than = opts.prune_older_than.map(offset_to_system_time);
         let prune_start = Instant::now();
-        unreachable_loose = prune_loose_unreachable_with(odb, &reachable, keep_newer_than, false)?;
+        unreachable_loose = prune_loose_unreachable_with(
+            odb,
+            &reachable,
+            keep_newer_than,
+            false,
+            CancelToken::never_ref(),
+        )?;
         unreachable_prune_ms = prune_start.elapsed().as_millis() as u64;
         unreachable_prune_ran = true;
     }
@@ -1664,7 +1688,13 @@ fn skipping_repack_would_retain_prunable_packed_objects(
 /// - [`RepositoryError::PreciousObjectsRepository`] (`operation: "prune"`) when
 ///   `extensions.preciousObjects` is set;
 /// - config parse failures, store failures and I/O errors.
-pub(crate) fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<PruneStats> {
+pub(crate) fn prune_loose_objects(
+    repo: &Repository,
+    opts: &PruneOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<PruneStats> {
+    poll_cancel(progress, cancel)?;
     let odb = repo.odb();
     let target = odb.prune_target()?;
     let cfg = repo.config().snapshot()?;
@@ -1683,15 +1713,18 @@ pub(crate) fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Res
     };
     let roots = collect_maintenance_object_roots(repo)?;
     let shallow = load_shallow_boundaries(repo.git_dir());
+    poll_cancel(progress, cancel)?;
     let mut stats = prune_loose_unreachable_with(
         odb,
         &LazyReachable::new(odb, &roots, &shallow),
         keep_newer_than,
         opts.dry_run,
+        cancel,
     )?;
     let (PruneTarget::Files, Some(objects_dir)) = (target, odb.files_objects_dir()) else {
         return Ok(stats);
     };
+    poll_cancel(progress, cancel)?;
     let temp =
         prune_stale_temporary_objects_with_cutoff(objects_dir, keep_newer_than, opts.dry_run)?;
     stats.pruned += temp.pruned;
@@ -1894,6 +1927,7 @@ fn gc_store_locked(
         &LazyReachable::new(odb, &roots, &shallow),
         keep_newer_than,
         dry_run,
+        cancel,
     )?;
     stats.prune_ran = !dry_run;
     stats.phase_timings.prune_ms = duration_ms(start.elapsed());
@@ -2288,6 +2322,7 @@ fn gc_locked(
             plan,
             dry_run,
             opts.repack.threads,
+            cancel,
         )?);
         stats.phase_timings.drop_large_blobs_ms = duration_ms(start.elapsed());
     }
@@ -2323,6 +2358,8 @@ fn gc_locked(
         stats.commit_graph = Some(write_commit_graph(
             repo,
             &CommitGraphOptions::with_changed_paths(existing_commit_graph_has_changed_paths(repo)),
+            &mut crate::progress::NullProgress,
+            cancel,
         )?);
         stats.phase_timings.commit_graph_ms = duration_ms(start.elapsed());
     }
@@ -4167,15 +4204,19 @@ mod tests {
 
         let linked_path = dir.path().join("linked-wt");
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: linked_path.clone(),
-                branch: Some(WorktreeBranch::Create("linked".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: true,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions {
+                    path: linked_path.clone(),
+                    branch: Some(WorktreeBranch::Create("linked".into())),
+                    start_point: Some("HEAD".into()),
+                    force: false,
+                    lock: None,
+                    no_checkout: true,
+                    track: false,
+                },
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("linked worktree");
         let linked_git = repo
             .worktrees()

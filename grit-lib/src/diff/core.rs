@@ -5211,6 +5211,8 @@ pub(crate) struct DiffTreeToWorktreeExtras {
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
     /// Limit the walk to these index paths (expanded pathspecs).
     pub restrict_to_paths: Option<std::sync::Arc<std::collections::BTreeSet<String>>>,
+    /// When set, the scan stops with [`crate::error::Error::Cancelled`] once cancelled.
+    pub cancel: Option<crate::progress::CancelToken>,
 }
 
 #[inline]
@@ -8840,6 +8842,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                     // without hashing (see `status_size_change_proves_modified`).
                     for_status: false,
                     config: config.cloned().map(std::sync::Arc::new),
+                    cancel: extras.cancel.clone(),
                     ..DiffIndexToWorktreeOptions::default()
                 };
                 let (entries, _, _) = diff_index_to_worktree_inner(
@@ -8940,7 +8943,10 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
     let mode_policy = crate::index::WorktreeModePolicy::from_config(&config);
     let mut result = Vec::new();
 
-    for path in &all_paths {
+    for (n, path) in all_paths.iter().enumerate() {
+        if n % crate::progress::CANCEL_POLL_STRIDE == 0 {
+            poll_diff_cancel_token(extras.cancel.as_ref())?;
+        }
         if extras
             .restrict_to_paths
             .as_ref()

@@ -1,9 +1,9 @@
 //! Clone honours cancellation during the post-fetch checkout phase.
 
 use grit_lib::error::Error;
+use grit_lib::progress::ProgressSink;
 use grit_lib::progress::{CancelToken, ProgressPhase, ProgressSink};
 use grit_lib::remote::clone::{cleanup_failed_clone, clone, CloneError, CloneOptions};
-use grit_lib::remote::fetch::Progress;
 use std::path::Path;
 use std::process::Command;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -45,9 +45,6 @@ impl ProgressSink for CancelCheckoutOnFiles {
             self.flag.cancel();
         }
     }
-}
-
-impl Progress for CancelCheckoutOnFiles {
     fn message(&mut self, _msg: &[u8]) {}
 }
 

@@ -11,7 +11,6 @@ use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use grit_lib::objects::pack_receive::{read_sideband_pack_to, PackReceiveTarget};
 
 use crate::progress::CancelToken;
-use grit_lib::remote::fetch::NoProgress;
 
 fn sideband_band1_stream(pack_bytes: usize) -> Vec<u8> {
     let mut out = Vec::new();

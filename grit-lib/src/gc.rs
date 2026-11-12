@@ -115,21 +115,27 @@ pub fn prune_loose_unreachable_with_dry_run(
         &LazyReachable::new(odb, reachable_roots, &shallow),
         keep_newer_than,
         dry_run,
+        crate::progress::CancelToken::never_ref(),
     )
 }
 
 /// [`prune_loose_unreachable_with_dry_run`] sharing `reachable` with the other steps of a
 /// maintenance run, so one run walks the object graph at most once.
+///
+/// `cancel` is polled before the reachability walk and between batches of deletions.
 pub(crate) fn prune_loose_unreachable_with(
     odb: &Odb,
     reachable: &LazyReachable<'_>,
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<PruneStats> {
     match odb.prune_target()? {
-        PruneTarget::Files => prune_files_unreachable(odb, reachable, keep_newer_than, dry_run),
+        PruneTarget::Files => {
+            prune_files_unreachable(odb, reachable, keep_newer_than, dry_run, cancel)
+        }
         PruneTarget::Store(store) => {
-            prune_store_unreachable(odb, store, reachable, keep_newer_than, dry_run)
+            prune_store_unreachable(odb, store, reachable, keep_newer_than, dry_run, cancel)
         }
     }
 }
@@ -147,6 +153,7 @@ fn prune_store_unreachable(
     reachable: &LazyReachable<'_>,
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<PruneStats> {
     let mut stats = PruneStats::default();
     let mut listed = Vec::new();
@@ -173,7 +180,9 @@ fn prune_store_unreachable(
         return Ok(stats);
     }
 
+    cancel.poll_result()?;
     let reachable = reachable.get()?;
+    cancel.poll_result()?;
     let (kept, unreachable): (Vec<_>, Vec<_>) = candidates
         .into_iter()
         .partition(|oid| reachable.contains(oid));
@@ -182,14 +191,20 @@ fn prune_store_unreachable(
         stats.pruned += unreachable.len();
         return Ok(stats);
     }
+    let mut removed = Ok(());
     for batch in unreachable.chunks(PRUNE_REMOVE_BATCH) {
+        if let Err(err) = cancel.poll_result() {
+            removed = Err(err);
+            break;
+        }
         stats.pruned += store.remove(batch)?;
     }
+    // Flush what was removed even when cancelled, so the store is consistent.
     store.flush()?;
     if !unreachable.is_empty() {
         odb.forget_session_reads();
     }
-    Ok(stats)
+    removed.map(|()| stats)
 }
 
 /// Prune unreachable loose object files of a files-backed primary.
@@ -198,6 +213,7 @@ fn prune_files_unreachable(
     reachable: &LazyReachable<'_>,
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
+    cancel: &crate::progress::CancelToken,
 ) -> Result<PruneStats> {
     let mut stats = PruneStats::default();
 
@@ -223,8 +239,12 @@ fn prune_files_unreachable(
         return Ok(stats);
     }
 
+    cancel.poll_result()?;
     let reachable = reachable.get()?;
-    for (oid, path) in candidates {
+    for (n, (oid, path)) in candidates.into_iter().enumerate() {
+        if n % crate::progress::CANCEL_POLL_STRIDE == 0 {
+            cancel.poll_result()?;
+        }
         if reachable.contains(&oid) {
             stats.kept += 1;
             continue;

@@ -416,6 +416,8 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
                 .add(
                     &AddLinkedWorktreeOptions::new(path.clone())
                         .with_branch(Some(WorktreeBranch::Create(format!("b{i}")))),
+                    &mut grit_lib::progress::NullProgress,
+                    &grit_lib::progress::CancelToken::never(),
                 )
                 .expect("add worktree");
             let repo = Repository::open(

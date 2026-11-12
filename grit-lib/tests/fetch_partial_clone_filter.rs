@@ -133,7 +133,7 @@ fn grit_clone_filtered(
             .with_dest(dest.to_path_buf())
             .with_filter(Some(filter))
             .with_checkout(false),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -301,7 +301,7 @@ fn refetch_reapplies_stored_filter() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -471,7 +471,7 @@ mod http_v2 {
                 checkout: false,
                 ..CloneOptions::new(&url, dest.path().to_path_buf())
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             Some(&grit_lib::remote::DefaultHttpClientFactory::new()),
         )

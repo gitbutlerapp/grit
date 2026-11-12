@@ -56,10 +56,11 @@ fn cancel_during_worktree_add_leaves_no_registration_or_branch() {
     });
     let err = repo
         .worktrees()
-        .add_with_cancel(
+        .add(
             &AddLinkedWorktreeOptions::new(wt_path.clone())
                 .with_branch(Some(WorktreeBranch::Create("wtb".into())))
                 .with_start_point(Some("HEAD".into())),
+            &mut grit_lib::progress::NullProgress,
             &cancel,
         )
         .expect_err("cancelled add");

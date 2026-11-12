@@ -17,7 +17,7 @@ use grit_lib::porcelain::add::StageOptions;
 use grit_lib::porcelain::commit::CommitRequest;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::Remote;
@@ -404,7 +404,7 @@ fn fetch_into_quarantine(root: &Path, url: &str) {
         .fetch(
             &remote,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -558,7 +558,7 @@ fn commit_and_push_from_quarantine(root: &Path, url: &str) -> ObjectId {
                 .with_dst("refs/heads/main".to_owned())
                 .with_force(true)],
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

@@ -82,7 +82,7 @@ fn push_local_full_lifecycle() {
             .with_src(Some(c2))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push main");
@@ -136,7 +136,7 @@ fn push_local_full_lifecycle() {
             .with_src(Some(c2_prime))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push call");
@@ -158,7 +158,7 @@ fn push_local_full_lifecycle() {
             .with_dst("refs/heads/main".to_owned())
             .with_force(true)],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push call");
@@ -184,7 +184,7 @@ fn push_local_full_lifecycle() {
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
         &delete_main,
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("delete current branch push call");
@@ -205,7 +205,7 @@ fn push_local_full_lifecycle() {
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
         &delete_main,
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("delete push call");
@@ -237,7 +237,7 @@ fn push_local_full_lifecycle() {
             // Expect c2 but remote is actually c1 -> stale.
             .with_expected_old(Some(c2))],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("cas push call");
@@ -260,7 +260,7 @@ fn push_local_full_lifecycle() {
             .with_force(true)
             .with_expected_old(Some(c1))],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("cas push call (matching)");
@@ -306,7 +306,7 @@ fn push_local_atomic_rejects_all_on_any_failure() {
             .with_src(Some(c1))
             .with_dst("refs/heads/locked".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("seed locked ref");
@@ -331,7 +331,7 @@ fn push_local_atomic_rejects_all_on_any_failure() {
                 .with_expected_old(Some(c2)),
         ],
         &PushOptions::default().with_atomic(true),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("atomic push call");
@@ -394,7 +394,7 @@ fn push_local_non_atomic_df_applies_first_ref_only() {
                 .with_dst("refs/heads/parent/child".to_owned()),
         ],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-atomic df push");
@@ -451,7 +451,7 @@ fn push_local_atomic_store_batch_df_marks_atomic_push_failed() {
                 .with_dst("refs/heads/parent/child".to_owned()),
         ],
         &PushOptions::default().with_atomic(true),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("atomic df push");
@@ -510,7 +510,7 @@ fn push_local_updates_remote_tracking_ref_when_configured() {
             .with_src(Some(c1))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push with tracking");
@@ -561,7 +561,7 @@ fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
             .with_src(Some(c2))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("initial push");
@@ -586,7 +586,7 @@ fn push_local_up_to_date_refreshes_stale_remote_tracking_ref() {
             .with_src(Some(c2))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("up-to-date push");
@@ -643,7 +643,7 @@ fn push_local_honors_custom_fetch_refspec_for_tracking() {
             .with_src(Some(c1))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push with custom tracking mapping");
@@ -685,7 +685,7 @@ fn push_local_missing_remote_is_error() {
             .with_src(Some(c1))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("push to missing remote must fail");
@@ -738,7 +738,7 @@ fn push_local_does_not_use_decoy_repo_when_parent_relative_target_missing() {
             .with_src(Some(c1))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect_err("missing ../wrong.git must fail");
@@ -813,7 +813,7 @@ fn linked_worktree_resolves_relative_remote_from_worktree_root() {
                 .with_src(Some(head))
                 .with_dst("refs/heads/main".to_owned())],
             &PushOptions::default(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push from linked worktree with resolved remote");
@@ -867,7 +867,7 @@ fn push_local_into_empty_repo_links_local_pack() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -957,7 +957,7 @@ fn push_local_shallow_to_empty_remote_with_shallow_update() {
         grit_lib::remote::transfer::TransferEndpoint::Local(dest_git),
         &[spec],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("shallow push with receive.shallowUpdate");
@@ -998,7 +998,7 @@ fn push_local_shallow_to_empty_remote_refused_without_shallow_update() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push completes with per-ref refusal");
@@ -1037,7 +1037,7 @@ fn push_local_shallow_to_remote_with_full_history_needs_no_shallow_file() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push onto remote that already has history");
@@ -1107,7 +1107,7 @@ fn push_local_installs_single_pack_without_loose_objects() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push to empty bare remote");
@@ -1183,7 +1183,7 @@ fn push_local_concurrent_creates_of_same_branch_never_lose_an_update() {
                                 .with_src(Some(*head))
                                 .with_dst("refs/heads/shared".to_owned())],
                             &PushOptions::default(),
-                            &mut grit_lib::remote::fetch::NoProgress,
+                            &mut grit_lib::progress::NullProgress,
                             &grit_lib::progress::CancelToken::never(),
                         )
                         .expect("push call");
@@ -1284,7 +1284,7 @@ fn push_local_rebuilds_pack_when_store_has_unreachable_objects() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");

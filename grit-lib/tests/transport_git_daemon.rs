@@ -169,7 +169,7 @@ fn fetch_over_git_daemon_lands_refs_and_objects() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("fetch_remote over git daemon");
@@ -331,7 +331,7 @@ fn fetch_following_lightweight_tag_at_branch_tip_downloads_branch() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("fetch with TagMode::Following");
@@ -442,7 +442,7 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("initial fetch");
@@ -466,7 +466,7 @@ fn fetch_remote_following_imports_annotated_tag_on_existing_tip() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("incremental fetch with new annotated tag");
@@ -561,7 +561,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut fetch_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("fetch main");
@@ -606,7 +606,7 @@ fn push_annotated_tag_on_existing_commit_over_git_daemon() {
             .with_src(Some(tag_outcome.oid))
             .with_dst("refs/tags/v1-ann".to_owned())],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push annotated tag");
@@ -699,7 +699,7 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut seed_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("seed fetch");
@@ -740,7 +740,7 @@ fn fetch_remote_dry_run_explicit_fast_forward_classifies_without_writing() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut dry_run_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("dry-run fetch");

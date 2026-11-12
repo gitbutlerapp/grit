@@ -33,8 +33,8 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{AuthFailure, Error, RemoteUnreadableReason, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::progress::NullProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::credentials::{Credential, CredentialProvider, HelperCredentialProvider};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport::http::http_client_arc;
@@ -645,7 +645,7 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
             },
             std::slice::from_ref(&spec),
             &PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("push with no credentials against an authed server must fail");
@@ -678,7 +678,7 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
         },
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("authed push with correct credentials must succeed");
@@ -864,7 +864,7 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         },
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push authenticated by the host-level store entry");
@@ -1121,7 +1121,7 @@ fn core_askpass_authenticates_push_through_the_default_factory() {
         },
         std::slice::from_ref(&spec),
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push authenticated through core.askPass");
@@ -1300,7 +1300,7 @@ fn a_rejected_stored_credential_is_reported_by_the_push_not_erased_by_the_plan()
                 &repo,
                 std::slice::from_ref(&spec),
                 PushOptions::default(),
-                &mut NoProgress,
+                &mut NullProgress,
                 &grit_lib::progress::CancelToken::never(),
                 None,
             )
@@ -1469,7 +1469,7 @@ fn custom_factories_build_the_push_plan_probe_with_create_for_preflight() {
             &repo,
             std::slice::from_ref(&spec),
             PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
             Some(&factory),
         )

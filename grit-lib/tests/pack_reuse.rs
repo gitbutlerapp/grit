@@ -140,7 +140,12 @@ fn stream_clone_pack(
         .with_haves(haves)
         .with_source_shallow(&HashSet::new())
         .with_have_shallow(&HashSet::new())
-        .write(repo, &mut grit_lib::progress::NullProgress, &mut buf)
+        .write(
+            repo,
+            &mut buf,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("stream pack");
     (buf, stats)
 }
@@ -336,7 +341,12 @@ fn thin_pack_bitmap_reuse_index_pack_strict_ok() {
         .with_haves(&[parent])
         .with_source_shallow(&HashSet::new())
         .with_have_shallow(&HashSet::new())
-        .write(&repo, &mut grit_lib::progress::NullProgress, &mut buf)
+        .write(
+            &repo,
+            &mut buf,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("thin pack with bitmap ofs reuse");
     git_index_pack_strict(&buf, HashAlgo::Sha1, true, Some(fx.path()));
 }
@@ -409,7 +419,12 @@ fn thin_pack_ref_delta_conversion() {
         .with_haves(&[parent])
         .with_source_shallow(&HashSet::new())
         .with_have_shallow(&HashSet::new())
-        .write(&repo, &mut grit_lib::progress::NullProgress, &mut buf)
+        .write(
+            &repo,
+            &mut buf,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("thin pack");
     git_index_pack_strict(&buf, HashAlgo::Sha1, true, Some(fx.path()));
     assert!(
@@ -608,7 +623,12 @@ fn full_clone_without_bitmap_streams_verbatim_pack_entries() {
         .with_haves(&[])
         .with_source_shallow(&HashSet::new())
         .with_have_shallow(&HashSet::new())
-        .write(&repo, &mut grit_lib::progress::NullProgress, &mut writer)
+        .write(
+            &repo,
+            &mut writer,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("stream pack");
 
     let expected_objects = fx
@@ -962,7 +982,12 @@ fn upload_pack_propagates_verbatim_reuse_io_error_without_fallback() {
         .with_haves(&[])
         .with_source_shallow(&HashSet::new())
         .with_have_shallow(&HashSet::new())
-        .write(&repo, &mut grit_lib::progress::NullProgress, &mut writer)
+        .write(
+            &repo,
+            &mut writer,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect_err("broken pipe must abort the pack");
     assert!(
         matches!(err, grit_lib::error::Error::Io(_)),

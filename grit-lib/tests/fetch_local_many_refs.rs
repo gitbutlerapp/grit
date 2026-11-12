@@ -57,7 +57,7 @@ fn assert_noop(remote: &Path, client: &Path, opts: &FetchOptions, heads: usize) 
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -137,7 +137,7 @@ fn repeated_many_ref_fetches_preserve_refs_and_transfer_nothing() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -175,7 +175,7 @@ fn repeated_many_ref_fetches_preserve_refs_and_transfer_nothing() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -200,7 +200,7 @@ fn repeated_many_ref_fetches_preserve_refs_and_transfer_nothing() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -237,7 +237,7 @@ fn reftable_local_fetch_remains_fresh_after_prune() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
             &mut opts.clone(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
         )
         .unwrap();
@@ -259,7 +259,7 @@ fn reftable_local_fetch_remains_fresh_after_prune() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -278,7 +278,7 @@ fn reftable_local_fetch_remains_fresh_after_prune() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap();
@@ -311,7 +311,7 @@ fn linked_worktree_fetch_resolves_shared_tracking_refs() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
             &mut options(tags).clone(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
         )
         .unwrap();

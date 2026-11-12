@@ -25,7 +25,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use crate::error::{Error, RemoteUnreadableReason, Result};
-use crate::fetch::Progress;
 use crate::fetch_request::FetchRefspecError;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -1386,7 +1385,7 @@ struct LocalCopyProgress {
 /// Forwards loose-object link [`ProgressSink::inc`] into [`LocalCopyProgress::add`].
 struct CopyingLooseLink<'a> {
     copy: &'a mut LocalCopyProgress,
-    progress: &'a mut dyn Progress,
+    progress: &'a mut dyn ProgressSink,
 }
 
 impl ProgressSink for CopyingLooseLink<'_> {
@@ -1405,14 +1404,14 @@ impl LocalCopyProgress {
         }
     }
 
-    fn ensure_started(&mut self, progress: &mut dyn Progress) {
+    fn ensure_started(&mut self, progress: &mut dyn ProgressSink) {
         if !self.phase_active {
             progress.start(ProgressPhase::CopyingObjects, Some(self.total));
             self.phase_active = true;
         }
     }
 
-    fn add(&mut self, progress: &mut dyn Progress, n: u64) {
+    fn add(&mut self, progress: &mut dyn ProgressSink, n: u64) {
         if n == 0 {
             return;
         }
@@ -1435,7 +1434,7 @@ impl LocalCopyProgress {
         }
     }
 
-    fn finish(&mut self, progress: &mut dyn Progress) {
+    fn finish(&mut self, progress: &mut dyn ProgressSink) {
         if !self.phase_active {
             return;
         }
@@ -1465,7 +1464,7 @@ fn copy_objects_for_local_fetch(
     try_pack_link: bool,
     pack_build: &PackBuildOptions,
     fetch_opts: &FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &crate::progress::CancelToken,
     prep_enumerating: bool,
 ) -> Result<(HashSet<ObjectId>, TransferStats)> {
@@ -1729,7 +1728,7 @@ fn copy_objects_for_local_push(
     source_shallow: &HashSet<ObjectId>,
     have_shallow: &HashSet<ObjectId>,
     opts: &PackBuildOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &crate::progress::CancelToken,
 ) -> Result<TransferStats> {
     use crate::local_object_copy::{
@@ -1916,7 +1915,7 @@ fn write_pack_for_local_transfer(
     opts: &PackBuildOptions,
     stop: &crate::progress::CancelSignal<'_>,
     w: &mut dyn Write,
-    copy: Option<(&mut LocalCopyProgress, &mut dyn Progress)>,
+    copy: Option<(&mut LocalCopyProgress, &mut dyn ProgressSink)>,
 ) -> Result<Option<Vec<(ObjectId, u64, u32)>>> {
     if !opts.thin && have_shallow.is_empty() {
         let pack_budget = missing.len() as u64;
@@ -2300,7 +2299,7 @@ pub(crate) fn fetch_local_into(
     local: &crate::repo::Repository,
     remote_git_dir: &Path,
     opts: &FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &crate::progress::CancelToken,
 ) -> Result<FetchOutcome> {
     crate::progress::poll_cancel(progress, cancel)?;
@@ -2796,14 +2795,14 @@ pub(crate) fn fetch_local_into(
 // of scope here and live in a later phase.
 ///
 /// Objects to send are read through `local`'s object store; `pre_push` runs after every update is decided and before anything is written to the
-/// remote, and relaying the remote's hook output to [`crate::fetch::Progress::message`] as a
+/// remote, and relaying the remote's hook output to [`crate::progress::ProgressSink::message`] as a
 /// wire push relays side-band output.
 pub(crate) fn push_local_from(
     local: &crate::repo::Repository,
     remote_git_dir: &Path,
     refs: &[PushRefSpec],
     opts: &PushOptions,
-    progress: &mut dyn crate::fetch::Progress,
+    progress: &mut dyn crate::progress::ProgressSink,
     cancel: &crate::progress::CancelToken,
     pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
@@ -3186,7 +3185,7 @@ fn receive_hook_or_panic(
 }
 
 fn relay_hook_output(
-    progress: &mut dyn crate::fetch::Progress,
+    progress: &mut dyn crate::progress::ProgressSink,
     messages: &mut Vec<String>,
     result: &crate::hooks::HookResult,
 ) {
@@ -4706,24 +4705,6 @@ mod tests {
                 self.finished.push(phase);
             }
         }
-    }
-
-    impl PhaseRecorder {
-        fn record_count(&mut self) {
-            self.counts.push(self.current);
-            match self.active {
-                Some(ProgressPhase::EnumeratingObjects) => {
-                    self.enumerating_counts.push(self.current);
-                }
-                Some(ProgressPhase::CopyingObjects) => {
-                    self.copying_counts.push(self.current);
-                }
-                _ => {}
-            }
-        }
-    }
-
-    impl Progress for PhaseRecorder {
         fn wants_received_objects(&self) -> bool {
             self.want_received
         }
@@ -4740,6 +4721,21 @@ mod tests {
                 "received must not exceed total: {counts:?}"
             );
             self.received.push(counts);
+        }
+    }
+
+    impl PhaseRecorder {
+        fn record_count(&mut self) {
+            self.counts.push(self.current);
+            match self.active {
+                Some(ProgressPhase::EnumeratingObjects) => {
+                    self.enumerating_counts.push(self.current);
+                }
+                Some(ProgressPhase::CopyingObjects) => {
+                    self.copying_counts.push(self.current);
+                }
+                _ => {}
+            }
         }
     }
 
@@ -4885,7 +4881,7 @@ mod tests {
                     atomic,
                     ..Default::default()
                 },
-                &mut crate::fetch::NoProgress,
+                &mut crate::progress::NullProgress,
                 crate::progress::CancelToken::never_ref(),
             )
             .expect("push call");
@@ -4946,7 +4942,7 @@ mod tests {
                     ..Default::default()
                 }],
                 &PushOptions::default(),
-                &mut crate::fetch::NoProgress,
+                &mut crate::progress::NullProgress,
                 crate::progress::CancelToken::never_ref(),
             )
             .expect("push call");

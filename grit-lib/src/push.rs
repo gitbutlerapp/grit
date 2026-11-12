@@ -31,10 +31,10 @@ use std::io::{Cursor, ErrorKind, Read, Write};
 
 use crate::branch_tracking;
 use crate::error::{Error, Result};
-use crate::fetch::Progress;
 use crate::objects::{HashAlgo, ObjectId};
 use crate::pack_objects::PackStats;
 use crate::pkt_line::{self, Packet};
+use crate::progress::ProgressSink;
 use crate::progress::{poll_cancel, CancelToken, ProgressPhase, ProgressUnit, ReceivedObjects};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::remote::RemoteError;
@@ -62,9 +62,9 @@ fn finish_push_outcome(
     })
 }
 
-/// Forwards side-band channel 2 to an inner [`Progress`] sink and records complete lines.
+/// Forwards side-band channel 2 to an inner [`ProgressSink`] and records complete lines.
 struct PushSidebandCollector<'a> {
-    inner: &'a mut dyn Progress,
+    inner: &'a mut dyn ProgressSink,
     remote_messages: Vec<String>,
     pending: SidebandLines,
 }
@@ -115,9 +115,6 @@ impl crate::progress::ProgressSink for PushSidebandCollector<'_> {
     fn finish(&mut self) {
         self.inner.finish();
     }
-}
-
-impl Progress for PushSidebandCollector<'_> {
     fn message(&mut self, bytes: &[u8]) {
         self.inner.message(bytes);
         self.record_remote_chunk(bytes);
@@ -189,7 +186,7 @@ pub(crate) fn push_remote_from(
     conn: &mut dyn Connection,
     refs: &[PushRefSpec],
     opts: &PushOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
@@ -212,7 +209,7 @@ pub(crate) fn push_remote_with(
     conn: &mut dyn Connection,
     refs: &[PushRefSpec],
     opts: &PushOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     bundle_target: Option<BundlePushTarget<'_>>,
     pre_push: Option<&PrePushGate<'_>>,
@@ -502,7 +499,7 @@ pub(crate) fn push_http(
     repo_url: &str,
     refs: &[PushRefSpec],
     opts: &PushOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<PushOutcome> {
     use crate::transport::http::SmartHttpTransport;
@@ -1237,7 +1234,10 @@ fn apply_report_status(report: &[u8], decisions: &mut [PushDecision]) {
 ///
 /// Bands 2 and 3 are optionally forwarded to `progress`; pass `None` for
 /// side-effect-free completeness checks.
-fn demux_sideband_report(input: &[u8], mut progress: Option<&mut dyn Progress>) -> Result<Vec<u8>> {
+fn demux_sideband_report(
+    input: &[u8],
+    mut progress: Option<&mut dyn ProgressSink>,
+) -> Result<Vec<u8>> {
     let mut report = Vec::new();
     let mut i = 0usize;
     while i + 4 <= input.len() {
@@ -1277,7 +1277,10 @@ fn demux_sideband_report(input: &[u8], mut progress: Option<&mut dyn Progress>) 
 /// (remote diagnostics) is forwarded to `progress`. Lifted from the CLI's
 /// `demux_report_and_remote_messages`, but progress goes to the callback rather
 /// than directly to stderr (the public API must not assume stdout/stderr).
-fn demux_report_and_remote_messages(input: &[u8], progress: &mut dyn Progress) -> Result<Vec<u8>> {
+fn demux_report_and_remote_messages(
+    input: &[u8],
+    progress: &mut dyn ProgressSink,
+) -> Result<Vec<u8>> {
     demux_sideband_report(input, Some(progress))
 }
 
@@ -1447,7 +1450,7 @@ mod tests {
                             crate::transfer::TransferEndpoint::Connection(&mut conn),
                             refs,
                             &opts,
-                            &mut crate::fetch::NoProgress,
+                            &mut crate::progress::NullProgress,
                             &crate::progress::CancelToken::never(),
                         )
                         .unwrap_err();
@@ -1818,8 +1821,7 @@ mod tests {
     #[test]
     fn demux_separates_report_and_progress() {
         struct Cap(Vec<u8>);
-        impl crate::progress::ProgressSink for Cap {}
-        impl Progress for Cap {
+        impl crate::progress::ProgressSink for Cap {
             fn message(&mut self, bytes: &[u8]) {
                 self.0.extend_from_slice(bytes);
             }
@@ -1907,7 +1909,7 @@ mod tests {
         reader: &mut dyn Read,
         sent_refs: &[&str],
         sideband: bool,
-        progress: &mut dyn Progress,
+        progress: &mut dyn ProgressSink,
     ) -> Result<Vec<u8>> {
         let raw = read_receive_pack_response(
             reader,
@@ -1999,7 +2001,6 @@ mod tests {
     fn sideband_remote_messages_flush_unterminated_hook_text() {
         struct Noop;
         impl crate::progress::ProgressSink for Noop {}
-        impl Progress for Noop {}
         let mut inner = Noop;
         let mut sideband = PushSidebandCollector {
             inner: &mut inner,
@@ -2019,8 +2020,7 @@ mod tests {
     #[test]
     fn sideband_diagnostics_delivered_once_on_clean_eof() {
         struct Cap(Vec<u8>);
-        impl crate::progress::ProgressSink for Cap {}
-        impl Progress for Cap {
+        impl crate::progress::ProgressSink for Cap {
             fn message(&mut self, bytes: &[u8]) {
                 self.0.extend_from_slice(bytes);
             }
@@ -2040,8 +2040,7 @@ mod tests {
     #[test]
     fn sideband_diagnostics_delivered_once_on_connection_reset() {
         struct Cap(Vec<u8>);
-        impl crate::progress::ProgressSink for Cap {}
-        impl Progress for Cap {
+        impl crate::progress::ProgressSink for Cap {
             fn message(&mut self, bytes: &[u8]) {
                 self.0.extend_from_slice(bytes);
             }

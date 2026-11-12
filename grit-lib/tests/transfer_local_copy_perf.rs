@@ -316,7 +316,7 @@ fn push_local_empty_bare_links_pack_within_budget() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");

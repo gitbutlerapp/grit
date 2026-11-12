@@ -555,14 +555,24 @@ fn index_to_worktree_modifications_pathspec_status_and_refresh() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     let clean = diff
-        .index_to_worktree(&mut index, &TreeDiffOptions::default())
+        .index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff");
     assert!(clean.entries.is_empty(), "{:?}", clean.entries);
 
     fs::write(work_tree.join("dir/b.txt"), "b1\nb2 changed again\n").expect("edit");
     fs::remove_file(work_tree.join("moved.txt")).expect("delete");
     let result = diff
-        .index_to_worktree(&mut index, &renames())
+        .index_to_worktree(
+            &mut index,
+            &renames(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff");
     assert_eq!(summary(&result.entries), ["D moved.txt", "M dir/b.txt"]);
     let modified = result
@@ -573,11 +583,25 @@ fn index_to_worktree_modifications_pathspec_status_and_refresh() {
     assert!(modified.new_oid.is_zero(), "work-tree side is not hashed");
 
     let limited = TreeDiffOptions::default().with_pathspec(Some(pathspec(&["dir"])));
-    let result = diff.index_to_worktree(&mut index, &limited).expect("diff");
+    let result = diff
+        .index_to_worktree(
+            &mut index,
+            &limited,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("diff");
     assert_eq!(summary(&result.entries), ["M dir/b.txt"]);
 
     let status = TreeDiffOptions::default().with_for_status(true);
-    let result = diff.index_to_worktree(&mut index, &status).expect("diff");
+    let result = diff
+        .index_to_worktree(
+            &mut index,
+            &status,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("diff");
     assert_eq!(summary(&result.entries), ["D moved.txt", "M dir/b.txt"]);
 
     // Same content, stale stat: only a refreshing scan adopts the new stat data.
@@ -592,12 +616,24 @@ fn index_to_worktree_modifications_pathspec_status_and_refresh() {
         }
     }
     let result = diff
-        .index_to_worktree(&mut stale.clone(), &TreeDiffOptions::default())
+        .index_to_worktree(
+            &mut stale.clone(),
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff");
     assert!(!result.index_stat_refreshed);
     assert!(!summary(&result.entries).contains(&"M keep.txt".to_owned()));
     let refresh = TreeDiffOptions::default().with_refresh_index_stat(true);
-    let result = diff.index_to_worktree(&mut stale, &refresh).expect("diff");
+    let result = diff
+        .index_to_worktree(
+            &mut stale,
+            &refresh,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("diff");
     assert!(result.index_stat_refreshed);
     let keep = stale.get(b"keep.txt", 0).expect("keep.txt");
     assert_ne!(keep.mtime_sec, 1, "refreshed stat data is adopted");
@@ -611,7 +647,12 @@ fn worktree_diffs_require_a_work_tree() {
     let mut index = Index::new();
     let err = repo
         .diff()
-        .index_to_worktree(&mut index, &TreeDiffOptions::default())
+        .index_to_worktree(
+            &mut index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect_err("bare");
     assert!(
         matches!(err, Error::Repository(RepositoryError::RequiresWorkTree)),
@@ -619,7 +660,13 @@ fn worktree_diffs_require_a_work_tree() {
     );
     let err = repo
         .diff()
-        .tree_to_worktree(None, &index, &TreeDiffOptions::default())
+        .tree_to_worktree(
+            None,
+            &index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect_err("bare");
     assert!(
         matches!(err, Error::Repository(RepositoryError::RequiresWorkTree)),
@@ -638,12 +685,24 @@ fn tree_to_worktree_pairs_against_the_old_tree() {
         .expect("index");
     let diff = fx.repo.diff();
     let clean = diff
-        .tree_to_worktree(Some(&fx.tip_tree), &index, &TreeDiffOptions::default())
+        .tree_to_worktree(
+            Some(&fx.tip_tree),
+            &index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff");
     assert!(clean.entries.is_empty(), "{:?}", clean.entries);
 
     let result = diff
-        .tree_to_worktree(Some(&fx.base_tree), &index, &renames())
+        .tree_to_worktree(
+            Some(&fx.base_tree),
+            &index,
+            &renames(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff");
     assert_eq!(
         summary(&result.entries),
@@ -653,14 +712,26 @@ fn tree_to_worktree_pairs_against_the_old_tree() {
     fs::write(work_tree.join("keep.txt"), numbered("keep", Some(1))).expect("edit");
     let limited = TreeDiffOptions::default().with_pathspec(Some(pathspec(&["keep.txt"])));
     let result = diff
-        .tree_to_worktree(Some(&fx.tip_tree), &index, &limited)
+        .tree_to_worktree(
+            Some(&fx.tip_tree),
+            &index,
+            &limited,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff");
     assert_eq!(summary(&result.entries), ["M keep.txt"]);
 
     let broken = TreeDiffOptions::default().with_break_rewrites(BreakRewrites::DEFAULT);
     fs::write(work_tree.join("keep.txt"), numbered("rewritten", None)).expect("rewrite");
     let result = diff
-        .tree_to_worktree(Some(&fx.tip_tree), &index, &broken)
+        .tree_to_worktree(
+            Some(&fx.tip_tree),
+            &index,
+            &broken,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff");
     let keep = result
         .entries

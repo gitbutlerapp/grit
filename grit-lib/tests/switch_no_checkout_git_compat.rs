@@ -44,7 +44,7 @@ fn no_checkout(source: &Path, with_grit: bool) -> tempfile::TempDir {
         clone_repo(
             CloneOptions::new(source.to_string_lossy(), dest.path().to_owned())
                 .with_checkout(false),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

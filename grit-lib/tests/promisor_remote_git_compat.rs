@@ -210,7 +210,7 @@ impl Lop {
             .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
             .collect();
         opts.promisor_fetcher = fetcher();
-        clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone")
+        clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone")
     }
 }
 
@@ -311,7 +311,7 @@ fn auto_filter_uses_the_filter_git_advertises() {
         ("promisor.acceptFromServer".into(), "knownUrl".into()),
     ];
     opts.promisor_fetcher = fetcher();
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
     assert_eq!(outcome.filter, Some(ObjectFilterSpec::BlobLimit(5 * 1024)));
     assert_eq!(
         git(&dest, &["config", "remote.origin.partialclonefilter"]).trim(),

@@ -79,7 +79,7 @@ fn push(
         grit_lib::remote::transfer::TransferEndpoint::Local(&setup.remote),
         &specs,
         &opts,
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
 }

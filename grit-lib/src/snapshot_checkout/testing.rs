@@ -9,7 +9,7 @@ use std::process::Command;
 use crate::bundle::{write_bundle, BundleSpec};
 use crate::config::environment::RepositoryOptions;
 use crate::objects::ObjectId;
-use crate::remote::fetch::NoProgress;
+use crate::progress::NullProgress;
 use crate::repo::Repository;
 
 use super::{
@@ -189,7 +189,7 @@ pub(crate) fn check_out(served: &mut Served, at: &Path) -> (PathBuf, Repository)
             repo_url: &served.url(),
             work: "work",
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("materialize");

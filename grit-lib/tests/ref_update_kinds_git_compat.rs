@@ -64,7 +64,7 @@ fn fetch_kinds_follow_what_happened_to_each_ref() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut fetch_options(false).clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch");
@@ -99,7 +99,7 @@ fn fetch_kinds_follow_what_happened_to_each_ref() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut dry_run.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("dry-run fetch");
@@ -121,7 +121,7 @@ fn fetch_kinds_follow_what_happened_to_each_ref() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote_git),
         &mut fetch_options(true).clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch 2");
@@ -187,7 +187,7 @@ fn push_outcome_summaries_match_the_remote_refs() {
             grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
             &[spec(src)],
             &PushOptions::default(),
-            &mut grit_lib::remote::fetch::NoProgress,
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push")

@@ -7,11 +7,11 @@ use std::sync::Arc;
 use crate::config::ConfigSet;
 use crate::environment::Environment;
 use crate::error::{Error, PromisorFetchFailure, Result};
-use crate::fetch::NoProgress;
 use crate::objects::pack::clear_pack_cache;
 use crate::objects::ObjectId;
 use crate::objects::OidHashSet;
 use crate::partial_clone::ObjectFilterSpec;
+use crate::progress::NullProgress;
 use crate::promisor::repo_treats_promisor_packs;
 use crate::promisor_remote::lazy_fetch_order;
 use crate::remote::{HttpClientFactory, Remote};
@@ -147,7 +147,7 @@ pub fn fetch_promisor_objects(
             http_protocol_version: protocol,
             ..Default::default()
         };
-        let mut progress = NoProgress;
+        let mut progress = NullProgress;
         remote
             .fetch(
                 repo,

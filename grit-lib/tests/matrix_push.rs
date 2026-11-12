@@ -57,7 +57,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_report::{PushRefResult, PushRefStatus};
 use grit_lib::remote::transfer::{PushOptions, PushOutcome, PushRefSpec};
 use grit_lib::remote::transport::http::{http_client_arc, ureq_client::UreqHttpClient};
@@ -570,7 +570,7 @@ fn run_unsupported_atomic_matrix(
                 dry_run,
                 ..Default::default()
             },
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .unwrap_err();
@@ -612,7 +612,7 @@ fn run_unsupported_atomic_matrix(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &specs,
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .unwrap();
@@ -938,7 +938,7 @@ fn push_matrix_over_git_daemon() {
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             specs,
             opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push_remote over git daemon")
@@ -1009,7 +1009,7 @@ fn push_matrix_over_ssh() {
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             specs,
             opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push_remote over ssh")
@@ -1092,7 +1092,7 @@ fn push_matrix_over_smart_http() {
             },
             specs,
             opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push_http over grit-http-server")
@@ -1192,7 +1192,7 @@ fn remote_rejection_surfaces_over_git_daemon() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec(Some(graph.c2), "refs/heads/main")],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push against declining hook completes");
@@ -1258,7 +1258,7 @@ fn remote_rejection_surfaces_over_ssh() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec(Some(graph.c2), "refs/heads/main")],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("ssh push against declining hook completes");
@@ -1504,7 +1504,7 @@ fn report_status_v1_and_v2_both_parse_over_ssh() {
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &push_specs,
             &PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push reading a v1 report");
@@ -1553,7 +1553,7 @@ fn report_status_v1_and_v2_both_parse_over_ssh() {
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &push_specs,
             &PushOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("push reading a v2 report");
@@ -1624,7 +1624,7 @@ fn push_succeeds_when_fake_receive_pack_exits_immediately_after_report() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &push_specs,
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push must succeed when report-status was complete before reset");

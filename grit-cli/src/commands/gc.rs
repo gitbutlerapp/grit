@@ -237,9 +237,14 @@ pub fn run_commit_graph(dry_run: bool, quiet: bool, show_progress: bool) -> Resu
     let repo = context::discover()?;
     let mut opts = CommitGraphOptions::with_changed_paths(true);
     opts.dry_run = dry_run;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let (report, elapsed) = timed(show_progress, "Writing commit-graph…", || {
         repo.maintenance()
-            .write_commit_graph(&opts)
+            .write_commit_graph(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &crate::interrupt::process_cancel_token(),
+            )
             .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
@@ -260,9 +265,14 @@ pub fn run_midx(dry_run: bool, quiet: bool, show_progress: bool) -> Result<GcOut
     let repo = context::discover()?;
     let mut opts = MidxOptions::default();
     opts.dry_run = dry_run;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let (report, elapsed) = timed(show_progress, "Writing multi-pack-index…", || {
         repo.maintenance()
-            .write_midx(&opts)
+            .write_midx(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &crate::interrupt::process_cancel_token(),
+            )
             .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
@@ -308,6 +318,7 @@ pub fn run_prune(
 ) -> Result<GcOutcome> {
     let repo = context::discover()?;
     let cutoff = older_than.map(parse_older_than).transpose()?.flatten();
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let (stats, elapsed) = timed(
         show_progress,
         "Pruning unreachable loose objects…",
@@ -315,7 +326,11 @@ pub fn run_prune(
             let mut prune_opts = PruneOptions::with_older_than(cutoff);
             prune_opts.dry_run = dry_run;
             repo.maintenance()
-                .prune_loose_objects(&prune_opts)
+                .prune_loose_objects(
+                    &prune_opts,
+                    &mut grit_lib::progress::NullProgress,
+                    &crate::interrupt::process_cancel_token(),
+                )
                 .map_err(crate::json_error::map_lib_error)
         },
     )?;
@@ -363,9 +378,14 @@ pub fn run_offload(
     opts.lop_git_dir = args.lop_dir;
     opts.configure_lop = args.configure_lop;
     opts.dry_run = args.dry_run;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let (report, elapsed) = timed(show_progress, "Offloading large blobs…", || {
         repo.maintenance()
-            .offload_blobs(&opts)
+            .offload_blobs(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &crate::interrupt::process_cancel_token(),
+            )
             .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {
@@ -417,9 +437,14 @@ pub fn run_drop_large_blobs(
         );
     };
     opts.dry_run = dry_run;
+    let _interrupt = crate::interrupt::InterruptCancel::install();
     let (report, elapsed) = timed(show_progress, "Dropping large promised blobs…", || {
         repo.maintenance()
-            .drop_promised_blobs(&opts)
+            .drop_promised_blobs(
+                &opts,
+                &mut grit_lib::progress::NullProgress,
+                &crate::interrupt::process_cancel_token(),
+            )
             .map_err(crate::json_error::map_lib_error)
     })?;
     Ok(GcOutcome {

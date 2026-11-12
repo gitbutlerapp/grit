@@ -40,6 +40,7 @@ use crate::odb::Odb;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::partial_clone::{stored_remote_filter, ObjectFilterSpec};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 
@@ -374,7 +375,13 @@ impl OffloadPack {
 ///
 /// [`crate::error::ObjectError::Offload`] for the [`OffloadError`] cases, [`RepositoryError::UnsupportedObjectStore`](crate::repo::RepositoryError::UnsupportedObjectStore)
 /// without a files-backed object store, and read, write and config failures.
-pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<OffloadReport> {
+pub(crate) fn offload_blobs(
+    repo: &Repository,
+    opts: &OffloadOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
+) -> Result<OffloadReport> {
+    poll_cancel(progress, cancel)?;
     let odb = repo.odb();
     odb.primary_store()
         .require_files_primary(FilesOnlyOperation::Offload)?;
@@ -408,6 +415,7 @@ pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<
 
     let main_bytes_before = local_object_bytes(odb)?;
     let selection = select_candidates(repo, &filter)?;
+    poll_cancel(progress, cancel)?;
     let candidates: Vec<ObjectId> = selection.candidates.keys().copied().collect();
     if let Some(refusal) = kept_object_the_promisor_pack_names(odb, &selection.candidates)? {
         return Err(refusal.into());
@@ -444,7 +452,7 @@ pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<
     }
 
     if !missing_in_lop.is_empty() {
-        report.lop_pack = copy_to_lop(repo, &lop, &missing_in_lop, opts)?
+        report.lop_pack = copy_to_lop(repo, &lop, &missing_in_lop, opts, progress, cancel)?
             .map(|(path, objects)| OffloadPack::written(OffloadPackRole::Lop, path, objects))
             .transpose()?;
         report.copied_to_lop = missing_in_lop.len();
@@ -458,6 +466,8 @@ pub(crate) fn offload_blobs(repo: &Repository, opts: &OffloadOptions) -> Result<
         // The main repository is about to drop its copies: the LOP's must be on disk.
         crate::index_pack::sync_installed_pack(&pack.path)?;
     }
+    // Last stop: from here on this repository changes config and drops its copies.
+    poll_cancel(progress, cancel)?;
 
     let mut wanted: Vec<(String, String)> = Vec::new();
     let promisor_key = format!("remote.{remote}.promisor");
@@ -824,6 +834,8 @@ fn copy_to_lop(
     lop: &Repository,
     blobs: &[ObjectId],
     opts: &OffloadOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<Option<(PathBuf, usize)>> {
     let cfg = repo.config().snapshot().ok();
     let pack_opts = PackBuildOptions {
@@ -861,8 +873,8 @@ fn copy_to_lop(
             keep_message: Some(LOP_KEEP_MESSAGE.to_owned()),
             ..IngestPackOptions::default()
         },
-        None,
-        None,
+        Some(progress),
+        Some(cancel),
     )?;
     let objects = ingested.object_ids.len();
     Ok(ingested.pack_path.map(|path| (path, objects)))
@@ -1068,7 +1080,13 @@ mod tests {
         fn offload(&self, limit: u64) -> OffloadReport {
             let mut opts = OffloadOptions::new("lop", NOW);
             opts.filter = Some(ObjectFilterSpec::BlobLimit(limit));
-            offload_blobs(&self.main(), &opts).expect("offload")
+            offload_blobs(
+                &self.main(),
+                &opts,
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
+            .expect("offload")
         }
 
         fn files(&self, dir: &Path, ext: &str) -> Vec<PathBuf> {
@@ -1163,7 +1181,13 @@ mod tests {
         let mut opts = OffloadOptions::new("lop", NOW);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(1024));
         opts.configure_lop = true;
-        let report = offload_blobs(&fx.main(), &opts).unwrap();
+        let report = offload_blobs(
+            &fx.main(),
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         let lop_dir = lop_dir_value(fx.lop().git_dir());
         assert!(Path::new(&lop_dir).is_absolute());
         let keys: Vec<(OffloadRepo, &str, &str)> = report
@@ -1198,7 +1222,13 @@ mod tests {
         assert_eq!(config.values_all(LOP_GIT_DIR_KEY), [lop_dir.clone()]);
 
         // The LOP is recorded once, however often offload runs.
-        let again = offload_blobs(&fx.main(), &opts).unwrap();
+        let again = offload_blobs(
+            &fx.main(),
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert!(
             again.config_changes.is_empty(),
             "{:?}",
@@ -1219,7 +1249,13 @@ mod tests {
     fn stored_filter_is_used_and_lop_is_left_alone_by_default() {
         let fx = Fixture::new(&[2048, 10]);
         fx.append_main_config("\tpartialCloneFilter = blob:limit=1k\n");
-        let report = offload_blobs(&fx.main(), &OffloadOptions::new("lop", NOW)).unwrap();
+        let report = offload_blobs(
+            &fx.main(),
+            &OffloadOptions::new("lop", NOW),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(report.candidates, 1);
         assert_eq!(report.filter, ObjectFilterSpec::BlobLimit(1024));
         let keys: Vec<&str> = report
@@ -1266,7 +1302,13 @@ mod tests {
         opts.filter = Some(ObjectFilterSpec::BlobNone);
         opts.dry_run = true;
         opts.configure_lop = true;
-        let report = offload_blobs(&fx.main(), &opts).unwrap();
+        let report = offload_blobs(
+            &fx.main(),
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert!(report.dry_run);
         assert_eq!(report.candidates, 1);
         assert_eq!(report.copied_to_lop, 0);
@@ -1580,13 +1622,24 @@ mod tests {
         let repo = Repository::discover(Some(&work), &RepositoryOptions::empty()).unwrap();
         let mut opts = OffloadOptions::new("lop", NOW);
         opts.filter = Some(ObjectFilterSpec::BlobLimit(1024));
-        let report = offload_blobs(&repo, &opts).unwrap();
+        let report = offload_blobs(
+            &repo,
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap();
         assert_eq!(report.candidates, 0);
         assert_eq!(report.skipped_checked_out, 1);
     }
 
     fn offload_err(fx: &Fixture, opts: &OffloadOptions) -> OffloadError {
-        match offload_blobs(&fx.main(), opts) {
+        match offload_blobs(
+            &fx.main(),
+            opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        ) {
             Err(Error::Object(ObjectError::Offload(err))) => err,
             other => panic!("expected an offload error, got {other:?}"),
         }

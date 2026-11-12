@@ -517,6 +517,7 @@ pub(crate) fn unpack_objects_with_promises(
 /// use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 /// use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
 /// use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
+/// use grit_lib::progress::{CancelToken, NullProgress};
 /// use grit_lib::objects::{HashAlgo, ObjectKind};
 /// use grit_lib::refs::store::MemoryRefStore;
 /// use grit_lib::repo::Repository;
@@ -538,12 +539,17 @@ pub(crate) fn unpack_objects_with_promises(
 ///     &target,
 ///     &target,
 ///     &UnpackOptions::default(),
+///     &mut NullProgress,
+///     &CancelToken::never(),
 /// )?;
 /// assert!(ingested.object_ids.contains(&blob));
 /// assert!(target.contains(&blob)?);
 /// # Ok(())
 /// # }
 /// ```
+///
+/// Reports [`ProgressPhase::IndexingObjects`] and [`ProgressPhase::ResolvingDeltas`] on
+/// `progress` and polls `cancel` per object.
 ///
 /// # Errors
 ///
@@ -552,24 +558,21 @@ pub(crate) fn unpack_objects_with_promises(
 /// - [`crate::error::ObjectError::UnresolvedDeltas`] — deltas whose bases are in neither the pack nor `bases`.
 /// - [`Error::Io`] — failure reading from `reader`.
 /// - [`crate::error::ObjectError::Zlib`] — decompression failure.
+/// - [`Error::Cancelled`] — `cancel` fired; like any failure, the store is asked to roll back.
 /// - Any error `store` or `bases` return.
 pub fn ingest_pack_into(
     reader: &mut dyn Read,
     store: &dyn WritableObjectStore,
     bases: &dyn ObjectStore,
     opts: &UnpackOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<IngestedObjects> {
-    ingest_pack_into_with_progress(reader, store, bases, opts, None, None)
+    ingest_pack_into_with_progress(reader, store, bases, opts, Some(progress), Some(cancel))
 }
 
-/// Like [`ingest_pack_into`], reporting [`ProgressPhase::IndexingObjects`] and
-/// [`ProgressPhase::ResolvingDeltas`] on `progress` and stopping with
-/// [`Error::Cancelled`] once `cancel` fires.
-///
-/// # Errors
-///
-/// Same as [`ingest_pack_into`], plus [`Error::Cancelled`].
-pub fn ingest_pack_into_with_progress(
+/// [`ingest_pack_into`] with an optional sink and token, for internal callers.
+pub(crate) fn ingest_pack_into_with_progress(
     reader: &mut dyn Read,
     store: &dyn WritableObjectStore,
     bases: &dyn ObjectStore,

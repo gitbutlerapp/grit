@@ -121,7 +121,7 @@ fn run_fetch_and_assert(transport: &SshTransport, url: &str, source: &Path, loca
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("fetch_remote over ssh");
@@ -298,7 +298,7 @@ fn fetch_over_ssh_v2_lands_refs_and_objects() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("v2 fetch over ssh");

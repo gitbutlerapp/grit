@@ -369,7 +369,7 @@ fn v2_clone_from_scratch_no_haves_and_not_v0() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("v2 clone");
@@ -477,7 +477,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("seed fetch");
@@ -539,7 +539,7 @@ fn v2_incremental_offers_haves_and_pack_is_minimal() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("incremental fetch");
@@ -661,7 +661,7 @@ fn v2_unborn_remote_is_empty_and_does_not_hang() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("v2 empty fetch");
@@ -743,7 +743,7 @@ fn v2_tag_modes_all_and_following() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("v2 tags=all");
@@ -798,7 +798,7 @@ fn v2_tag_modes_all_and_following() {
         .fetch_from(
             grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect("v2 tags=following");
@@ -880,7 +880,7 @@ fn v2_ref_prefix_filtering_excludes_tags() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("v2 heads-only fetch");
@@ -1025,7 +1025,7 @@ fn v2_sha256_fetch_lands_refs_and_objects() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("v2 sha256 fetch_remote");

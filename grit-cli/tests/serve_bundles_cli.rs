@@ -13,8 +13,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::bundle_uri::bundle_cache_path;
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::resumable::{download_resumable, ResumableError};
 use grit_lib::remote::transport::http::ureq_client::UreqHttpClient;
 use grit_lib::remote::transport::http::{HttpClient, HttpRequest, HttpResponse};
@@ -346,7 +346,7 @@ fn clones_start_from_the_server_bundle_and_resume_its_download() {
         &dropped,
         &uri,
         &dest,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     );
     assert!(

@@ -8,9 +8,9 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneCheckout, CloneIntoOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{git, rev_parse};
 
@@ -82,7 +82,7 @@ fn clone_into_custom_primary_fetches_and_checks_out() {
     let outcome = clone_into(
         repo,
         CloneIntoOptions::new(url),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -115,7 +115,7 @@ fn clone_into_custom_primary_skips_checkout_when_disabled() {
     let outcome = clone_into(
         repo,
         CloneIntoOptions::new(url).with_checkout(false),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -138,7 +138,7 @@ fn clone_into_memory_store_and_memory_ref_store_checks_out() {
     let outcome = clone_into(
         repo,
         CloneIntoOptions::new(url),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

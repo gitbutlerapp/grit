@@ -111,6 +111,8 @@ fn two_worktrees() -> Fixture {
         .add(
             &AddLinkedWorktreeOptions::new(linked.clone())
                 .with_branch(Some(WorktreeBranch::Create("feat".into()))),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("worktrees().add");
     assert_eq!(

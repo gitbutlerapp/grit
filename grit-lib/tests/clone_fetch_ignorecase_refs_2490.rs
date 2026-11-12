@@ -85,7 +85,7 @@ fn clone_stores_casefold_remote_refs_in_packed_refs() {
     opts.config
         .push(("core.ignorecase".to_owned(), "true".to_owned()));
     opts.checkout = false;
-    clone(opts, &mut NoProgress, &CancelToken::never(), None)
+    clone(opts, &mut NullProgress, &CancelToken::never(), None)
         .expect("clone with casefold remote refs");
 
     assert!(dest.join(".git").is_dir(), "clone destination must remain");
@@ -150,7 +150,7 @@ fn fetch_rejects_second_case_twin_and_keeps_first() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&bare),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch continues with rejections");

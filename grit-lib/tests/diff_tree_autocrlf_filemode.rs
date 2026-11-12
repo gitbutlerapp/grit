@@ -58,7 +58,13 @@ fn diff_tree_to_worktree_empty_with_autocrlf_and_filemode_false() {
 
     let diff = repo
         .diff()
-        .tree_to_worktree(Some(&tree_oid), &index, &TreeDiffOptions::default())
+        .tree_to_worktree(
+            Some(&tree_oid),
+            &index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff")
         .entries;
 
@@ -80,7 +86,13 @@ fn diff_tree_to_worktree_empty_when_stat_cache_stale() {
 
     let diff = repo
         .diff()
-        .tree_to_worktree(Some(&tree_oid), &index, &TreeDiffOptions::default())
+        .tree_to_worktree(
+            Some(&tree_oid),
+            &index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff")
         .entries;
 
@@ -120,7 +132,13 @@ fn explicit_index_chmod_reported_when_filemode_false() {
 
     let diff = repo
         .diff()
-        .tree_to_worktree(Some(&tree_oid), &index, &TreeDiffOptions::default())
+        .tree_to_worktree(
+            Some(&tree_oid),
+            &index,
+            &TreeDiffOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff")
         .entries;
 
@@ -144,7 +162,12 @@ fn diff_index_to_worktree_stays_empty_in_same_fixture() {
     let options = TreeDiffOptions::default().with_submodules(SubmoduleIgnoreMode::Dirty);
     let diff = repo
         .diff()
-        .index_to_worktree(&mut index, &options)
+        .index_to_worktree(
+            &mut index,
+            &options,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("diff")
         .entries;
     assert!(

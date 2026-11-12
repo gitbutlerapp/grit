@@ -106,7 +106,7 @@ fn grit_fetch(repo: &Path, remote_git: &Path) {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
         &mut fetch_opts().clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch_local");
@@ -183,7 +183,7 @@ fn fetch_forced_update_reflog() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.bare),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("force fetch");
@@ -261,7 +261,7 @@ fn fetch_tag_tracking_ref_has_no_reflog() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.bare),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("tags");
@@ -297,7 +297,7 @@ fn fetch_prune_removes_tracking_reflog() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.bare),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("prune fetch");

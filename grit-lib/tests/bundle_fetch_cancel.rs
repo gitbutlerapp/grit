@@ -2,7 +2,7 @@
 
 use grit_lib::error::Error;
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -48,7 +48,7 @@ fn bundle_fetch_returns_cancelled_when_signalled_before_unbundle() {
     )
     .expect("open fetch target")
     .bundles()
-    .fetch(&bundle, &opts, &mut NoProgress, &flag)
+    .fetch(&bundle, &opts, &mut NullProgress, &flag)
     .expect_err("cancelled before bundle ingest");
     assert!(matches!(err, Error::Cancelled));
 }

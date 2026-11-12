@@ -10,9 +10,9 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::odb::store::MemoryStore;
 use grit_lib::objects::HashAlgo;
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::refs::store::{MemoryRefStore, RawRef, RefNameRef, RefStore};
 use grit_lib::remote::clone::{clone_into, CloneIntoOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::{git, rev_parse};
 
@@ -73,7 +73,7 @@ fn clone_into_injected_ref_store_keeps_clone_reflogs_in_store() {
     clone_into(
         repo,
         CloneIntoOptions::new(url),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

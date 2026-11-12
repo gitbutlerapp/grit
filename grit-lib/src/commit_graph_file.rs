@@ -2097,7 +2097,11 @@ mod tests {
     fn from_bytes_parses_a_written_graph_and_rejects_bad_files() {
         let (_dir, repo, commit) = one_commit_repo();
         repo.maintenance()
-            .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
+            .write_commit_graph(
+                &crate::maintenance::CommitGraphOptions::default(),
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("write graph");
         let bytes =
             std::fs::read(repo.odb().objects_dir().join("info/commit-graph")).expect("graph file");
@@ -2150,7 +2154,11 @@ mod tests {
         let octopus = commit(vec![root, side_a, side_b], "octopus\n");
         crate::refs::write_ref(&repo.git_dir(), "refs/heads/main", &octopus).expect("ref");
         repo.maintenance()
-            .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
+            .write_commit_graph(
+                &crate::maintenance::CommitGraphOptions::default(),
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("write graph");
         let bytes =
             std::fs::read(repo.odb().objects_dir().join("info/commit-graph")).expect("graph file");
@@ -2181,7 +2189,11 @@ mod tests {
         let (dir, files, commit) = one_commit_repo();
         files
             .maintenance()
-            .write_commit_graph(&crate::maintenance::CommitGraphOptions::default())
+            .write_commit_graph(
+                &crate::maintenance::CommitGraphOptions::default(),
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("write graph");
         assert!(files.odb().commit_graph_chain().is_some());
 
@@ -2193,7 +2205,11 @@ mod tests {
 
         let crate::maintenance::CommitGraphBuild::Built(built) = custom
             .maintenance()
-            .build_commit_graph(&crate::maintenance::CommitGraphOptions::default())
+            .build_commit_graph(
+                &crate::maintenance::CommitGraphOptions::default(),
+                &mut crate::progress::NullProgress,
+                &crate::progress::CancelToken::never(),
+            )
             .expect("build")
         else {
             panic!("plain repository must not skip the graph");

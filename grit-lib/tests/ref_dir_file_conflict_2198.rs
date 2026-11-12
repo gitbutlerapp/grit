@@ -194,7 +194,7 @@ fn assert_fetch_rejects_rel_and_creates_other(clone: &Path, bare: &Path, opts: &
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(bare),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch without prune");
@@ -243,7 +243,7 @@ fn assert_fetch_rejects_rel_and_creates_other(clone: &Path, bare: &Path, opts: &
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(bare),
         &mut pruned.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch with prune");

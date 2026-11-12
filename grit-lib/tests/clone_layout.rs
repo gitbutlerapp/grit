@@ -198,7 +198,7 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&upstream.path().join(".git")),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch");
@@ -355,7 +355,7 @@ fn library_clone_api_passes_fsck_and_status() {
         CloneOptions {
             ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
         },
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -447,7 +447,7 @@ fn clone_tag_layout_covers_bare_no_tags_shallow_and_empty() {
         }
         git_args.extend([&url, "."]);
         assert!(git_in(control.path(), &git_args));
-        let result = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).unwrap();
+        let result = clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).unwrap();
         let git_dir = result.repo.git_dir();
         let tags = git_out(
             dest.path(),
@@ -497,7 +497,7 @@ fn clone_tag_layout_covers_bare_no_tags_shallow_and_empty() {
     let dest = tempfile::tempdir().unwrap();
     let result = clone_repo(
         CloneOptions::new(empty.path().to_string_lossy(), dest.path().to_path_buf()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -604,7 +604,7 @@ fn clone_of_many_branches_packs_them_in_one_file_like_git() {
         }
         git_args.extend([url.as_str(), "."]);
         assert!(git_in(control.path(), &git_args));
-        let result = clone_repo(opts, &mut NoProgress, &CancelToken::never(), None).unwrap();
+        let result = clone_repo(opts, &mut NullProgress, &CancelToken::never(), None).unwrap();
         let git_dir = result.repo.git_dir().to_path_buf();
 
         let imported = if bare {

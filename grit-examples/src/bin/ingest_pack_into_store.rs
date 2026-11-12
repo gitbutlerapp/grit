@@ -48,6 +48,8 @@ fn main() -> grit_lib::error::Result<()> {
         &store,
         &store,
         &UnpackOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
     )?;
     println!("store_objects={}", ingested.object_ids.len());
     println!("store_has_tip={}", store.contains(&tip)?);
@@ -64,7 +66,13 @@ fn main() -> grit_lib::error::Result<()> {
             .with_ref_store(Arc::new(MemoryRefStore::new()))
             .with_initial_branch("main")),
     )?;
-    let received = ingest_received_pack(pack, repo.odb(), &IngestPackOptions::default())?;
+    let received = ingest_received_pack(
+        pack,
+        repo.odb(),
+        &IngestPackOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    )?;
     println!("repo_objects={}", received.object_ids.len());
     println!("repo_commits={}", received.object_counts.commits);
     println!("pack_installed={}", received.pack_path.is_some());

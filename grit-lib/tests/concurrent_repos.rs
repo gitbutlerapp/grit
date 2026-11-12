@@ -476,7 +476,7 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             .fetch_from(
                 grit_lib::remote::transfer::TransferEndpoint::Local(upstream),
                 &mut fetch_opts.clone(),
-                &mut grit_lib::remote::fetch::NoProgress,
+                &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
             )
             .expect("fetch");

@@ -610,8 +610,11 @@ pub(crate) fn build_commit_graph_bytes_from_oid_maps(
 fn walk_reachable_commit_infos(
     odb: &Odb,
     mut stack: Vec<ObjectId>,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
 ) -> crate::error::Result<OidHashMap<CommitGraphCommitInfo>> {
-    odb.with_pack_read_context(|| {
+    let mut stride = crate::progress::HistoryWalkStrideState::default();
+    let walked = odb.with_pack_read_context(|| {
         let mut commits: OidHashMap<CommitGraphCommitInfo> = oid_hash_map();
         let mut buf = Vec::new();
         // One reader for the whole walk instead of one per read; anything it does not serve
@@ -633,13 +636,23 @@ fn walk_reachable_commit_infos(
                     let info = commit_info_from_ref(&CommitRef::parse(&buf)?);
                     stack.extend_from_slice(&info.parents);
                     commits.insert(oid, info);
+                    crate::progress::HistoryWalkStride::poll(
+                        progress,
+                        cancel,
+                        crate::progress::ProgressPhase::WalkingHistory,
+                        &mut stride,
+                    )?;
                 }
                 Some(ObjectKind::Tag) => stack.extend(tag_object_line_oid(&buf)),
                 Some(_) | None => {}
             }
         }
         Ok(commits)
-    })
+    });
+    if stride.started {
+        progress.finish();
+    }
+    walked
 }
 
 /// `HEAD` and every ref under `refs/`, through the repository's ref store.
@@ -667,17 +680,26 @@ fn ref_tips_for_repository(repo: &crate::repo::Repository) -> crate::error::Resu
 pub(crate) fn collect_reachable_commit_oids_for_repository(
     repo: &crate::repo::Repository,
 ) -> crate::error::Result<HashSet<ObjectId>> {
-    Ok(collect_reachable_commit_infos_for_repository(repo)?
-        .into_keys()
-        .collect())
+    Ok(collect_reachable_commit_infos_for_repository(
+        repo,
+        &mut crate::progress::NullProgress,
+        crate::progress::CancelToken::never_ref(),
+    )?
+    .into_keys()
+    .collect())
 }
 
 /// [`collect_reachable_commit_oids_for_repository`], keeping the graph data of each commit read
 /// during the walk so the writer does not read every commit a second time.
+///
+/// The walk reports [`crate::progress::ProgressPhase::WalkingHistory`] on `progress` and
+/// stops with [`crate::error::Error::Cancelled`] once `cancel` fires.
 pub(crate) fn collect_reachable_commit_infos_for_repository(
     repo: &crate::repo::Repository,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &crate::progress::CancelToken,
 ) -> crate::error::Result<OidHashMap<CommitGraphCommitInfo>> {
-    walk_reachable_commit_infos(repo.odb(), ref_tips_for_repository(repo)?)
+    walk_reachable_commit_infos(repo.odb(), ref_tips_for_repository(repo)?, progress, cancel)
 }
 
 /// Collect reachable commit OIDs from on-disk ref tips under `git_dir`.
@@ -698,7 +720,12 @@ pub(crate) fn collect_reachable_commit_infos(
     git_dir: &std::path::Path,
     odb: &Odb,
 ) -> crate::error::Result<OidHashMap<CommitGraphCommitInfo>> {
-    walk_reachable_commit_infos(odb, ref_tips_under_git_dir(git_dir)?)
+    walk_reachable_commit_infos(
+        odb,
+        ref_tips_under_git_dir(git_dir)?,
+        &mut crate::progress::NullProgress,
+        crate::progress::CancelToken::never_ref(),
+    )
 }
 
 /// Loose refs, `packed-refs` and `HEAD` read straight from `git_dir`.

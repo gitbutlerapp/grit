@@ -1016,6 +1016,8 @@ mod log_patch_one_commit;
 #[cfg(feature = "full-tests")]
 #[path = "log_pathspec_git_compat.rs"]
 mod log_pathspec_git_compat;
+#[path = "long_ops_cancel.rs"]
+mod long_ops_cancel;
 #[cfg(feature = "full-tests")]
 #[path = "loose_write_concurrent_issue_1875.rs"]
 mod loose_write_concurrent_issue_1875;

@@ -196,7 +196,7 @@ fn incremental_second_fetch_read_info(upstream: &tempfile::TempDir, with_tags: b
         .fetch(
             &remote,
             opts.clone(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -206,7 +206,13 @@ fn incremental_second_fetch_read_info(upstream: &tempfile::TempDir, with_tags: b
     git(upstream.path(), &["add", "c.txt"]);
     git(upstream.path(), &["commit", "-q", "-m", "c3"]);
     repo.remotes()
-        .fetch(&remote, opts, &mut NoProgress, &CancelToken::never(), None)
+        .fetch(
+            &remote,
+            opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("second fetch");
     store.read_info.load(Ordering::Relaxed) - read_info_after_first
 }
@@ -221,7 +227,13 @@ fn fresh_fetch_read_info(upstream: &tempfile::TempDir, with_tags: bool) -> usize
         fetch_heads_only()
     };
     repo.remotes()
-        .fetch(&remote, opts, &mut NoProgress, &CancelToken::never(), None)
+        .fetch(
+            &remote,
+            opts,
+            &mut NullProgress,
+            &CancelToken::never(),
+            None,
+        )
         .expect("fetch");
     store.read_info.load(Ordering::Relaxed)
 }
@@ -238,7 +250,7 @@ fn local_fetch_into_empty_custom_primary_skips_per_object_contains() {
         .fetch(
             &remote,
             fetch_all(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -274,7 +286,7 @@ fn incremental_local_fetch_uses_one_contains_many_batch() {
         .fetch(
             &remote,
             fetch_all(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -291,7 +303,7 @@ fn incremental_local_fetch_uses_one_contains_many_batch() {
         .fetch(
             &remote,
             fetch_all(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -354,7 +366,7 @@ fn local_fetch_propagates_contains_many_errors() {
         .fetch(
             &remote,
             fetch_all(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

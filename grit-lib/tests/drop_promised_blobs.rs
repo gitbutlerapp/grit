@@ -25,7 +25,6 @@ use grit_lib::porcelain::MergeError;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::remote::clone::{clone, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::{HttpClientFactory, RemoteError};
@@ -269,7 +268,11 @@ impl Fixture {
         let report = self
             .offline()
             .maintenance()
-            .drop_promised_blobs(opts)
+            .drop_promised_blobs(
+                opts,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
             .expect("drop");
         clear_pack_cache();
         report
@@ -569,7 +572,11 @@ fn refusals_are_typed() {
     let tmp = tempfile::tempdir().unwrap();
     let (plain, _) = Repository::init(tmp.path(), &InitOptions::default()).unwrap();
     assert!(matches!(
-        plain.maintenance().drop_promised_blobs(&opts(LIMIT, None)),
+        plain.maintenance().drop_promised_blobs(
+            &opts(LIMIT, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never()
+        ),
         Err(Error::Object(ObjectError::NoPromisorRemote { .. }))
     ));
 
@@ -580,9 +587,11 @@ fn refusals_are_typed() {
     )
     .unwrap();
     assert!(matches!(
-        fx.offline()
-            .maintenance()
-            .drop_promised_blobs(&opts(LIMIT, None)),
+        fx.offline().maintenance().drop_promised_blobs(
+            &opts(LIMIT, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never()
+        ),
         Err(Error::Merge(MergeError::OperationInProgress(
             InProgressOperation::Merge,
         )))
@@ -597,9 +606,11 @@ fn refusals_are_typed() {
     )
     .unwrap();
     assert!(matches!(
-        fx.offline()
-            .maintenance()
-            .drop_promised_blobs(&opts(LIMIT, None)),
+        fx.offline().maintenance().drop_promised_blobs(
+            &opts(LIMIT, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never()
+        ),
         Err(Error::Repository(
             RepositoryError::MaintenanceRunning { .. }
         ))
@@ -608,9 +619,11 @@ fn refusals_are_typed() {
 
     append_config(&fx.git_dir, "[extensions]\n\tpreciousObjects = true\n");
     assert!(matches!(
-        fx.offline()
-            .maintenance()
-            .drop_promised_blobs(&opts(LIMIT, None)),
+        fx.offline().maintenance().drop_promised_blobs(
+            &opts(LIMIT, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never()
+        ),
         Err(Error::Repository(
             RepositoryError::PreciousObjectsRepository { .. }
         ))
@@ -623,7 +636,11 @@ fn a_multi_pack_index_is_rewritten_for_the_remaining_packs() {
     let fx = Fixture::new().with_old_versions_fetched();
     fx.offline()
         .maintenance()
-        .write_midx(&MidxOptions::default())
+        .write_midx(
+            &MidxOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .unwrap();
     clear_pack_cache();
     let report = fx.run(&opts(LIMIT, None));
@@ -782,7 +799,14 @@ fn offload_at(main_dir: &Path, limit: u64) -> grit_lib::maintenance::OffloadRepo
     let main = Repository::open(main_dir, &RepositoryOptions::empty()).unwrap();
     let mut offload = OffloadOptions::new("lop", NOW);
     offload.filter = Some(ObjectFilterSpec::BlobLimit(limit));
-    let report = main.maintenance().offload_blobs(&offload).expect("offload");
+    let report = main
+        .maintenance()
+        .offload_blobs(
+            &offload,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
+        .expect("offload");
     drop(main);
     clear_pack_cache();
     report
@@ -856,7 +880,11 @@ fn blobs_an_offload_left_in_main_are_never_dropped() {
     // A threshold below the offload's: f0 is a candidate the LOP cannot supply.
     let report = main
         .maintenance()
-        .drop_promised_blobs(&opts(1024, None))
+        .drop_promised_blobs(
+            &opts(1024, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("drop");
     clear_pack_cache();
     assert_eq!(report.candidates, 1, "{report:?}");
@@ -869,7 +897,11 @@ fn blobs_an_offload_left_in_main_are_never_dropped() {
     copy_into(&main_dir, &lop_dir, &blobs[..1]);
     let report = main
         .maintenance()
-        .drop_promised_blobs(&opts(1024, None))
+        .drop_promised_blobs(
+            &opts(1024, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("drop");
     clear_pack_cache();
     assert_eq!(dropped_oids(&report), blobs[..1], "{report:?}");
@@ -899,7 +931,11 @@ fn a_blob_an_offload_kept_for_a_checkout_is_never_dropped() {
 
     let report = main
         .maintenance()
-        .drop_promised_blobs(&opts(LIMIT, None))
+        .drop_promised_blobs(
+            &opts(LIMIT, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("drop");
     clear_pack_cache();
     assert_eq!(report.candidates, 1, "{report:?}");
@@ -921,7 +957,11 @@ fn an_offloaded_repository_keeps_what_it_cannot_confirm_over_the_network() {
     let main = Repository::open(&main_dir, &RepositoryOptions::empty()).unwrap();
     let report = main
         .maintenance()
-        .drop_promised_blobs(&opts(1024, None))
+        .drop_promised_blobs(
+            &opts(1024, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("drop");
     clear_pack_cache();
     assert!(report.dropped.is_empty(), "{report:?}");
@@ -933,7 +973,11 @@ fn an_offloaded_repository_keeps_what_it_cannot_confirm_over_the_network() {
     copy_into(&main_dir, &tmp.path().join("lop.git"), &blobs[..1]);
     let report = main
         .maintenance()
-        .drop_promised_blobs(&opts(1024, None))
+        .drop_promised_blobs(
+            &opts(1024, None),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("drop");
     assert_eq!(dropped_oids(&report), blobs[..1], "{report:?}");
 }
@@ -1100,7 +1144,11 @@ fn only_packs_offload_wrote_count_as_held_by_a_lop() {
     let drop_f0 = || {
         let report = main
             .maintenance()
-            .drop_promised_blobs(&opts(1024, None))
+            .drop_promised_blobs(
+                &opts(1024, None),
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::CancelToken::never(),
+            )
             .expect("drop");
         clear_pack_cache();
         report

@@ -26,7 +26,7 @@ use std::time::{Duration, Instant};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
 
@@ -165,7 +165,7 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("shallow depth=1 fetch over git daemon");
@@ -345,7 +345,7 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut shallow_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("initial shallow fetch");
@@ -385,7 +385,7 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut unshallow_opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
     )
     .expect("unshallow fetch");
@@ -477,7 +477,7 @@ fn git_daemon_shallow_depth_two_keeps_parent_tag() {
     let dest = tmp.path().join("clone");
     clone_repo(
         CloneOptions::new(url, dest.clone()).with_depth(Some(2)),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

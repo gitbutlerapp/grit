@@ -69,6 +69,7 @@ use crate::pack::PackedType;
 use crate::pack_index::PackIndex;
 use crate::pack_objects::PackBuildOptions;
 use crate::porcelain::MergeError;
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::repo::error::FilesOnlyOperation;
 use crate::repo::Repository;
 use crate::repo::RepositoryError;
@@ -448,7 +449,10 @@ impl DropPromisedBlobsReport {
 pub(crate) fn drop_promised_blobs(
     repo: &Repository,
     opts: &DropPromisedBlobsOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<DropPromisedBlobsReport> {
+    poll_cancel(progress, cancel)?;
     repo.odb()
         .primary_store()
         .require_files_primary(FilesOnlyOperation::DropLargeBlobs)?;
@@ -468,7 +472,7 @@ pub(crate) fn drop_promised_blobs(
             }
         }
     };
-    run(repo, &config, opts)
+    run(repo, &config, opts, cancel)
 }
 
 /// What the `gc` drop phase will do, settled from config before `gc` changes
@@ -515,6 +519,7 @@ pub(crate) fn run_drop_for_gc(
     plan: GcDropPlan,
     dry_run: bool,
     threads: Option<usize>,
+    cancel: &CancelToken,
 ) -> Result<DropPromisedBlobsReport> {
     let mut opts = match plan {
         GcDropPlan::Skip(reason) => return Ok(DropPromisedBlobsReport::skipped_for(reason)),
@@ -525,7 +530,7 @@ pub(crate) fn run_drop_for_gc(
     }
     opts.dry_run = dry_run;
     opts.threads = threads;
-    run(repo, config, &opts)
+    run(repo, config, &opts, cancel)
 }
 
 /// Why the repository is not in a state to drop anything.
@@ -599,10 +604,13 @@ struct Candidate {
     entry_bytes: u64,
 }
 
+/// Scan, decide and rewrite. `cancel` is polled per scanned pack and before the walks
+/// and the rewrite; once packs are being rewritten the run completes.
 fn run(
     repo: &Repository,
     config: &ConfigSet,
     opts: &DropPromisedBlobsOptions,
+    cancel: &CancelToken,
 ) -> Result<DropPromisedBlobsReport> {
     let odb = repo.odb();
     let pack_dir = odb.objects_dir().join("pack");
@@ -633,6 +641,7 @@ fn run(
     };
     let mut candidates: OidHashMap<Candidate> = oid_hash_map();
     for (pack_no, pack) in packs.iter_mut().enumerate() {
+        cancel.poll_result()?;
         scan_pack(odb, pack, pack_no as u32, opts.min_size, &mut candidates)?;
     }
     report.candidates = candidates.len();
@@ -656,6 +665,7 @@ fn run(
         }
     }
     // Before the walks: in an offloaded repository most candidates stop here.
+    cancel.poll_result()?;
     let mut undecided =
         PromisorSupply::load(repo, config).suppliable(stored_only_here, &mut report.kept)?;
     let mut walk = ProtectionWalk::new(odb, &undecided);
@@ -717,6 +727,7 @@ fn run(
         .collect();
     affected.sort_unstable();
     affected.dedup();
+    cancel.poll_result()?;
     rewrite_packs(
         repo,
         config,
@@ -1364,7 +1375,12 @@ fn rewrite_packs(
     odb.reprepare_local_packs();
     let packs_left = odb.local_pack_indexes()?.len();
     if had_midx && packs_left > 0 {
-        super::write_midx(repo, &super::MidxOptions::default())?;
+        super::write_midx(
+            repo,
+            &super::MidxOptions::default(),
+            &mut crate::progress::NullProgress,
+            CancelToken::never_ref(),
+        )?;
     }
     report.bytes_reclaimed = bytes_before.saturating_sub(bytes_after);
     Ok(())

@@ -64,7 +64,7 @@ fn push_local_honors_deny_non_fast_forwards() {
             .with_dst("refs/heads/main".to_owned())
             .with_force(true)],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -120,7 +120,7 @@ fn push_local_honors_deny_deletes() {
             .with_dst("refs/heads/feature".to_owned())
             .with_delete(true)],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -166,7 +166,7 @@ fn push_local_honors_deny_current_branch_on_non_bare() {
             .with_src(Some(two))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -221,7 +221,7 @@ fn push_local_update_instead_deploys_worktree() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -275,7 +275,7 @@ fn push_local_update_instead_rejects_dirty_unstaged() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -327,7 +327,7 @@ fn push_local_update_instead_rejects_dirty_staged() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -375,7 +375,7 @@ fn push_local_update_instead_refuses_untracked_collision() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");
@@ -425,7 +425,7 @@ fn push_local_update_instead_ignore_advances_ref_without_checkout() {
             .with_src(Some(tip))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_local");

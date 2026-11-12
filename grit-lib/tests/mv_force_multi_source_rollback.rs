@@ -42,6 +42,7 @@ fn multi_source_missing_later_source_rolls_back_earlier_forced_move() {
         .move_paths(
             &MoveOptions::new(vec!["src/f0000".into(), "src/f0001".into()], "dest")
                 .with_force(true),
+            &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("missing later source");

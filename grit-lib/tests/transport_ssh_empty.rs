@@ -159,7 +159,7 @@ fn fetch_empty_bare_over_ssh_is_noop() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("fetch against empty remote");
@@ -191,7 +191,7 @@ fn clone_empty_bare_over_ssh_succeeds() {
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
     );
 
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None)
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None)
         .expect("clone empty bare over ssh");
 
     assert!(outcome.branches_with_commits.is_empty());
@@ -249,7 +249,7 @@ fn push_to_empty_bare_over_ssh_without_hung_up_stderr() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push to empty bare");
@@ -355,7 +355,7 @@ fn clone_empty_bare_over_ssh_flush_only_v0_succeeds() {
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
     );
 
-    let outcome = clone(opts, &mut NoProgress, &CancelToken::never(), None)
+    let outcome = clone(opts, &mut NullProgress, &CancelToken::never(), None)
         .expect("clone flush-only empty over ssh");
     assert!(outcome.branches_with_commits.is_empty());
     assert!(dest.join(".git").is_dir());
@@ -445,7 +445,7 @@ fn fetch_empty_bare_over_ssh_flush_only_v0_is_noop() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &mut opts,
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("fetch against flush-only empty remote");
@@ -516,7 +516,7 @@ fn ssh_connect_system_git_empty_bare_v0_then_fsck() {
         )],
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
     );
-    clone(opts, &mut NoProgress, &CancelToken::never(), None).expect("clone");
+    clone(opts, &mut NullProgress, &CancelToken::never(), None).expect("clone");
     let fsck = Command::new("git")
         .args(["-C", dest.to_str().expect("utf8"), "fsck"])
         .status()

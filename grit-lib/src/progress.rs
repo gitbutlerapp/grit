@@ -52,7 +52,7 @@ pub enum ProgressPhase {
     /// Downloading or uploading a bundle that can resume where it stopped
     /// (clone's `bundle-uri` bundle, a large push). Counted in bytes, including
     /// any bytes an earlier run already moved; the detailed events go to
-    /// [`crate::fetch::Progress::resumable_transfer`].
+    /// [`ProgressSink::resumable_transfer`].
     TransferringBundle,
     /// Compressing objects while building a pack for upload.
     CompressingObjects,
@@ -103,9 +103,9 @@ pub enum ProgressUnit {
 
 /// How far a pack transfer has got, counted in objects rather than bytes.
 ///
-/// Reported through [`crate::fetch::Progress::received_objects`] while a pack
+/// Reported through [`ProgressSink::received_objects`] while a pack
 /// streams in, when the sink asks for it with
-/// [`crate::fetch::Progress::wants_received_objects`].
+/// [`ProgressSink::wants_received_objects`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[non_exhaustive]
 pub struct ReceivedObjects {
@@ -174,6 +174,71 @@ pub trait ProgressSink {
 
     /// Finish the current phase.
     fn finish(&mut self) {}
+
+    /// Receive a chunk of progress bytes the remote sent on side-band channel 2
+    /// (typically `\r`-delimited counter lines), or hook output relayed during push.
+    fn message(&mut self, bytes: &[u8]) {
+        let _ = bytes;
+    }
+
+    /// When true, fetch omits `no-progress` so the remote may emit channel-2 progress
+    /// for [`Self::message`]. Defaults to `false`.
+    fn remote_sideband_progress(&self) -> bool {
+        false
+    }
+
+    /// When true, a pack being received is also counted in objects and
+    /// reported through [`Self::received_objects`]. Defaults to `false`.
+    ///
+    /// Counting inflates every entry once more on a background thread (the
+    /// receive itself never waits on it), so leave this off unless the counts
+    /// are shown.
+    fn wants_received_objects(&self) -> bool {
+        false
+    }
+
+    /// Objects copied or received so far, reported during
+    /// [`ProgressPhase::ReceivingObjects`] or [`ProgressPhase::CopyingObjects`] when
+    /// [`Self::wants_received_objects`] is true. Counts may lag the bytes
+    /// reported through [`Self::inc`] slightly on network fetch.
+    fn received_objects(&mut self, counts: ReceivedObjects) {
+        let _ = counts;
+    }
+
+    /// Progress of a resumable bundle download (clone with `bundle-uri`) or
+    /// upload (push to a `pushBundle` endpoint).
+    fn resumable_transfer(&mut self, event: &crate::resumable::ResumableEvent) {
+        let _ = event;
+    }
+
+    /// The fetch conversation with a remote reached `milestone`.
+    ///
+    /// Reported once per milestone per connection, in [`FetchMilestone`]
+    /// order, before the pack's first byte starts the
+    /// [`ProgressPhase::ReceivingObjects`] phase. A sink that timestamps these can
+    /// split the wait before the pack into the transport handshake, ref listing
+    /// and negotiation, and the remote preparing the pack. Local copies and
+    /// bundles report none.
+    fn milestone(&mut self, milestone: FetchMilestone) {
+        let _ = milestone;
+    }
+}
+
+/// A point reached in a wire fetch, reported through [`ProgressSink::milestone`].
+///
+/// New variants may be added; match with a wildcard arm outside this crate.
+#[non_exhaustive]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FetchMilestone {
+    /// The connection is open and the remote's advertisement has been read:
+    /// the capabilities for protocol v2, the capabilities and refs for v0/v1.
+    /// Time before this is the transport handshake (TCP, TLS or SSH, and
+    /// starting the remote's `upload-pack`).
+    Connected,
+    /// Ref listing and `want`/`have` negotiation are over and the client has
+    /// sent its final request. Time from here to the first pack byte is the
+    /// remote preparing the pack (counting, compressing).
+    PackRequested,
 }
 
 /// Forwarding impl so a `&mut P` can be threaded into sub-operations that also
@@ -193,6 +258,24 @@ impl<T: ProgressSink + ?Sized> ProgressSink for &mut T {
     }
     fn finish(&mut self) {
         (**self).finish();
+    }
+    fn message(&mut self, bytes: &[u8]) {
+        (**self).message(bytes);
+    }
+    fn remote_sideband_progress(&self) -> bool {
+        (**self).remote_sideband_progress()
+    }
+    fn wants_received_objects(&self) -> bool {
+        (**self).wants_received_objects()
+    }
+    fn received_objects(&mut self, counts: ReceivedObjects) {
+        (**self).received_objects(counts);
+    }
+    fn resumable_transfer(&mut self, event: &crate::resumable::ResumableEvent) {
+        (**self).resumable_transfer(event);
+    }
+    fn milestone(&mut self, milestone: FetchMilestone) {
+        (**self).milestone(milestone);
     }
 }
 
@@ -311,7 +394,7 @@ impl HistoryWalkStride {
 
 /// Returned from [`CancelToken::poll`] once cancellation was requested.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Cancelled;
+pub(crate) struct Cancelled;
 
 /// Historical type alias for [`CancelToken`] retained for older examples and tests.
 pub type Token = CancelToken;
@@ -694,6 +777,24 @@ impl ProgressSink for UncancellableProgress<'_> {
     fn finish(&mut self) {
         self.inner.finish();
     }
+    fn message(&mut self, bytes: &[u8]) {
+        self.inner.message(bytes);
+    }
+    fn remote_sideband_progress(&self) -> bool {
+        self.inner.remote_sideband_progress()
+    }
+    fn wants_received_objects(&self) -> bool {
+        self.inner.wants_received_objects()
+    }
+    fn received_objects(&mut self, counts: ReceivedObjects) {
+        self.inner.received_objects(counts);
+    }
+    fn resumable_transfer(&mut self, event: &crate::resumable::ResumableEvent) {
+        self.inner.resumable_transfer(event);
+    }
+    fn milestone(&mut self, milestone: FetchMilestone) {
+        self.inner.milestone(milestone);
+    }
 }
 
 /// Returns [`crate::error::Error::Cancelled`] when `cancel` requests stop.
@@ -781,12 +882,29 @@ impl ProgressSink for CancelProgress<'_> {
             self.inner.finish();
         }
     }
+    fn message(&mut self, bytes: &[u8]) {
+        self.inner.message(bytes);
+    }
+    fn remote_sideband_progress(&self) -> bool {
+        self.inner.remote_sideband_progress()
+    }
+    fn wants_received_objects(&self) -> bool {
+        self.inner.wants_received_objects()
+    }
+    fn received_objects(&mut self, counts: ReceivedObjects) {
+        self.inner.received_objects(counts);
+    }
+    fn resumable_transfer(&mut self, event: &crate::resumable::ResumableEvent) {
+        self.inner.resumable_transfer(event);
+    }
+    fn milestone(&mut self, milestone: FetchMilestone) {
+        self.inner.milestone(milestone);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fetch::{NoProgress, Progress};
 
     /// A sink that records typed phase updates, to prove the trait + forwarding
     /// impl route calls correctly.
@@ -822,11 +940,6 @@ mod tests {
     }
 
     #[test]
-    fn no_progress_is_inert() {
-        drive_typed(&mut NoProgress);
-    }
-
-    #[test]
     fn typed_phase_recorder_roundtrip() {
         let mut rec = PhaseRecorder::default();
         drive_typed(&mut &mut rec);
@@ -839,12 +952,10 @@ mod tests {
     }
 
     #[test]
-    fn progress_supertrait_upcasts() {
+    fn sideband_messages_route_through_forwarding_impl() {
         struct SidebandCap(Vec<u8>);
 
-        impl ProgressSink for SidebandCap {}
-
-        impl Progress for SidebandCap {
+        impl ProgressSink for SidebandCap {
             fn message(&mut self, bytes: &[u8]) {
                 self.0.extend_from_slice(bytes);
             }
@@ -852,12 +963,15 @@ mod tests {
 
         fn takes_sink(sink: &mut dyn ProgressSink) {
             sink.start(ProgressPhase::IndexingObjects, None);
+            sink.message(b"remote: hi\n");
             sink.finish();
         }
 
         let mut cap = SidebandCap(Vec::new());
-        let progress: &mut dyn Progress = &mut cap;
-        takes_sink(progress);
+        takes_sink(&mut &mut cap);
+        assert_eq!(cap.0, b"remote: hi\n");
+        assert!(!cap.remote_sideband_progress());
+        assert!(!cap.wants_received_objects());
     }
 
     #[test]

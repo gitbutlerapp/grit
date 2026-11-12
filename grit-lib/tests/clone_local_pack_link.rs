@@ -4,9 +4,9 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::progress::CancelToken;
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{ProgressPhase, ProgressSink};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::test_support::objects_pack::read_pack_index_no_verify;
 
 fn git(dir: &Path, args: &[&str]) {
@@ -134,7 +134,7 @@ fn clone_local_repacked_source_links_pack_and_reports_index_stats() {
     let dest = tmp.path().join("dest");
     let outcome = clone_repo(
         CloneOptions::new(remote.to_string_lossy(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -201,7 +201,7 @@ fn clone_local_repacked_plus_unreachable_loose_still_links_pack() {
     let dest = tmp.path().join("dest");
     let outcome = clone_repo(
         CloneOptions::new(remote.to_string_lossy(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

@@ -567,7 +567,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     let clone_dest = tmp.path().join("r1c");
     let outcome = clone_repo(
         CloneOptions::new(r1.to_string_lossy(), clone_dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

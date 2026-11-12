@@ -116,7 +116,7 @@ fn file_url(path: &Path) -> String {
 fn grit_clone(url: String, dest: PathBuf) {
     clone_repo(
         CloneOptions::new(url, dest),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -218,7 +218,7 @@ fn push_to_empty_bare_packs_only_loose_objects_beside_linked_pack() {
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote),
         &specs,
         &PushOptions::default(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push");

@@ -316,20 +316,27 @@ impl IngestPackOptions {
 /// the pack checksum is verified then; [`IngestPackOptions`] fields that describe the
 /// installed `.pack`/`.idx` pair (threads, promisor marker, trusted rows) do not apply.
 ///
+/// Indexing reports [`ProgressPhase::IndexingObjects`](crate::progress::ProgressPhase::IndexingObjects)
+/// and [`ProgressPhase::ResolvingDeltas`](crate::progress::ProgressPhase::ResolvingDeltas)
+/// through `progress`; `cancel` is polled per object, and a cancelled ingest installs nothing.
+///
 /// # Errors
 ///
-/// [`crate::error::ObjectError::Corrupt`] when the bytes are not a complete pack, plus any
-/// indexing, delta-resolution, or object-store failure.
+/// [`crate::error::ObjectError::Corrupt`] when the bytes are not a complete pack, any
+/// indexing, delta-resolution, or object-store failure, and
+/// [`Error::Cancelled`] when `cancel` fires.
 pub fn ingest_received_pack(
     pack: Vec<u8>,
     odb: &Odb,
     opts: &IngestPackOptions,
+    progress: &mut dyn ProgressSink,
+    cancel: &CancelToken,
 ) -> Result<IngestedPack> {
-    ingest_received_pack_with_progress(pack, odb, opts, None, None)
+    ingest_received_pack_with_progress(pack, odb, opts, Some(progress), Some(cancel))
 }
 
-/// Like [`ingest_received_pack`], reporting pack indexing progress on `progress` when set.
-pub fn ingest_received_pack_with_progress(
+/// [`ingest_received_pack`] with an optional sink and token, for internal callers.
+pub(crate) fn ingest_received_pack_with_progress(
     pack: Vec<u8>,
     odb: &Odb,
     opts: &IngestPackOptions,
@@ -970,8 +977,14 @@ mod tests {
         let objects = tmp.path().join("objects");
         std::fs::create_dir_all(objects.join("pack")).expect("pack dir");
         let odb = Odb::new(&objects);
-        let ingested =
-            ingest_received_pack(pack, &odb, &IngestPackOptions::default()).expect("ingest");
+        let ingested = ingest_received_pack(
+            pack,
+            &odb,
+            &IngestPackOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .expect("ingest");
         assert_eq!(
             ingested.object_counts,
             ObjectKindCounts {

@@ -155,7 +155,7 @@ fn grit_push_request(work: &Path, bare: &Path, request: PushRequest) -> PushOutc
             &repo,
             &plan.specs,
             PushOptions::default().with_tracking_remote(Some("origin".into())),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

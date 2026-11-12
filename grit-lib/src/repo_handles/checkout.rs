@@ -22,7 +22,7 @@ use crate::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions, SwitchOutcome,
 };
-use crate::progress::{CancelToken, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, ProgressSink};
 use crate::repo::Repository;
 
 /// Checkout, switch, reset, restore, clean, and worktree path maintenance for one repository.
@@ -100,8 +100,24 @@ impl<'repo> Checkout<'repo> {
     }
 
     /// Preview a reset without touching refs, index, or worktree.
-    pub fn preview_reset(&self, opts: &ResetOptions) -> Result<ResetPreview> {
-        preview_reset(self.repo, opts)
+    ///
+    /// `cancel` is polled before and after the plan is computed. No progress phases are
+    /// reported yet; `progress` is accepted for future use.
+    ///
+    /// # Errors
+    ///
+    /// The validation failures of [`Self::reset`], and [`crate::error::Error::Cancelled`]
+    /// when `cancel` fires.
+    pub fn preview_reset(
+        &self,
+        opts: &ResetOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<ResetPreview> {
+        poll_cancel(progress, cancel)?;
+        let preview = preview_reset(self.repo, opts)?;
+        poll_cancel(progress, cancel)?;
+        Ok(preview)
     }
 
     /// Move `HEAD` and update index/worktree per `opts`.
@@ -135,27 +151,59 @@ impl<'repo> Checkout<'repo> {
     }
 
     /// Remove tracked paths from the index and worktree.
+    ///
+    /// `cancel` is polled before anything changes and while paths are collected. No
+    /// progress phases are reported yet; `progress` is accepted for future use.
+    ///
+    /// # Errors
+    ///
+    /// Pathspec, blocked-removal, index and I/O failures, and
+    /// [`crate::error::Error::Cancelled`] when `cancel` fires.
     pub fn remove_paths(
         &self,
         opts: &RemoveOptions,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<RemoveOutcome> {
+        poll_cancel(progress, cancel)?;
         remove_paths(self.repo, opts, cancel)
     }
 
     /// Rename one tracked path in the index and worktree.
+    ///
+    /// Same as [`Self::move_paths`] with one source.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::move_paths`].
     pub fn move_path(
         &self,
         src: &str,
         dst: &str,
         force: bool,
+        progress: &mut dyn ProgressSink,
         cancel: &CancelToken,
     ) -> Result<MoveOutcome> {
+        poll_cancel(progress, cancel)?;
         move_path(self.repo, src, dst, force, cancel)
     }
 
     /// Move tracked sources into `opts.destination`, updating the index once.
-    pub fn move_paths(&self, opts: &MoveOptions, cancel: &CancelToken) -> Result<MoveOutcome> {
+    ///
+    /// `cancel` is polled before anything changes and while the moves are planned. No
+    /// progress phases are reported yet; `progress` is accepted for future use.
+    ///
+    /// # Errors
+    ///
+    /// Path validation, move conflicts, index and I/O failures, and
+    /// [`crate::error::Error::Cancelled`] when `cancel` fires.
+    pub fn move_paths(
+        &self,
+        opts: &MoveOptions,
+        progress: &mut dyn ProgressSink,
+        cancel: &CancelToken,
+    ) -> Result<MoveOutcome> {
+        poll_cancel(progress, cancel)?;
         move_paths(self.repo, opts, cancel)
     }
 

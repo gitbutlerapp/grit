@@ -39,7 +39,6 @@ use crate::porcelain::stash::{
 use crate::porcelain::switch::checkout_tree_transition_allow_local_reset;
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::progress::{CancelToken, ProgressSink};
-use crate::remote::fetch::Progress;
 use crate::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode, TransferStats};
 use crate::remote::HttpClientFactory;
 use crate::repo::Repository;
@@ -507,16 +506,13 @@ fn parse_pull_rebase_config(raw: &str) -> crate::error::Result<bool> {
 ///
 /// Returns [`PullError`] for detached HEAD, missing upstream, interactive rebase config,
 /// or transport/repository failures.
-pub fn pull<P>(
+pub fn pull(
     repo: &Repository,
     options: &PullOptions,
-    progress: &mut P,
+    progress: &mut dyn ProgressSink,
     cancel: &crate::progress::CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
-) -> crate::error::Result<PullOutcome>
-where
-    P: Progress,
-{
+) -> crate::error::Result<PullOutcome> {
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
         return Err(Error::from(MergeError::OperationInProgress(op)));
     }
@@ -1141,7 +1137,7 @@ mod tests {
     use crate::config::environment::RepositoryOptions;
     use crate::config::ConfigSet;
     use crate::environment::Environment;
-    use crate::remote::fetch::NoProgress;
+    use crate::progress::NullProgress;
     use std::path::{Path, PathBuf};
     use std::process::{Command, Output};
     use tempfile::TempDir;
@@ -1299,7 +1295,7 @@ mod tests {
         let err = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1341,7 +1337,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1370,7 +1366,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1395,7 +1391,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1408,7 +1404,7 @@ mod tests {
         let again = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1437,7 +1433,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1472,7 +1468,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &options,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1510,7 +1506,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1549,7 +1545,7 @@ mod tests {
         let err = pull(
             &repo,
             &options,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1598,7 +1594,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &options,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1652,7 +1648,7 @@ mod tests {
         let plain = pull(
             &repo,
             &rebase_options(&repo, upstream, false),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1665,7 +1661,7 @@ mod tests {
         let stopped = pull(
             &repo,
             &rebase_options(&repo, upstream, true),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1702,7 +1698,7 @@ mod tests {
         let refused = pull(
             &repo,
             &rebase_options(&repo, upstream, true),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         );
@@ -1739,7 +1735,7 @@ mod tests {
         let err = pull(
             &repo,
             &pull_options(&repo),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1797,7 +1793,7 @@ mod tests {
         let replayed = pull(
             &repo,
             &rebase_options(&repo, upstream, false),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1810,15 +1806,21 @@ mod tests {
         std::fs::write(clone.join("draft.txt"), "not committed\n").expect("write");
         let mut check = landed_options(&repo, upstream, tip, false);
         check.check = true;
-        let predicted =
-            pull(&repo, &check, &mut NoProgress, &CancelToken::never(), None).expect("check");
+        let predicted = pull(
+            &repo,
+            &check,
+            &mut NullProgress,
+            &CancelToken::never(),
+            None,
+        )
+        .expect("check");
         assert_eq!(predicted.check.map(|c| c.would), Some(PullResult::Landed));
 
         git(&clone, &["update-ref", "-d", "ORIG_HEAD"]);
         let landed = pull(
             &repo,
             &landed_options(&repo, upstream, tip, true),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1854,7 +1856,7 @@ mod tests {
         let err = pull(
             &repo,
             &landed_options(&repo, upstream, tip, true),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1883,7 +1885,7 @@ mod tests {
         let outcome = pull(
             &repo,
             &landed_options(&repo, upstream, landed, true),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -1904,7 +1906,7 @@ mod tests {
         let stopped = pull(
             &repo,
             &landed_options(&repo, upstream, landed, true),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

@@ -963,8 +963,11 @@ mod tests {
             .expect("before");
         assert_eq!(tag_short_name(&before), "z-near");
         assert_eq!(before.distance, 1);
-        repo.maintenance()
-            .write_commit_graph(&CommitGraphOptions::default())?;
+        repo.maintenance().write_commit_graph(
+            &CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
         let after = repo
             .revwalk()
             .describe("HEAD", &opts, &mut NullProgress, &CancelToken::never())?
@@ -1501,8 +1504,11 @@ mod tests {
         }
         let head = tips.into_iter().next().expect("merge head");
         refs::write_ref(repo.git_dir(), "refs/heads/main", &head)?;
-        repo.maintenance()
-            .write_commit_graph(&CommitGraphOptions::default())?;
+        repo.maintenance().write_commit_graph(
+            &CommitGraphOptions::default(),
+            &mut crate::progress::NullProgress,
+            &crate::progress::CancelToken::never(),
+        )?;
 
         reset_describe_distance_counts();
         reset_describe_heap_processed();

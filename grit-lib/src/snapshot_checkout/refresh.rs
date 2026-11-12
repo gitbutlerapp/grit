@@ -12,7 +12,6 @@
 //! that landed in the target ([`super::record_landed`]) are never replayed.
 
 use crate::diff::{build_file_diffs, diff_trees, DiffDetail, DiffOptions, DiffTotals};
-use crate::fetch::Progress;
 use crate::merge_base::is_ancestor;
 use crate::objects::ObjectId;
 use crate::porcelain::branch_error::BranchError;
@@ -21,6 +20,7 @@ use crate::porcelain::pull::{
     pull, FetchedUpstream, PullError, PullMode, PullOptions, PullOutcome,
 };
 use crate::progress::CancelToken;
+use crate::progress::ProgressSink;
 use crate::remote::HttpClientFactory;
 use crate::repo::Repository;
 use crate::state::{detect_in_progress, resolve_head_for_repository, HeadState};
@@ -115,12 +115,12 @@ pub(crate) fn ensure_refreshable(repo: &Repository) -> Result<()> {
 }
 
 /// [`RepositorySnapshotCheckouts::refresh`](crate::repo_handles::RepositorySnapshotCheckouts::refresh) for `repo`.
-pub(crate) fn refresh<P: Progress>(
+pub(crate) fn refresh(
     repo: &Repository,
     marker: &CheckoutMarker,
     info: &CheckoutInfo,
     options: &PullOptions,
-    progress: &mut P,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<RefreshOutcome> {
@@ -368,7 +368,7 @@ fn snapshot_changes(
 mod tests {
     use super::*;
     use crate::porcelain::pull::PullResult;
-    use crate::remote::fetch::NoProgress;
+    use crate::progress::NullProgress;
     use crate::snapshot_checkout::landing::{move_off_landed_branch, record_landed, MovedOff};
     use crate::snapshot_checkout::testing::*;
     use crate::snapshot_checkout::{
@@ -383,7 +383,7 @@ mod tests {
             &marker(repo),
             info,
             &PullOptions::default(),
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -455,7 +455,7 @@ mod tests {
             &repo,
             &marker(&repo),
             &[("work".to_owned(), tip)],
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )

@@ -213,6 +213,8 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
             &AddLinkedWorktreeOptions::new(wt_path.clone())
                 .with_branch(Some(WorktreeBranch::Create("linked".into())))
                 .with_start_point(Some("HEAD".into())),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("worktree");
     assert_eq!(
@@ -303,6 +305,8 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
             &AddLinkedWorktreeOptions::new(wt_path.clone())
                 .with_branch(Some(WorktreeBranch::Create("linked".into())))
                 .with_start_point(Some("HEAD".into())),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("worktree");
     let wt_id = entry

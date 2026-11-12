@@ -172,7 +172,7 @@ fn grit_fetch_file(
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(remote_git),
         &mut opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("grit fetch_local")
@@ -247,7 +247,7 @@ fn named_remote_explicit_refspec_writes_fetch_head_via_remote_fetch() {
         .fetch(
             &repo,
             fetch_opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             None,
         )
@@ -397,7 +397,7 @@ fn missing_source_ref_typed_error_file() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.git_dir()),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap_err();
@@ -439,7 +439,7 @@ fn branch_to_tag_clobber_rejected_like_git() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.git_dir()),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("grit fetch");
@@ -503,7 +503,7 @@ fn tag_to_branch_rejected_when_tag_would_clobber_branch() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.git_dir()),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch");
@@ -564,7 +564,7 @@ fn dry_run_classifies_fast_forward_without_writing() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.git_dir()),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("dry-run fetch");
@@ -612,7 +612,7 @@ fn non_fast_forward_local_branch_rejected_file() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.git_dir()),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .expect("fetch");
@@ -654,7 +654,7 @@ fn checked_out_branch_update_refused_file() {
     .fetch_from(
         grit_lib::remote::transfer::TransferEndpoint::Local(&remote.git_dir()),
         &mut fetch_opts.clone(),
-        &mut grit_lib::remote::fetch::NoProgress,
+        &mut grit_lib::progress::NullProgress,
         grit_lib::progress::CancelToken::never_ref(),
     )
     .unwrap_err();

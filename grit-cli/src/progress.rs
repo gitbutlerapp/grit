@@ -9,10 +9,10 @@
 use std::io::{self, IsTerminal, Write};
 use std::time::{Duration, Instant};
 
+use grit_lib::progress::FetchMilestone;
 use grit_lib::progress::{
     OverallEstimate, OverallEstimator, ProgressPhase, ProgressSink, ProgressUnit, ReceivedObjects,
 };
-use grit_lib::remote::fetch::{FetchMilestone, Progress};
 use grit_lib::remote::sideband_lines::{RemoteLine, SidebandLines};
 use terminal_size::{terminal_size, Width};
 
@@ -354,47 +354,6 @@ impl TerminalProgress {
     }
 }
 
-impl Progress for TerminalProgress {
-    fn message(&mut self, bytes: &[u8]) {
-        if !self.emit_remote {
-            return;
-        }
-        let mut lines = Vec::new();
-        self.remote_lines.feed(bytes, |line| lines.push(line));
-        for line in lines {
-            self.render_remote(line);
-        }
-    }
-
-    fn remote_sideband_progress(&self) -> bool {
-        self.draw
-    }
-
-    fn wants_received_objects(&self) -> bool {
-        self.overall.is_some()
-    }
-
-    fn resumable_transfer(&mut self, event: &grit_lib::remote::resumable::ResumableEvent) {
-        self.resumable.handle(event);
-    }
-
-    fn milestone(&mut self, milestone: FetchMilestone) {
-        let at = self.since_start();
-        self.milestones.push(MilestoneRecord { milestone, at });
-    }
-
-    fn received_objects(&mut self, counts: ReceivedObjects) {
-        let at = self.since_start();
-        if let Some(overall) = &mut self.overall {
-            overall.received_objects(counts, at);
-        }
-        if let Some(active) = &mut self.active {
-            active.objects = Some(counts);
-        }
-        self.redraw(false);
-    }
-}
-
 impl Drop for TerminalProgress {
     fn drop(&mut self) {
         self.flush_remote_pending();
@@ -448,6 +407,44 @@ impl ProgressSink for TerminalProgress {
 
     fn finish(&mut self) {
         self.finish_active();
+    }
+    fn message(&mut self, bytes: &[u8]) {
+        if !self.emit_remote {
+            return;
+        }
+        let mut lines = Vec::new();
+        self.remote_lines.feed(bytes, |line| lines.push(line));
+        for line in lines {
+            self.render_remote(line);
+        }
+    }
+
+    fn remote_sideband_progress(&self) -> bool {
+        self.draw
+    }
+
+    fn wants_received_objects(&self) -> bool {
+        self.overall.is_some()
+    }
+
+    fn resumable_transfer(&mut self, event: &grit_lib::remote::resumable::ResumableEvent) {
+        self.resumable.handle(event);
+    }
+
+    fn milestone(&mut self, milestone: FetchMilestone) {
+        let at = self.since_start();
+        self.milestones.push(MilestoneRecord { milestone, at });
+    }
+
+    fn received_objects(&mut self, counts: ReceivedObjects) {
+        let at = self.since_start();
+        if let Some(overall) = &mut self.overall {
+            overall.received_objects(counts, at);
+        }
+        if let Some(active) = &mut self.active {
+            active.objects = Some(counts);
+        }
+        self.redraw(false);
     }
 }
 

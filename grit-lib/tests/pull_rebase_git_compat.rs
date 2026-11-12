@@ -6,8 +6,8 @@ use grit_lib::change_id::{change_id, resolved_change_id, ChangeIdPolicy};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions, PullResult};
+use grit_lib::progress::NullProgress;
 use grit_lib::progress::{CancelToken, NullProgress};
-use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
@@ -545,7 +545,7 @@ fn pull_rebase_conflict_keeps_autostash_on_stash_ref() {
             .with_mode(Some(PullMode::Rebase))
             .with_autostash(true)
             .with_fetch(fetch_opts(&Environment::empty())),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -620,7 +620,7 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
             .with_mode(Some(PullMode::Rebase))
             .with_check(true)
             .with_fetch(fetch_opts(&Environment::empty())),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -643,7 +643,7 @@ fn pull_rebase_check_predicts_conflicts_without_changes() {
             .with_mode(Some(PullMode::Rebase))
             .with_check(true)
             .with_fetch(fetch_opts(&Environment::empty())),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

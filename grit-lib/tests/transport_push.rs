@@ -20,7 +20,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
-use grit_lib::remote::fetch::NoProgress;
+use grit_lib::progress::NullProgress;
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
@@ -143,7 +143,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn),
         &[spec],
         &PushOptions::default().with_tracking_remote(Some("origin".to_owned())),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("push_remote over git daemon");
@@ -242,7 +242,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn2),
         &[nonff],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("non-ff push_remote completes");
@@ -291,7 +291,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn3),
         &[forced],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced push_remote completes");
@@ -353,7 +353,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_mk),
         &[mk],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("create scratch ref");
@@ -386,7 +386,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
         grit_lib::remote::transfer::TransferEndpoint::Connection(&mut *conn_del),
         &[del],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("deletion push_remote completes");
@@ -520,7 +520,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
             .with_src(Some(advanced))
             .with_dst("refs/heads/main".to_owned())],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("clone A advances main");
@@ -565,7 +565,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
             .with_src(Some(new_tip))
             .with_dst("refs/heads/newbr".to_owned())],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("clone B pushes new branch without fetch");
@@ -612,7 +612,7 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
             .with_dst("refs/heads/main".to_owned())
             .with_force(true)],
         &PushOptions::default(),
-        &mut NoProgress,
+        &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("forced main push without local copy of old tip");

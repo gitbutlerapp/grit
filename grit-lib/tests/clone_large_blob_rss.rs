@@ -86,7 +86,7 @@ fn local_clone_links_large_loose_blob_in_bounded_memory() {
     git(&tiny, &["commit", "-qm", "small"]);
     clone_repo(
         CloneOptions::new(tiny.to_string_lossy(), dir.path().join("warm-clone")),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )
@@ -96,7 +96,7 @@ fn local_clone_links_large_loose_blob_in_bounded_memory() {
     let before = peak_rss_kib();
     clone_repo(
         CloneOptions::new(source.to_string_lossy(), dest.clone()),
-        &mut NoProgress,
+        &mut NullProgress,
         &CancelToken::never(),
         None,
     )

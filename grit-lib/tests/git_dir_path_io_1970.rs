@@ -241,6 +241,8 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
     repo.worktrees()
         .add(
             &AddLinkedWorktreeOptions::new(linked_wt.clone()).with_start_point(Some("HEAD".into())),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("add linked worktree");
 
@@ -290,6 +292,8 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
             &AddLinkedWorktreeOptions::new(linked_wt.clone())
                 .with_branch(Some(WorktreeBranch::Detach))
                 .with_start_point(Some("HEAD".into())),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
         )
         .expect("add linked worktree");
 

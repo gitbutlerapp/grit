@@ -202,7 +202,12 @@ fn grit_filtered_pack(
         .with_source_shallow(&empty)
         .with_have_shallow(&empty)
         .with_filter(filter)
-        .write(repo, &mut grit_lib::progress::NullProgress, &mut pack)
+        .write(
+            repo,
+            &mut pack,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("filtered upload-pack stream");
     (pack, stats)
 }

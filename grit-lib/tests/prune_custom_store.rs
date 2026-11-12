@@ -259,7 +259,11 @@ fn unreachable_blob_is_removed_and_history_kept() {
 
     let stats = repo
         .maintenance()
-        .prune_loose_objects(&PruneOptions::default().with_now(fixed_now()))
+        .prune_loose_objects(
+            &PruneOptions::default().with_now(fixed_now()),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("prune");
 
     let after = stored(store.as_ref());
@@ -282,7 +286,11 @@ fn reflog_reachable_commit_and_its_tree_are_kept() {
     let (dir, repo, store) = memory_repo(PRUNE_NOW);
     let history = build_history(&repo, dir.path());
     repo.maintenance()
-        .prune_loose_objects(&PruneOptions::default())
+        .prune_loose_objects(
+            &PruneOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("prune");
     let reflog_commit = repo
         .odb()
@@ -308,7 +316,11 @@ fn dry_run_counts_without_removing() {
     opts.dry_run = true;
     let stats = repo
         .maintenance()
-        .prune_loose_objects(&opts)
+        .prune_loose_objects(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("dry run");
     assert_eq!(stats.pruned, history.unreachable.len());
     assert_eq!(stored(store.as_ref()), before);
@@ -321,7 +333,11 @@ fn default_grace_period_keeps_objects_without_a_recorded_time() {
     let before = stored(store.as_ref());
     let stats = repo
         .maintenance()
-        .prune_loose_objects(&PruneOptions::default().with_now(fixed_now()))
+        .prune_loose_objects(
+            &PruneOptions::default().with_now(fixed_now()),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("prune");
     assert_eq!(stats.pruned, 0);
     assert_eq!(stats.kept, before.len());
@@ -335,7 +351,11 @@ fn pruned_objects_are_not_served_from_the_session_cache() {
     let orphan = history.unreachable[0];
     repo.odb().read(&orphan).expect("readable before prune");
     repo.maintenance()
-        .prune_loose_objects(&PruneOptions::default())
+        .prune_loose_objects(
+            &PruneOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("prune");
     assert!(
         repo.odb().read(&orphan).is_err(),
@@ -422,7 +442,11 @@ fn grace_period_uses_object_mtime() {
 
     let stats = repo
         .maintenance()
-        .prune_loose_objects(&PruneOptions::with_older_than(Some(cutoff)))
+        .prune_loose_objects(
+            &PruneOptions::with_older_than(Some(cutoff)),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("prune");
 
     assert_eq!(stats.pruned, 1);
@@ -444,8 +468,11 @@ fn precious_objects_refuses_and_gc_deletes_nothing() {
     let before = stored(store.as_ref());
 
     assert_precious(
-        repo.maintenance()
-            .prune_loose_objects(&PruneOptions::default()),
+        repo.maintenance().prune_loose_objects(
+            &PruneOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         "prune",
     );
     assert_precious(repo.odb().gc(), "gc");
@@ -471,8 +498,11 @@ fn precious_objects_refuses_prune_on_files_too() {
     let repo = open_files(dir.path());
     let orphan = blob(&repo, "orphan\n");
     assert_precious(
-        repo.maintenance()
-            .prune_loose_objects(&PruneOptions::default()),
+        repo.maintenance().prune_loose_objects(
+            &PruneOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         "prune",
     );
     assert_precious(repo.odb().gc(), "gc");
@@ -509,8 +539,11 @@ fn odb_gc_honors_precious_objects_from_the_injected_environment() {
     let orphan = blob(&repo, "orphan\n");
 
     assert_precious(
-        repo.maintenance()
-            .prune_loose_objects(&PruneOptions::default()),
+        repo.maintenance().prune_loose_objects(
+            &PruneOptions::default(),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        ),
         "prune",
     );
     assert_precious(repo.odb().gc(), "gc");
@@ -581,10 +614,11 @@ fn store_without_capability_gets_typed_refusal() {
     let history = build_history(&repo, dir.path());
     let before = stored(store.as_ref());
 
-    assert_unsupported(
-        repo.maintenance()
-            .prune_loose_objects(&PruneOptions::default()),
-    );
+    assert_unsupported(repo.maintenance().prune_loose_objects(
+        &PruneOptions::default(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::CancelToken::never(),
+    ));
     assert_unsupported(repo.maintenance().gc(
         &GcOptions::default(),
         &mut grit_lib::progress::NullProgress,
@@ -710,11 +744,19 @@ fn files_and_memory_keep_the_same_objects() {
     let opts = PruneOptions::default().with_now(fixed_now());
     let files_stats = files
         .maintenance()
-        .prune_loose_objects(&opts)
+        .prune_loose_objects(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("files prune");
     let memory_stats = memory
         .maintenance()
-        .prune_loose_objects(&opts)
+        .prune_loose_objects(
+            &opts,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::CancelToken::never(),
+        )
         .expect("memory prune");
     assert_eq!(files_stats, memory_stats);
     assert_eq!(files_stats.pruned, files_history.unreachable.len());

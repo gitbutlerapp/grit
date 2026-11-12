@@ -26,7 +26,7 @@ type LsRefsAdvertised = (
     std::collections::HashMap<String, ObjectId>,
     Option<ObjectId>,
 );
-use crate::progress::{poll_cancel, CancelToken, ProgressSink};
+use crate::progress::{poll_cancel, CancelToken, FetchMilestone, ProgressSink};
 use crate::remote::RemoteError;
 use crate::repo::error::FilesOnlyOperation;
 use crate::repo::RepositoryError;
@@ -42,80 +42,6 @@ fn http_writer_flush(conn: &mut dyn Connection, cancel: &CancelToken) -> Result<
     conn.drain_pending_http(cancel)?;
     Ok(())
 }
-
-/// Sink for wire transport progress: typed phases via [`ProgressSink`] plus
-/// raw side-band channel 2 bytes from the remote.
-///
-/// Implementations receive the server's progress bytes (typically `\r`-delimited
-/// counter lines) through [`Progress::message`]. Typed
-/// [`progress::ProgressPhase`](crate::progress::ProgressPhase) updates use the
-/// [`crate::progress::ProgressSink`] methods inherited from this supertrait.
-pub trait Progress: ProgressSink {
-    /// Receive a chunk of progress bytes from side-band channel 2.
-    fn message(&mut self, _bytes: &[u8]) {}
-
-    /// When true, fetch omits `no-progress` so the remote may emit channel-2 progress.
-    fn remote_sideband_progress(&self) -> bool {
-        false
-    }
-
-    /// When true, a pack being received is also counted in objects and
-    /// reported through [`Progress::received_objects`].
-    ///
-    /// Counting inflates every entry once more on a background thread (the
-    /// receive itself never waits on it), so leave this off unless the counts
-    /// are shown.
-    fn wants_received_objects(&self) -> bool {
-        false
-    }
-
-    /// Objects copied or received so far, reported during
-    /// [`ReceivingObjects`](crate::progress::ProgressPhase::ReceivingObjects) or
-    /// [`CopyingObjects`](crate::progress::ProgressPhase::CopyingObjects) when
-    /// [`Progress::wants_received_objects`] is true. Counts may lag the bytes
-    /// reported through [`ProgressSink::inc`] slightly on network fetch.
-    fn received_objects(&mut self, _counts: crate::progress::ReceivedObjects) {}
-
-    /// Progress of a resumable bundle download (clone with `bundle-uri`) or
-    /// upload (push to a `pushBundle` endpoint).
-    fn resumable_transfer(&mut self, _event: &crate::resumable::ResumableEvent) {}
-
-    /// The fetch conversation with a remote reached `milestone`.
-    ///
-    /// Reported once per milestone per connection, in [`FetchMilestone`]
-    /// order, before the pack's first byte starts the
-    /// [`ReceivingObjects`](crate::progress::ProgressPhase::ReceivingObjects)
-    /// phase. A sink that timestamps these can split the wait before the pack
-    /// into the transport handshake, ref listing and negotiation, and the
-    /// remote preparing the pack. Local copies and bundles report none.
-    fn milestone(&mut self, _milestone: FetchMilestone) {}
-}
-
-/// A point reached in a wire fetch, reported through [`Progress::milestone`].
-///
-/// New variants may be added; match with a wildcard arm outside this crate.
-#[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum FetchMilestone {
-    /// The connection is open and the remote's advertisement has been read:
-    /// the capabilities for protocol v2, the capabilities and refs for v0/v1.
-    /// Time before this is the transport handshake (TCP, TLS or SSH, and
-    /// starting the remote's `upload-pack`).
-    Connected,
-    /// Ref listing and `want`/`have` negotiation are over and the client has
-    /// sent its final request. Time from here to the first pack byte is the
-    /// remote preparing the pack (counting, compressing).
-    PackRequested,
-}
-
-/// A [`Progress`] / [`ProgressSink`] that discards everything.
-pub struct NoProgress;
-
-impl Progress for NoProgress {}
-
-impl ProgressSink for NoProgress {}
-
-impl Progress for crate::progress::NullProgress {}
 
 // --- Negotiation flush schedule (mirrors fetch-pack.c) --------------------
 
@@ -304,7 +230,7 @@ fn seed_known_common(
 fn read_sideband_pack(
     r: &mut dyn Read,
     target: &mut crate::pack_receive::PackReceiveTarget<'_>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<()> {
     crate::pack_receive::read_sideband_pack_to(r, target, progress, cancel)
@@ -401,7 +327,7 @@ fn negotiate_pack(
     opts: &mut FetchOptions,
     local_shallow: &[ObjectId],
     wire_filter: Option<&str>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     skip_local_haves: bool,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
@@ -1096,7 +1022,7 @@ fn negotiate_pack_v2(
     wants: &[ObjectId],
     deepen: &V2DeepenArgs,
     wire_filter: Option<&str>,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     mode: V2FetchMode<'_>,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
@@ -1445,7 +1371,7 @@ pub(crate) fn read_v2_fetch_pack_response(
     out: &mut Vec<u8>,
     pack_sink: Option<&mut crate::pack_receive::TempPackReceive>,
     shallow_out: &mut ShallowUpdate,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     sideband_all: bool,
 ) -> Result<()> {
@@ -1585,7 +1511,7 @@ pub(crate) fn fetch_remote_into(
     local: &Repository,
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
@@ -2197,7 +2123,7 @@ fn fetch_remote_object_wants(
     local: &Repository,
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
-    progress: &mut dyn Progress,
+    progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
@@ -2991,7 +2917,7 @@ mod fetch_advertised_ref_tests {
             &mut Vec::new(),
             None,
             &mut super::ShallowUpdate::default(),
-            &mut crate::fetch::NoProgress,
+            &mut crate::progress::NullProgress,
             &crate::progress::CancelToken::never(),
             false,
         )
@@ -3659,6 +3585,7 @@ mod v0_negotiation_tests {
 mod v2_negotiation_tests {
     use super::*;
     use crate::objects::ObjectKind;
+    use crate::progress::NullProgress;
     use crate::repo::{InitOptions, Repository};
     use std::io::Cursor;
 
@@ -3780,7 +3707,7 @@ mod v2_negotiation_tests {
             &[want],
             &V2DeepenArgs::default(),
             None,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
             V2FetchMode::Refs {
                 promisor_reply: None,
@@ -3820,9 +3747,6 @@ mod v2_negotiation_tests {
         ) {
             self.events.push(format!("start {phase:?}"));
         }
-    }
-
-    impl Progress for MilestoneRecorder {
         fn milestone(&mut self, milestone: FetchMilestone) {
             self.events.push(format!("{milestone:?}"));
         }
@@ -3900,6 +3824,7 @@ mod v2_negotiation_tests {
 mod remote_fatal_fetch_tests {
     use super::*;
     use crate::objects::ObjectId;
+    use crate::progress::NullProgress;
     use crate::refs::resolve_ref;
     use crate::repo::{InitOptions, Repository};
     use crate::transfer::{FetchOptions, TagMode};
@@ -3989,7 +3914,7 @@ mod remote_fatal_fetch_tests {
         .fetch_from(
             crate::transfer::TransferEndpoint::Connection(&mut conn),
             &mut opts,
-            &mut NoProgress,
+            &mut NullProgress,
             &CancelToken::never(),
         )
         .expect_err("the server aborted the fetch");
