@@ -591,11 +591,11 @@ pub(crate) fn file_diff_from_tree_structured(
     let mut structured = t.structured;
     if !t.binary {
         if let Ok((old_bytes, _)) = super::tree_content::load_old_side(repo.odb(), e) {
-            if let Ok(matcher) = funcname_attrs.matcher_for_path(repo, config, &path) {
+            if let Ok(matcher) = funcname_attrs.matcher_arc_for_path(repo, config, &path) {
                 crate::diff::structured::apply_patch_funcname_to_hunks(
                     &mut structured.hunks,
                     &old_bytes.text(),
-                    matcher.as_ref(),
+                    matcher.as_deref(),
                 );
             }
         }
@@ -698,11 +698,11 @@ fn build_file_diff(
 ) -> FileDiff {
     let mut structured = fc.structured(diff_options.clone());
     if !fc.binary {
-        if let Ok(matcher) = funcname_attrs.matcher_for_path(repo, config, &fc.path) {
+        if let Ok(matcher) = funcname_attrs.matcher_arc_for_path(repo, config, &fc.path) {
             crate::diff::structured::apply_patch_funcname_to_hunks(
                 &mut structured.hunks,
                 &fc.old_bytes.text(),
-                matcher.as_ref(),
+                matcher.as_deref(),
             );
         }
     }

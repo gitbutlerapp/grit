@@ -375,7 +375,7 @@ fn write_diff_entry_patch_from_structured<W: Write>(
                 detail: "blob is not valid UTF-8".into(),
             })
         })?;
-        let funcname_matcher = funcname_attrs.matcher_for_path(repo, config, git_new)?;
+        let funcname_matcher = funcname_attrs.matcher_arc_for_path(repo, config, git_new)?;
         write_structured_unified_body(
             out,
             git_old,
@@ -384,7 +384,7 @@ fn write_diff_entry_patch_from_structured<W: Write>(
             new_mode,
             structured,
             old_text,
-            funcname_matcher.as_ref(),
+            funcname_matcher.as_deref(),
         )?;
         return Ok(());
     }
@@ -397,7 +397,7 @@ fn write_diff_entry_patch_from_structured<W: Write>(
         crate::apply::write_git_binary_patch_sections(out, &old_bytes, &new_bytes)?;
         return Ok(());
     }
-    let funcname_matcher = funcname_attrs.matcher_for_path(repo, config, git_new)?;
+    let funcname_matcher = funcname_attrs.matcher_arc_for_path(repo, config, git_new)?;
     write_patch_unified_body_from_bytes(
         out,
         &old_bytes,
@@ -407,7 +407,7 @@ fn write_diff_entry_patch_from_structured<W: Write>(
         old_mode,
         new_mode,
         opts,
-        funcname_matcher.as_ref(),
+        funcname_matcher.as_deref(),
     )
 }
 
@@ -1012,8 +1012,8 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
         return Ok(());
     }
 
-    let funcname_matcher = funcname_attrs.matcher_for_path(repo, config, git_new)?;
-    let funcname_ref = funcname_matcher.as_ref();
+    let funcname_matcher = funcname_attrs.matcher_arc_for_path(repo, config, git_new)?;
+    let funcname_ref = funcname_matcher.as_deref();
     if binary_format == LogPatchBinaryFormat::GitApplyBinaryPatch {
         return write_patch_unified_body_from_bytes(
             out,

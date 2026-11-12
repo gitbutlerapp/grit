@@ -13,7 +13,7 @@ use crate::attributes::{collect_attrs_for_path, AttrValue, MacroTable};
 use crate::config::ConfigSet;
 use regex::{Regex, RegexBuilder};
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, OnceLock, RwLock};
 
 /// Built-in diff driver funcname patterns (same strings as Git's userdiff builtin drivers).
 const BUILTIN_PATTERN_DEFS: &[(&str, &str, bool)] = &[
@@ -176,8 +176,8 @@ struct BuiltinPattern {
 }
 
 // hygiene: built-in drivers compiled on first use of that driver name only
-static BUILTIN_FUNCNAME_MATCHERS: Mutex<BTreeMap<String, Arc<FuncnameMatcher>>> =
-    Mutex::new(BTreeMap::new());
+static BUILTIN_FUNCNAME_MATCHERS: RwLock<BTreeMap<String, Arc<FuncnameMatcher>>> =
+    RwLock::new(BTreeMap::new());
 
 /// Compiled function-name matcher used for diff hunk headers.
 #[derive(Debug, Clone)]
@@ -268,22 +268,30 @@ pub fn matcher_for_driver(
     config: &ConfigSet,
     driver: &str,
 ) -> Result<Option<FuncnameMatcher>, FuncnamePatternError> {
+    Ok(matcher_for_driver_arc(config, driver)?.map(|m| m.as_ref().clone()))
+}
+
+/// Same as [`matcher_for_driver`], but returns a shared matcher without cloning regex state.
+///
+/// Built-in drivers hit the process-wide cache; custom `diff.<driver>.funcname` config
+/// compiles once per call site that uses [`matcher_for_driver_arc`] with session caching.
+pub(crate) fn matcher_for_driver_arc(
+    config: &ConfigSet,
+    driver: &str,
+) -> Result<Option<Arc<FuncnameMatcher>>, FuncnamePatternError> {
     if let Some(pattern) = config.value(&format!("diff.{driver}.xfuncname")) {
-        return compile_matcher(&pattern, true, false).map(Some);
+        return compile_matcher(&pattern, true, false).map(|m| Some(Arc::new(m)));
     }
     if let Some(pattern) = config.value(&format!("diff.{driver}.funcname")) {
-        return compile_matcher(&pattern, false, false).map(Some);
+        return compile_matcher(&pattern, false, false).map(|m| Some(Arc::new(m)));
     }
-    if let Some(matcher) = cached_builtin_matcher(driver) {
-        return Ok(Some((*matcher).clone()));
-    }
-    Ok(None)
+    Ok(cached_builtin_matcher(driver))
 }
 
 fn cached_builtin_matcher(driver: &str) -> Option<Arc<FuncnameMatcher>> {
     {
         let cache = BUILTIN_FUNCNAME_MATCHERS
-            .lock()
+            .read()
             .unwrap_or_else(|e| e.into_inner());
         if let Some(matcher) = cache.get(driver) {
             return Some(Arc::clone(matcher));
@@ -295,7 +303,7 @@ fn cached_builtin_matcher(driver: &str) -> Option<Arc<FuncnameMatcher>> {
         .unwrap_or_else(|e| panic!("built-in userdiff driver {driver}: {e}"));
     let arc = Arc::new(matcher);
     let mut cache = BUILTIN_FUNCNAME_MATCHERS
-        .lock()
+        .write()
         .unwrap_or_else(|e| e.into_inner());
     Some(cache.entry(driver.to_owned()).or_insert(arc).clone())
 }
