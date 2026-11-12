@@ -105,10 +105,8 @@ fn write_large_single_pack_midx(dir: &Path) -> (PathBuf, PathBuf) {
         .expect("pack index");
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            preferred_pack_name: Some(preferred_idx.to_string_lossy().into_owned()),
-            ..WriteMultiPackIndexOptions::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_preferred_pack_name(Some(preferred_idx.to_string_lossy().into_owned())),
     )
     .expect("grit midx with embedded RIDX");
     let objects = dir.join(".git/objects");

@@ -463,11 +463,9 @@ fn issue_2003_split_index_rm_mv_updates_index_for_git() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["b.txt".into()],
-                pathspec_sources: vec!["b.txt".into()],
-                ..RemoveOptions::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["b.txt".into()])
+                .with_pathspec_sources(vec!["b.txt".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm b.txt");
@@ -521,11 +519,9 @@ fn issue_2003_split_index_rm_mv_many_files_status_matches_git() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["f0030.txt".into()],
-                pathspec_sources: vec!["f0030.txt".into()],
-                ..RemoveOptions::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["f0030.txt".into()])
+                .with_pathspec_sources(vec!["f0030.txt".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm one tracked file");
@@ -569,9 +565,7 @@ fn split_index_explicit_no_split_writes_unified_index() {
             &mut idx,
             &grit_lib::index::IndexWriteOptions::default()
                 .with_path(&index_path)
-                .with_split(WriteSplitIndexRequest {
-                    explicit: Some(false),
-                }),
+                .with_split(WriteSplitIndexRequest::default().with_explicit(Some(false))),
         )
         .expect("unified write");
     let bytes = read_index_bytes(&repo);

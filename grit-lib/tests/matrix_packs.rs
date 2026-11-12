@@ -736,10 +736,7 @@ fn whole_and_delta_packs_resolve_to_same_object_set() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("delta");
 
@@ -808,10 +805,7 @@ fn delta_pack_is_far_smaller_and_near_pack_objects() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("delta");
 
@@ -1164,11 +1158,7 @@ fn thin_pack_references_external_ref_delta_base_and_resolves() {
         &odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("thin pack");
 
@@ -1229,10 +1219,7 @@ fn thin_pack_references_external_ref_delta_base_and_resolves() {
         &odb,
         &[want],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("full pack of want");
     assert!(
@@ -1263,11 +1250,7 @@ fn ofs_vs_ref_delta_selection() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            use_ofs_delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("ofs pack");
     let (ref_ofs, ofs_ofs, _) = pack_delta_stats(&ofs, 20);
@@ -1285,11 +1268,9 @@ fn ofs_vs_ref_delta_selection() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            use_ofs_delta: false,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_use_ofs_delta(false),
     )
     .expect("ref pack");
     let (ref_ref, ofs_ref, _) = pack_delta_stats(&refp, 20);
@@ -1338,12 +1319,7 @@ fn delta_depth_limit_caps_chain_length() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            max_depth: 50,
-            use_ofs_delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("deep pack");
     let deep_depth = max_in_pack_delta_depth(&deep, 20);
@@ -1353,12 +1329,9 @@ fn delta_depth_limit_caps_chain_length() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            max_depth: 1,
-            use_ofs_delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_max_depth(1),
     )
     .expect("shallow pack");
     let shallow_depth = max_in_pack_delta_depth(&shallow, 20);
@@ -1560,10 +1533,7 @@ fn sha256_repo_packs_index_and_fsck_clean() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("sha256 delta");
     let delta_map = pack_bytes_to_object_map(&delta, &odb).expect("reparse sha256 delta");
@@ -1605,11 +1575,7 @@ fn sha256_repo_packs_index_and_fsck_clean() {
         &odb,
         &[tip],
         &[prev],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("sha256 thin");
     assert!(
@@ -1657,11 +1623,7 @@ fn window_zero_disables_delta_selection() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            window: 0,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_window(0),
     )
     .expect("window-0 pack");
 
@@ -1705,12 +1667,9 @@ fn long_history_delta_depth_git_round_trip() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            max_depth: 250,
-            use_ofs_delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_max_depth(250),
     )
     .expect("uncapped pack");
     let uncapped_depth = max_in_pack_delta_depth(&uncapped, 20);
@@ -1723,12 +1682,7 @@ fn long_history_delta_depth_git_round_trip() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            max_depth: 50,
-            use_ofs_delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("depth-50 pack");
     assert_eq!(
@@ -1754,12 +1708,9 @@ fn long_history_delta_depth_git_round_trip() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            max_depth: 5,
-            use_ofs_delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_max_depth(5),
     )
     .expect("depth-5 pack");
     assert_eq!(max_in_pack_delta_depth(&shallow, 20), 5);

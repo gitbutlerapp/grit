@@ -109,10 +109,7 @@ fn grit_loose_and_pack_round_trip_git_fsck_and_cat_file() {
         &odb,
         &[blob_oid, tree_oid],
         &[],
-        &PackBuildOptions {
-            delta: false,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default(),
     )
     .expect("build pack");
     index_pack_into(&objects, &pack_bytes, "roundtrip");

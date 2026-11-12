@@ -47,11 +47,9 @@ fn bench(c: &mut Criterion) {
     let ctx = PushPlanContext::default();
     c.bench_function("push_resolve_1000_shorthands_6000_heads", |b| {
         b.iter(|| {
-            let request = PushRequest {
-                remote: Some("origin".into()),
-                refspecs: refspecs.clone(),
-                ..Default::default()
-            };
+            let request = PushRequest::default()
+                .with_remote(Some("origin".into()))
+                .with_refspecs(refspecs.clone());
             let resolved = black_box(&repo)
                 .remotes()
                 .resolve_push(black_box(&request), black_box(&ctx))

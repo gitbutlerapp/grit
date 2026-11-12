@@ -213,7 +213,9 @@ fn assert_eol_only_rewrite_is_clean(
     let options = TreeDiffOptions::default()
         .with_for_status(true)
         .with_threads(Some(
-            ThreadPolicy::with_threads_override(Some(threads)).min_items_override(Some(0)),
+            ThreadPolicy::default()
+                .with_threads_override(Some(threads))
+                .with_min_items_override(Some(0)),
         ));
     let entries = grit_repo
         .diff()

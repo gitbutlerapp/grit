@@ -20,10 +20,7 @@ fn git_git_bare() -> std::path::PathBuf {
 fn main() -> grit_lib::error::Result<()> {
     let bare = git_git_bare();
     let repo = Repository::open(Path::new(&bare), &RepositoryOptions::empty())?;
-    let opts = RevListOptions {
-        objects: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_objects(true);
     let mut times = Vec::with_capacity(7);
     let mut object_count = 0usize;
     for _ in 0..7 {

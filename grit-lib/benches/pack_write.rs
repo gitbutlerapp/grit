@@ -32,17 +32,8 @@ fn pack_write_bench() -> &'static PackWriteBench {
         let fx = OdbBackendFixtures::global();
         let case = &fx.pack_100k;
         let root = case.history_tip;
-        let reuse_opts = PackBuildOptions {
-            use_bitmaps: false,
-            ..PackBuildOptions::for_local_copy(None)
-        };
-        let fresh_opts = PackBuildOptions {
-            delta: true,
-            reuse_objects: false,
-            reuse_deltas: false,
-            use_bitmaps: false,
-            ..PackBuildOptions::default()
-        };
+        let reuse_opts = PackBuildOptions::for_local_copy(None).with_use_bitmaps(false);
+        let fresh_opts = PackBuildOptions::default().with_delta(true).with_reuse_objects(false).with_reuse_deltas(false).with_use_bitmaps(false);
 
         let reuse_pack = build_pack_with_parallel_threads(
             &case.odb,

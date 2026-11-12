@@ -37,10 +37,7 @@ fn describe_distance_matches_git_rev_list_count() {
         .revwalk()
         .describe(
             "HEAD",
-            &DescribeOptions {
-                tags: true,
-                ..Default::default()
-            },
+            &DescribeOptions::default().with_tags(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -173,10 +170,7 @@ fn describe_merge_ladder_matches_git() {
         ("feat_0", "ss", Some("ss")),
     ];
     for (rev, match_glob, expect_tag) in cases {
-        let opts = DescribeOptions {
-            match_glob: Some(format!("{match_glob}*")),
-            ..DescribeOptions::default()
-        };
+        let opts = DescribeOptions::default().with_match_glob(Some(format!("{match_glob}*")));
         let git_desc = git(wt, &["describe", &format!("--match={match_glob}*"), rev])
             .trim()
             .to_owned();
@@ -211,10 +205,7 @@ fn describe_merge_ladder_matches_git() {
         repo.revwalk()
             .describe(
                 "main",
-                &DescribeOptions {
-                    match_glob: Some("t1*".into()),
-                    ..Default::default()
-                },
+                &DescribeOptions::default().with_match_glob(Some("t1*".into())),
                 &mut NullProgress,
                 &CancelToken::never()
             )
@@ -227,10 +218,7 @@ fn describe_merge_ladder_matches_git() {
         repo.revwalk()
             .describe(
                 "main~1",
-                &DescribeOptions {
-                    match_glob: Some("t1*".into()),
-                    ..Default::default()
-                },
+                &DescribeOptions::default().with_match_glob(Some("t1*".into())),
                 &mut NullProgress,
                 &CancelToken::never()
             )
@@ -243,10 +231,7 @@ fn describe_merge_ladder_matches_git() {
         repo.revwalk()
             .describe(
                 "feat_0",
-                &DescribeOptions {
-                    match_glob: Some("ss*".into()),
-                    ..Default::default()
-                },
+                &DescribeOptions::default().with_match_glob(Some("ss*".into())),
                 &mut NullProgress,
                 &CancelToken::never()
             )
@@ -287,11 +272,9 @@ fn describe_merge_ladder_commit_graph_and_tag_modes() {
     }
     assert_describe_matches_git_rev_list(wt, &repo, "main", &annotated);
 
-    let with_light = DescribeOptions {
-        tags: true,
-        match_glob: Some("light-*".into()),
-        ..Default::default()
-    };
+    let with_light = DescribeOptions::default()
+        .with_tags(true)
+        .with_match_glob(Some("light-*".into()));
     assert_describe_matches_git_rev_list(wt, &repo, "main", &with_light);
 }
 

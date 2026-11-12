@@ -117,12 +117,7 @@ fn replay_pick_cancel_on_first_step_clears_state_and_locks() {
     let committer = "Test <t@example.com> 1700000000 +0000"
         .parse()
         .expect("ident");
-    let req = ReplaySequenceRequest {
-        commits: vec![pick],
-        direction: ReplayDirection::Pick,
-        committer,
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(vec![pick], ReplayDirection::Pick, committer);
 
     let mut progress = CancelReplayOnCheckout::new(5);
     let cancel = progress.flag.clone();

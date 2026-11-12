@@ -408,10 +408,7 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
         .index()
         .resolve_hunk_selection(
             DiffSide::Unstaged,
-            &HunkSelection {
-                ids: half_ids,
-                ranges: Vec::new(),
-            },
+            &HunkSelection::default().with_ids(half_ids),
             &pathspec,
             grit_lib::diff::DiffOptions::default(),
         )
@@ -535,10 +532,11 @@ pub fn prepare_add_lines_large(git: &Path) -> Result<()> {
         .index()
         .resolve_hunk_selection(
             DiffSide::Unstaged,
-            &HunkSelection {
-                ids: Vec::new(),
-                ranges: vec![LineRange::new(LARGE_HUNKS_FILE.to_string(), 1, 25_000)],
-            },
+            &HunkSelection::default().with_ranges(vec![LineRange::new(
+                LARGE_HUNKS_FILE.to_string(),
+                1,
+                25_000,
+            )]),
             &pathspec,
             grit_lib::diff::DiffOptions::default(),
         )

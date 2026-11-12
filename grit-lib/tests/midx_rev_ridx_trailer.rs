@@ -57,12 +57,10 @@ fn grit_write_midx_rev(pack_dir: &Path) {
     // Git `repack` may leave MIDX sidecars without `.rev`; clear them so grit writes
     // a consistent MIDX + bitmap + rev set.
     clear_existing_midx(pack_dir);
-    let opts = WriteMultiPackIndexOptions {
-        write_bitmap: true,
-        write_rev_sidecar: true,
-        version: Some(1),
-        ..WriteMultiPackIndexOptions::default()
-    };
+    let opts = WriteMultiPackIndexOptions::default()
+        .with_write_bitmap(true)
+        .with_write_rev_sidecar(true)
+        .with_version(Some(1));
     write_multi_pack_index(pack_dir, &opts).expect("write MIDX");
 }
 

@@ -20,27 +20,12 @@ fn init_repo(root: &std::path::Path) {
 }
 
 fn stash_options() -> StashPushOptions {
-    StashPushOptions {
-        message: None,
-        include_untracked: false,
-        identity: "T <t@e.com> 1000000000 +0000".parse().expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: grit_lib::stash::StashMode::default(),
-    }
+    StashPushOptions::new("T <t@e.com> 1000000000 +0000".parse().expect("signature"))
 }
 
 fn stash_options_untracked() -> StashPushOptions {
-    StashPushOptions {
-        message: None,
-        include_untracked: true,
-        identity: "T <t@e.com> 1000000000 +0000".parse().expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: grit_lib::stash::StashMode::default(),
-    }
+    StashPushOptions::new("T <t@e.com> 1000000000 +0000".parse().expect("signature"))
+        .with_include_untracked(true)
 }
 
 fn assert_worktree_bytes(path: &std::path::Path, expected: &[u8]) {

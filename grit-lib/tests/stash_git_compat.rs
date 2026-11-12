@@ -35,17 +35,13 @@ fn open_grit(root: &std::path::Path) -> Repository {
 }
 
 fn stash_options(include_untracked: bool, message: Option<&str>) -> StashPushOptions {
-    StashPushOptions {
-        message: message.map(str::to_owned),
-        include_untracked,
-        identity: "Test <t@example.com> 1000000000 +0000"
+    StashPushOptions::new(
+        "Test <t@example.com> 1000000000 +0000"
             .parse()
             .expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: grit_lib::stash::StashMode::default(),
-    }
+    )
+    .with_message(message.map(str::to_owned))
+    .with_include_untracked(include_untracked)
 }
 
 fn assert_fsck_strict(root: &std::path::Path) {
@@ -435,10 +431,7 @@ fn pop_stash_with_index_restores_staged_deletion_like_git() {
         .stash()
         .pop(
             0,
-            &StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -781,10 +774,7 @@ fn t3903_grit_stash_read_by_git_and_reverse() {
         .stash()
         .apply_commit(
             &stash_oid,
-            &StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -904,15 +894,11 @@ fn t3908_stash_in_linked_worktree() {
     let linked = tmp.path().join("linked");
     open_grit(&main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("linked".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("linked".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add worktree");
 
     std::fs::write(linked.join("f"), "linked change\n").expect("modify");
@@ -1267,7 +1253,10 @@ fn grit_stash_name_status(
 ) -> Vec<(char, String)> {
     let diffs = repo
         .stash()
-        .diff(n, &StashDiffOptions { include_untracked })
+        .diff(
+            n,
+            &StashDiffOptions::default().with_include_untracked(include_untracked),
+        )
         .expect("stash diff");
     diffs
         .into_iter()
@@ -1812,10 +1801,7 @@ fn stash_pop_many_files_without_index_matches_git() {
         .stash()
         .pop(
             0,
-            &StashApplyOptions {
-                restore_index: false,
-                ..Default::default()
-            },
+            &StashApplyOptions::default(),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1923,15 +1909,7 @@ fn apply_stash_skips_identical_untracked_collision_with_overwrite_flag() {
         .expect("signature");
     let stash_oid = open_grit(root.path())
         .stash()
-        .create(&StashPushOptions {
-            message: None,
-            include_untracked: true,
-            identity: ident,
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: Default::default(),
-        })
+        .create(&StashPushOptions::new(ident).with_include_untracked(true))
         .expect("create")
         .expect("oid");
     git_cmd(root.path(), &["reset", "--hard", "HEAD"]);
@@ -1940,10 +1918,7 @@ fn apply_stash_skips_identical_untracked_collision_with_overwrite_flag() {
         .stash()
         .apply_commit(
             &stash_oid,
-            &StashApplyOptions {
-                overwrite_identical_untracked: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_overwrite_identical_untracked(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1967,15 +1942,7 @@ fn apply_stash_still_refuses_differing_untracked_with_overwrite_flag() {
         .expect("signature");
     let stash_oid = open_grit(root.path())
         .stash()
-        .create(&StashPushOptions {
-            message: None,
-            include_untracked: true,
-            identity: ident,
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: Default::default(),
-        })
+        .create(&StashPushOptions::new(ident).with_include_untracked(true))
         .expect("create")
         .expect("oid");
     std::fs::write(root.path().join("u.txt"), "different\n").expect("overwrite");
@@ -1983,10 +1950,7 @@ fn apply_stash_still_refuses_differing_untracked_with_overwrite_flag() {
         .stash()
         .apply_commit(
             &stash_oid,
-            &StashApplyOptions {
-                overwrite_identical_untracked: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_overwrite_identical_untracked(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -2011,15 +1975,7 @@ fn apply_stash_overwrite_identical_rejects_when_any_collision_differs() {
         .expect("signature");
     let stash_oid = open_grit(root.path())
         .stash()
-        .create(&StashPushOptions {
-            message: None,
-            include_untracked: true,
-            identity: ident,
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: Default::default(),
-        })
+        .create(&StashPushOptions::new(ident).with_include_untracked(true))
         .expect("create")
         .expect("oid");
     git_cmd(root.path(), &["reset", "--hard", "HEAD"]);
@@ -2029,10 +1985,7 @@ fn apply_stash_overwrite_identical_rejects_when_any_collision_differs() {
         .stash()
         .apply_commit(
             &stash_oid,
-            &StashApplyOptions {
-                overwrite_identical_untracked: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_overwrite_identical_untracked(true),
             &mut NullProgress,
             &CancelToken::never(),
         )

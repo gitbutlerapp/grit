@@ -43,22 +43,17 @@ fn assert_merge_file_matches_git(
     context: &str,
 ) {
     let git_out = git_merge_file(args, base, ours, theirs);
-    let grit_out = grit_merge(MergeInput {
-        base,
-        ours,
-        theirs,
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor,
-        style,
-        marker_size,
-        diff_algorithm: None,
-        ignore_all_space: args.contains(&"-w"),
-        ignore_space_change: args.contains(&"-b"),
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: false,
-    });
+    let grit_out = grit_merge(
+        MergeInput::new(base, ours, theirs)
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_favor(favor)
+            .with_style(style)
+            .with_marker_size(marker_size)
+            .with_ignore_all_space(args.contains(&"-w"))
+            .with_ignore_space_change(args.contains(&"-b")),
+    );
     assert_eq!(
         grit_out.content, git_out,
         "{context}: merged content mismatch"
@@ -151,39 +146,23 @@ fn t6417_merge_favor_ours_theirs_grit_api() {
     let base = b"a\nb\nc\n";
     let ours = b"a\nOURS\nc\n";
     let theirs = b"a\nTHEIRS\nc\n";
-    let ours_out = grit_merge(MergeInput {
-        base,
-        ours,
-        theirs,
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor: MergeFavor::Ours,
-        style: ConflictStyle::Merge,
-        marker_size: 7,
-        diff_algorithm: None,
-        ignore_all_space: false,
-        ignore_space_change: false,
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: false,
-    });
+    let ours_out = grit_merge(
+        MergeInput::new(base, ours, theirs)
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_favor(MergeFavor::Ours)
+            .with_marker_size(7),
+    );
     assert_eq!(ours_out.content, b"a\nOURS\nc\n");
-    let theirs_out = grit_merge(MergeInput {
-        base,
-        ours,
-        theirs,
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor: MergeFavor::Theirs,
-        style: ConflictStyle::Merge,
-        marker_size: 7,
-        diff_algorithm: None,
-        ignore_all_space: false,
-        ignore_space_change: false,
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: false,
-    });
+    let theirs_out = grit_merge(
+        MergeInput::new(base, ours, theirs)
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_favor(MergeFavor::Theirs)
+            .with_marker_size(7),
+    );
     assert_eq!(theirs_out.content, b"a\nTHEIRS\nc\n");
 }
 
@@ -203,22 +182,13 @@ fn issue_2259_crlf_conversion_with_edit_conflicts_like_git() {
         7,
         "issue 2259 interior edit",
     );
-    let grit_out = grit_merge(MergeInput {
-        base,
-        ours,
-        theirs,
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor: MergeFavor::None,
-        style: ConflictStyle::Merge,
-        marker_size: 7,
-        diff_algorithm: None,
-        ignore_all_space: false,
-        ignore_space_change: false,
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: false,
-    });
+    let grit_out = grit_merge(
+        MergeInput::new(base, ours, theirs)
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_marker_size(7),
+    );
     assert_eq!(grit_out.conflicts, 1, "expected one conflict region");
 }
 
@@ -305,22 +275,13 @@ fn issue_2259_incomplete_line_lone_cr_conflicts_like_git() {
         7,
         "incomplete final line with lone CR on ours",
     );
-    let grit_out = grit_merge(MergeInput {
-        base,
-        ours,
-        theirs,
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor: MergeFavor::None,
-        style: ConflictStyle::Merge,
-        marker_size: 7,
-        diff_algorithm: None,
-        ignore_all_space: false,
-        ignore_space_change: false,
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: false,
-    });
+    let grit_out = grit_merge(
+        MergeInput::new(base, ours, theirs)
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_marker_size(7),
+    );
     assert_eq!(grit_out.conflicts, 1);
     assert!(
         grit_out.content.windows(2).any(|w| w == b"a\r"),
@@ -333,22 +294,14 @@ fn issue_2259_ignore_cr_at_eol_clean_for_interior_edit() {
     let base = b"a\nb\nc\nd\n";
     let ours = b"a\r\nb\r\nc\r\nd\r\n";
     let theirs = b"a\nB\nc\nd\n";
-    let grit_out = grit_merge(MergeInput {
-        base,
-        ours,
-        theirs,
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor: MergeFavor::None,
-        style: ConflictStyle::Merge,
-        marker_size: 7,
-        diff_algorithm: None,
-        ignore_all_space: false,
-        ignore_space_change: false,
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: true,
-    });
+    let grit_out = grit_merge(
+        MergeInput::new(base, ours, theirs)
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_marker_size(7)
+            .with_ignore_cr_at_eol(true),
+    );
     assert_eq!(
         grit_out.conflicts, 0,
         "ignore_cr_at_eol should auto-merge CR-only EOL diffs"

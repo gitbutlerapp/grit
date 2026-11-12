@@ -142,16 +142,8 @@ fn bitmap_and_walk_honor_explicit_shallow_boundary() {
     let mut shallow = HashSet::new();
     shallow.insert(boundary);
 
-    let opts_on = PackBuildOptions {
-        use_bitmaps: true,
-        delta: false,
-        ..PackBuildOptions::default()
-    };
-    let opts_off = PackBuildOptions {
-        use_bitmaps: false,
-        delta: false,
-        ..PackBuildOptions::default()
-    };
+    let opts_on = PackBuildOptions::default();
+    let opts_off = PackBuildOptions::default().with_use_bitmaps(false);
     let pack_on = UploadPackStream::new(&[head], opts_on)
         .with_source_shallow(&shallow)
         .with_have_shallow(&shallow)
@@ -209,16 +201,8 @@ fn bitmap_and_walk_select_identical_objects() {
         } else {
             pick_subset(&commits, seed, 1)
         };
-        let opts_on = PackBuildOptions {
-            use_bitmaps: true,
-            delta: false,
-            ..PackBuildOptions::default()
-        };
-        let opts_off = PackBuildOptions {
-            use_bitmaps: false,
-            delta: false,
-            ..PackBuildOptions::default()
-        };
+        let opts_on = PackBuildOptions::default();
+        let opts_off = PackBuildOptions::default().with_use_bitmaps(false);
         let pack_on = build_pack(&odb, &wants, &haves, &opts_on).expect("bitmap pack");
         let pack_off = build_pack(&odb, &wants, &haves, &opts_off).expect("walk pack");
         let on_set = pack_object_set(&pack_on, &odb);
@@ -257,11 +241,7 @@ fn filters_respected_with_bitmaps() {
 
     let filter = ObjectFilter::BlobNone;
     let empty = HashSet::new();
-    let opts = PackBuildOptions {
-        use_bitmaps: true,
-        delta: false,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default();
     let pack = UploadPackStream::new(&[head], opts)
         .with_source_shallow(&empty)
         .with_have_shallow(&empty)

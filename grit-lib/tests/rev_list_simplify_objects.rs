@@ -49,17 +49,15 @@ fn rev_list_opts_from_git_flags(flags: &[&str]) -> (RevListOptions, Vec<String>,
             continue;
         }
     }
-    let opts = RevListOptions {
-        full_history: flags.iter().any(|a| *a == "--full-history"),
-        simplify_merges: flags.iter().any(|a| *a == "--simplify-merges"),
-        ancestry_path: flags.iter().any(|a| *a == "--ancestry-path"),
-        first_parent: flags.iter().any(|a| *a == "--first-parent"),
-        sparse: flags.iter().any(|a| *a == "--sparse"),
-        show_pulls: flags.iter().any(|a| *a == "--show-pulls"),
-        ordering: ordering_from_git_args(flags),
-        paths,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_full_history(flags.iter().any(|a| *a == "--full-history"))
+        .with_simplify_merges(flags.iter().any(|a| *a == "--simplify-merges"))
+        .with_ancestry_path(flags.iter().any(|a| *a == "--ancestry-path"))
+        .with_first_parent(flags.iter().any(|a| *a == "--first-parent"))
+        .with_sparse(flags.iter().any(|a| *a == "--sparse"))
+        .with_show_pulls(flags.iter().any(|a| *a == "--show-pulls"))
+        .with_ordering(ordering_from_git_args(flags))
+        .with_paths(paths);
     (opts, pos, neg)
 }
 
@@ -136,11 +134,9 @@ fn t6111_treesame_matches_git() {
         &["rw6111-f..rw6111-m", "--ancestry-path", "--", "content.txt"],
     );
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-    let opts = RevListOptions {
-        ancestry_path: true,
-        paths: vec!["content.txt".to_owned()],
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_ancestry_path(true)
+        .with_paths(vec!["content.txt".to_owned()]);
     let grit_range = grit_repo
         .revwalk()
         .rev_list(
@@ -168,15 +164,12 @@ fn treesame_show_pulls_exercises_simplify_merge_paths() {
             .rev_list(
                 &[String::from("rw6111-m")],
                 &[],
-                &RevListOptions {
-                    full_history,
-                    simplify_merges: true,
-                    show_pulls: true,
-                    preserve_simplify_merges_graph_merges: preserve,
-                    sparse: false,
-                    paths: vec!["content.txt".to_owned()],
-                    ..RevListOptions::default()
-                },
+                &RevListOptions::default()
+                    .with_full_history(full_history)
+                    .with_simplify_merges(true)
+                    .with_show_pulls(true)
+                    .with_preserve_simplify_merges_graph_merges(preserve)
+                    .with_paths(vec!["content.txt".to_owned()]),
                 &mut NullProgress,
                 &CancelToken::never(),
             )
@@ -200,12 +193,9 @@ fn t4216_bloom_and_no_bloom_identical() {
     let git_oids = git_rev_list(wt, &["HEAD", "--", "A/file1"]);
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
     for use_bloom in [false, true] {
-        let opts = RevListOptions {
-            paths: vec!["A/file1".to_owned()],
-            use_commit_graph: true,
-            use_commit_graph_bloom: use_bloom,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_paths(vec!["A/file1".to_owned()])
+            .with_use_commit_graph_bloom(use_bloom);
         let out = grit_repo
             .revwalk()
             .rev_list(
@@ -333,12 +323,10 @@ fn t6022_missing_actions_match_git() {
         let git_set = git_rev_list_object_set(wt, &git_args);
         let grit_repo =
             Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-        let opts = RevListOptions {
-            objects: true,
-            no_object_names: true,
-            missing_action: action,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_objects(true)
+            .with_no_object_names(true)
+            .with_missing_action(action);
         let result = grit_repo
             .revwalk()
             .rev_list(
@@ -382,10 +370,7 @@ fn t6102_unexpected_object_types_typed_error() {
         .write_loose_materialize(ObjectKind::Tree, &broken_body)
         .expect("broken tree");
     let broken_tree_hex = broken_tree.to_hex();
-    let opts = RevListOptions {
-        objects: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_objects(true);
     let result = grit_repo.revwalk().rev_list(
         &[blob_hex, broken_tree_hex.clone()],
         &[],
@@ -504,10 +489,7 @@ fn t6004_path_limited_trivial_optimization_matches_git() {
     assert_eq!(git_rev_list(wt, &[&commit]).len(), 2);
     assert_eq!(git_rev_list(wt, &[&commit, "--", "."]).len(), 1);
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-    let opts = RevListOptions {
-        paths: vec![".".to_owned()],
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_paths(vec![".".to_owned()]);
     let grit = grit_repo
         .revwalk()
         .rev_list(
@@ -528,11 +510,9 @@ fn t6110_first_parent_boundary_matches_git() {
     setup_first_parent_boundary_history(wt);
     let git_lines = git_rev_list_with_boundary(wt, &["--first-parent", "--boundary", "HEAD^.."]);
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-    let opts = RevListOptions {
-        first_parent: true,
-        boundary: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_first_parent(true)
+        .with_boundary(true);
     let result = grit_repo
         .revwalk()
         .rev_list(
@@ -556,13 +536,11 @@ fn reachable_objects_all_refs_with_filter() {
     commit_file(wt, "f", "x\n", "c");
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
     let walk = |filter: Option<ObjectFilter>| {
-        let opts = RevListOptions {
-            all_refs: true,
-            objects: true,
-            no_object_names: true,
-            filter,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_all_refs(true)
+            .with_objects(true)
+            .with_no_object_names(true)
+            .with_filter(filter);
         let out = grit_repo
             .revwalk()
             .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())

@@ -41,10 +41,9 @@ fn large_clean_fixture(root: &std::path::Path) {
 }
 
 fn campaign_thresholds() -> IndexStagingThresholds {
-    IndexStagingThresholds {
-        large_index_restage: 64,
-        parallel_tracked_restage: 64,
-    }
+    IndexStagingThresholds::default()
+        .with_large_index_restage(64)
+        .with_parallel_tracked_restage(64)
 }
 
 #[test]

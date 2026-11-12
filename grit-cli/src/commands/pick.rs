@@ -123,20 +123,16 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     if message_override.is_some() && opts.commits.len() != 1 {
         bail!("--message and --message-file are only allowed when picking exactly one commit");
     }
-    let req = ReplaySequenceRequest {
-        commits: sources,
-        direction: ReplayDirection::Pick,
-        committer,
-        options: ReplayOptions {
-            record_origin: opts.record_origin,
-            no_commit: opts.no_commit,
-            empty: opts.empty.into(),
-            message_override,
-            mainline: mainline_parent(opts.mainline)?,
-            favor,
-            conflict_style,
-        },
-    };
+    let req = ReplaySequenceRequest::new(sources, ReplayDirection::Pick, committer).with_options(
+        ReplayOptions::default()
+            .with_record_origin(opts.record_origin)
+            .with_no_commit(opts.no_commit)
+            .with_empty(opts.empty.into())
+            .with_message_override(message_override)
+            .with_mainline(mainline_parent(opts.mainline)?)
+            .with_favor(favor)
+            .with_conflict_style(conflict_style),
+    );
     if opts.check {
         let prediction = repo
             .merge()

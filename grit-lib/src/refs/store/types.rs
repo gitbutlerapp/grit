@@ -204,6 +204,7 @@ impl RefUpdateFlags {
 
 /// Rename a loose ref when only letter case changes (case-insensitive filesystems).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefCaseOnlyRename {
     /// Full ref name before rename (for example `refs/heads/topic`).
     pub from: RefName,
@@ -211,8 +212,36 @@ pub struct RefCaseOnlyRename {
     pub to: RefName,
 }
 
+impl RefCaseOnlyRename {
+    /// Creates a [`RefCaseOnlyRename`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `from`: full ref name before rename (for example `refs/heads/topic`).
+    /// - `to`: full ref name after rename (for example `refs/heads/Topic`).
+    #[must_use]
+    pub fn new(from: RefName, to: RefName) -> Self {
+        Self { from, to }
+    }
+
+    /// Sets [`from`](Self::from).
+    #[must_use]
+    pub fn with_from(mut self, from: RefName) -> Self {
+        self.from = from;
+        self
+    }
+
+    /// Sets [`to`](Self::to).
+    #[must_use]
+    pub fn with_to(mut self, to: RefName) -> Self {
+        self.to = to;
+        self
+    }
+}
+
 /// Move a branch reflog to a new ref name and append one entry (branch rename).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RefReflogRename {
     /// Full ref name whose reflog is moved (for example `refs/heads/topic`).
     pub from: RefName,
@@ -220,6 +249,41 @@ pub struct RefReflogRename {
     pub to: RefName,
     /// Rename entry appended as the newest reflog line on `to`.
     pub append: ReflogUpdate,
+}
+
+impl RefReflogRename {
+    /// Creates a [`RefReflogRename`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `from`: full ref name whose reflog is moved (for example `refs/heads/topic`).
+    /// - `to`: destination ref name (for example `refs/heads/new`).
+    /// - `append`: rename entry appended as the newest reflog line on `to`.
+    #[must_use]
+    pub fn new(from: RefName, to: RefName, append: ReflogUpdate) -> Self {
+        Self { from, to, append }
+    }
+
+    /// Sets [`from`](Self::from).
+    #[must_use]
+    pub fn with_from(mut self, from: RefName) -> Self {
+        self.from = from;
+        self
+    }
+
+    /// Sets [`to`](Self::to).
+    #[must_use]
+    pub fn with_to(mut self, to: RefName) -> Self {
+        self.to = to;
+        self
+    }
+
+    /// Sets [`append`](Self::append).
+    #[must_use]
+    pub fn with_append(mut self, append: ReflogUpdate) -> Self {
+        self.append = append;
+        self
+    }
 }
 
 /// One ref create, update, delete, or reflog-only touch in a transaction.

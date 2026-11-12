@@ -143,15 +143,8 @@ fn cancelled_stash_push_leaves_no_entry_and_git_pops_a_finished_one() {
     write_files(root, "d", "changed");
     let status_before = status(root);
     let repo = open_grit_repo(root);
-    let opts = StashPushOptions {
-        message: Some("wip".into()),
-        include_untracked: false,
-        identity: IDENT.parse().expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: StashMode::default(),
-    };
+    let opts =
+        StashPushOptions::new(IDENT.parse().expect("signature")).with_message(Some("wip".into()));
 
     let mut sink = CancelAfter::new(ProgressPhase::StagingFiles, 10);
     let cancel = sink.flag.clone();

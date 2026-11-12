@@ -753,10 +753,10 @@ fn allowing_failures_prepare_rename_only_commits_case_only_rename() {
     .expect("seed topic");
     assert_eq!(fx.raw("refs/heads/topic"), Some(RawRef::Direct(fx.commit)));
     let txn = RefTransaction::new()
-        .with_case_only_rename(RefCaseOnlyRename {
-            from: name("refs/heads/topic"),
-            to: name("refs/heads/Topic"),
-        })
+        .with_case_only_rename(RefCaseOnlyRename::new(
+            name("refs/heads/topic"),
+            name("refs/heads/Topic"),
+        ))
         .allowing_failures();
     let prepared = fx
         .repo

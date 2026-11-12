@@ -48,13 +48,12 @@ fn graph_layout_criss_cross_topology() -> grit_lib::error::Result<()> {
     let inputs: Vec<GraphCommitInput> = walk
         .iter()
         .map(|&id| {
-            Ok(GraphCommitInput {
+            Ok(GraphCommitInput::new(
                 id,
-                parents: repo
-                    .revwalk()
+                repo.revwalk()
                     .rewrite_display_parents(&visible)
                     .map(|parents| parents.get(&id).cloned().unwrap_or_default())?,
-            })
+            ))
         })
         .collect::<grit_lib::error::Result<_>>()?;
     let mut layout = GraphLayout::default();

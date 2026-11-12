@@ -227,10 +227,7 @@ fn ingest_thin_pack_resolves_bases_already_in_the_store() {
         &mut Cursor::new(&thin),
         &store,
         &store,
-        &UnpackOptions {
-            strict: true,
-            ..UnpackOptions::default()
-        },
+        &UnpackOptions::default().with_strict(true),
     )
     .expect("ingest thin pack");
     assert_eq!(ingested.object_ids, new_objects);
@@ -310,10 +307,7 @@ fn strict_ingest_rejects_a_pack_with_dangling_references() {
         &mut Cursor::new(&pack),
         &store,
         &store,
-        &UnpackOptions {
-            strict: true,
-            ..UnpackOptions::default()
-        },
+        &UnpackOptions::default().with_strict(true),
     )
     .expect_err("strict ingest must reject missing blobs");
     assert!(
@@ -384,10 +378,7 @@ fn corrupt_and_truncated_packs_are_rejected() {
         &mut Cursor::new(&pack),
         &store,
         &store,
-        &UnpackOptions {
-            max_input_bytes: Some(32),
-            ..UnpackOptions::default()
-        },
+        &UnpackOptions::default().with_max_input_bytes(Some(32)),
     )
     .expect_err("max input size");
     assert!(
@@ -405,10 +396,7 @@ fn dry_run_hashes_without_writing() {
         &mut Cursor::new(&pack),
         &store,
         &store,
-        &UnpackOptions {
-            dry_run: true,
-            ..UnpackOptions::default()
-        },
+        &UnpackOptions::default().with_dry_run(true),
     )
     .expect("dry run");
     assert_eq!(

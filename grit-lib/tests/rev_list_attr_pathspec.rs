@@ -57,10 +57,7 @@ fn git_rev_list(root: &Path, spec: &str) -> Vec<String> {
 }
 
 fn grit_rev_list(repo: &Repository, spec: &str) -> Vec<ObjectId> {
-    let opts = RevListOptions {
-        paths: vec![spec.to_owned()],
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_paths(vec![spec.to_owned()]);
     repo.revwalk()
         .rev_list(
             &["HEAD".into()],

@@ -19,11 +19,10 @@ fn ident() -> String {
 
 fn continue_options(message: Option<&str>) -> ContinueOptions {
     let id = ident();
-    ContinueOptions {
-        message: message.map(str::to_owned),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
-    }
+    ContinueOptions::default()
+        .with_message(message.map(str::to_owned))
+        .with_author(Some(id.parse().expect("signature")))
+        .with_committer(Some(id.parse().expect("signature")))
 }
 
 fn git_out(dir: &Path, args: &[&str]) -> String {

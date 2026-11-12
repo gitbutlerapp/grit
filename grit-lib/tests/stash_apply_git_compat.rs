@@ -117,10 +117,7 @@ fn apply_stash_with_index_matches_git_staged_porcelain() {
         .stash()
         .apply_commit(
             &ObjectId::from_hex(&stash_oid_hex).expect("stash"),
-            &StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(true),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -201,10 +198,7 @@ fn restore_index_keeps_unstaged_only_edits_unstaged_like_git() {
                 &RepositoryOptions::empty().with_work_tree(grit_dir.path()),
             )
             .expect("open");
-            let options = StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            };
+            let options = StashApplyOptions::default().with_restore_index(true);
             let progress = &mut grit_lib::progress::NullProgress;
             let cancel = &grit_lib::progress::CancelToken::never();
             match op {
@@ -315,10 +309,7 @@ fn wide_sparse_apply_preserves_index_and_untouched_changes_like_git() {
                 .stash()
                 .apply_commit(
                     &stash,
-                    &StashApplyOptions {
-                        restore_index,
-                        ..Default::default()
-                    },
+                    &StashApplyOptions::default().with_restore_index(restore_index),
                     &mut grit_lib::progress::NullProgress,
                     &grit_lib::progress::CancelToken::never(),
                 )
@@ -491,10 +482,7 @@ mod raw_stash_paths {
             let expected = tempfile::tempdir().unwrap();
             copy_repo(root.path(), expected.path());
             let repo = open(root.path());
-            let options = StashApplyOptions {
-                restore_index,
-                ..Default::default()
-            };
+            let options = StashApplyOptions::default().with_restore_index(restore_index);
             let outcome = if pop {
                 repo.stash().pop(
                     0,
@@ -612,10 +600,7 @@ mod raw_stash_paths {
                 .stash()
                 .pop(
                     0,
-                    &StashApplyOptions {
-                        restore_index: true,
-                        ..Default::default()
-                    },
+                    &StashApplyOptions::default().with_restore_index(true),
                     &mut grit_lib::progress::NullProgress,
                     &grit_lib::progress::CancelToken::never(),
                 )
@@ -648,15 +633,9 @@ mod raw_stash_paths {
         open(root.path())
             .stash()
             .push(
-                &StashPushOptions {
-                    message: Some("untracked literal".into()),
-                    include_untracked: true,
-                    identity,
-                    selection: None,
-                    pathspecs: Vec::new(),
-                    dry_run: false,
-                    mode: StashMode::default(),
-                },
+                &StashPushOptions::new(identity)
+                    .with_message(Some("untracked literal".into()))
+                    .with_include_untracked(true),
                 &mut grit_lib::progress::NullProgress,
                 &grit_lib::progress::CancelToken::never(),
             )
@@ -714,15 +693,9 @@ mod raw_stash_paths {
         open(root.path())
             .stash()
             .push(
-                &StashPushOptions {
-                    message: Some("untracked non-utf8".into()),
-                    include_untracked: true,
-                    identity,
-                    selection: None,
-                    pathspecs: Vec::new(),
-                    dry_run: false,
-                    mode: StashMode::default(),
-                },
+                &StashPushOptions::new(identity)
+                    .with_message(Some("untracked non-utf8".into()))
+                    .with_include_untracked(true),
                 &mut grit_lib::progress::NullProgress,
                 &grit_lib::progress::CancelToken::never(),
             )
@@ -760,15 +733,7 @@ mod grit_stash_push_non_utf8 {
     }
 
     fn stash_push_opts(include_untracked: bool) -> StashPushOptions {
-        StashPushOptions {
-            message: None,
-            include_untracked,
-            identity: identity(),
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: Default::default(),
-        }
+        StashPushOptions::new(identity()).with_include_untracked(include_untracked)
     }
 
     fn identity() -> grit_lib::ident::Signature {

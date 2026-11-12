@@ -30,11 +30,28 @@ use std::time::SystemTime;
 
 /// Options for [`capture_workspace_snapshot`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WorkspaceCaptureOptions {
     /// Ref names (for example `refs/heads/main`) whose [`RawRef`] values are stored.
     pub refs: Vec<String>,
     /// When true, untracked worktree paths are included in [`WorkspaceSnapshot::worktree_tree`].
     pub include_untracked: bool,
+}
+
+impl WorkspaceCaptureOptions {
+    /// Sets [`refs`](Self::refs).
+    #[must_use]
+    pub fn with_refs(mut self, refs: Vec<String>) -> Self {
+        self.refs = refs;
+        self
+    }
+
+    /// Sets [`include_untracked`](Self::include_untracked).
+    #[must_use]
+    pub const fn with_include_untracked(mut self, include_untracked: bool) -> Self {
+        self.include_untracked = include_untracked;
+        self
+    }
 }
 
 /// Ref prefix for pins created by [`pin_workspace_snapshot`].

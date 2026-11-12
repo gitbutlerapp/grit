@@ -67,32 +67,30 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
 
     for use_graph in [false, true] {
         for in_order in [false, true] {
-            let opts = RevListOptions {
-                objects: true,
-                in_commit_order: in_order,
-                use_commit_graph: use_graph,
-                use_commit_graph_bloom: use_graph,
-                use_bitmap_index: use_graph,
-                no_kept_objects: true,
-                simplify_merges: true,
-                show_pulls: true,
-                preserve_simplify_merges_graph_merges: true,
-                full_history: true,
-                paths: vec!["deep/".into(), "wide/".into()],
-                ordering: OrderingMode::AuthorDateTopo,
-                filter: Some(ObjectFilter::Combine(vec![
+            let opts = RevListOptions::default()
+                .with_objects(true)
+                .with_in_commit_order(in_order)
+                .with_use_commit_graph(use_graph)
+                .with_use_commit_graph_bloom(use_graph)
+                .with_use_bitmap_index(use_graph)
+                .with_no_kept_objects(true)
+                .with_simplify_merges(true)
+                .with_show_pulls(true)
+                .with_preserve_simplify_merges_graph_merges(true)
+                .with_full_history(true)
+                .with_paths(vec!["deep/".into(), "wide/".into()])
+                .with_ordering(OrderingMode::AuthorDateTopo)
+                .with_filter(Some(ObjectFilter::Combine(vec![
                     ObjectFilter::BlobLimit(8192),
                     ObjectFilter::TreeDepth(10),
-                ])),
-                filter_print_omitted: true,
-                ancestry_path: true,
-                ancestry_path_bottoms: vec![mid.parse().expect("mid oid")],
-                left_right: true,
-                boundary: true,
-                cherry_mark: true,
-                max_count: Some(128),
-                ..RevListOptions::default()
-            };
+                ])))
+                .with_filter_print_omitted(true)
+                .with_ancestry_path(true)
+                .with_ancestry_path_bottoms(vec![mid.parse().expect("mid oid")])
+                .with_left_right(true)
+                .with_boundary(true)
+                .with_cherry_mark(true)
+                .with_max_count(Some(128));
             let _ = repo.revwalk().rev_list(
                 &[String::from("HEAD")],
                 &[String::from("HEAD~15")],
@@ -134,29 +132,27 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
     }
 
     for mask in 0u32..128 {
-        let opts = RevListOptions {
-            ordering: match mask % 5 {
+        let opts = RevListOptions::default()
+            .with_ordering(match mask % 5 {
                 0 => OrderingMode::Default,
                 1 => OrderingMode::Topo,
                 2 => OrderingMode::DateOrderWalk,
                 3 => OrderingMode::AuthorDateWalk,
                 _ => OrderingMode::AuthorDateTopo,
-            },
-            first_parent: mask & 1 != 0,
-            reverse: mask & 2 != 0,
-            boundary: mask & 4 != 0,
-            simplify_merges: mask & 8 != 0,
-            show_pulls: mask & 16 != 0,
-            preserve_simplify_merges_graph_merges: mask & 32 != 0,
-            sparse: mask & 64 != 0,
-            full_history: mask & 8 != 0,
-            paths: vec!["deep/".into()],
-            objects: mask & 1 != 0,
-            in_commit_order: mask & 2 != 0,
-            use_commit_graph: mask & 4 != 0,
-            max_count: Some(96),
-            ..RevListOptions::default()
-        };
+            })
+            .with_first_parent(mask & 1 != 0)
+            .with_reverse(mask & 2 != 0)
+            .with_boundary(mask & 4 != 0)
+            .with_simplify_merges(mask & 8 != 0)
+            .with_show_pulls(mask & 16 != 0)
+            .with_preserve_simplify_merges_graph_merges(mask & 32 != 0)
+            .with_sparse(mask & 64 != 0)
+            .with_full_history(mask & 8 != 0)
+            .with_paths(vec!["deep/".into()])
+            .with_objects(mask & 1 != 0)
+            .with_in_commit_order(mask & 2 != 0)
+            .with_use_commit_graph(mask & 4 != 0)
+            .with_max_count(Some(96));
         let _ = repo.revwalk().rev_list(
             &[String::from("HEAD")],
             &[],

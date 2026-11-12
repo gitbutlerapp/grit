@@ -388,11 +388,9 @@ fn revwalk_ignores_corrupt_on_disk_graph() {
 }
 
 fn grit_rev_list(repo: &Repository, tip: &str, use_graph: bool) -> Vec<ObjectId> {
-    let opts = RevListOptions {
-        reverse: true,
-        use_commit_graph: use_graph,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_reverse(true)
+        .with_use_commit_graph(use_graph);
     repo.revwalk()
         .rev_list(
             &[tip.to_owned()],

@@ -63,15 +63,10 @@ fn selected(
         repo.odb(),
         wants,
         haves,
-        &PackEnumerateOptions {
-            filter: None,
-            shallow_grafts: &no_grafts,
-            have_shallow_grafts: Some(client_shallow),
-            use_bitmaps,
-            exclude_objects: None,
-            peer_odb: None,
-            have_boundary: HaveBoundary::TipsOnly,
-        },
+        &PackEnumerateOptions::new(&no_grafts)
+            .with_have_shallow_grafts(Some(client_shallow))
+            .with_use_bitmaps(use_bitmaps)
+            .with_have_boundary(HaveBoundary::TipsOnly),
     )
     .expect("enumerate")
     .send

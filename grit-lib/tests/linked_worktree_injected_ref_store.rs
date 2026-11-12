@@ -108,15 +108,10 @@ fn two_worktrees() -> Fixture {
     let first = commit_change(&main, &wt.join("a.txt"), "one");
     let added = main
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("feat".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat".into()))),
+        )
         .expect("worktrees().add");
     assert_eq!(
         fs::read_to_string(added.admin_dir.join("HEAD")).expect("linked HEAD"),

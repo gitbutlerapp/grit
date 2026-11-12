@@ -9,9 +9,10 @@ use grit_lib::parallel::{ParallelOp, ParallelOptions, ThreadPolicy};
 /// Build a [`ThreadPolicy`] that forces four workers and disables batch thresholds.
 #[must_use]
 pub fn forced_parallel_policy() -> ThreadPolicy {
-    ThreadPolicy::with_threads_override(Some(4))
-        .min_items_override(Some(0))
-        .min_total_bytes_override(Some(0))
+    ThreadPolicy::default()
+        .with_threads_override(Some(4))
+        .with_min_items_override(Some(0))
+        .with_min_total_bytes_override(Some(0))
 }
 
 /// Resolved options for `op` with [`forced_parallel_policy`].

@@ -154,11 +154,9 @@ fn git_rev_list_topo_with_config(repo_root: &Path, tip: &str, commit_graph: bool
 }
 
 fn grit_rev_list_topo(repo: &Repository, tip: &str, use_graph: bool) -> Vec<ObjectId> {
-    let opts = RevListOptions {
-        reverse: true,
-        use_commit_graph: use_graph,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_reverse(true)
+        .with_use_commit_graph(use_graph);
     repo.revwalk()
         .rev_list(
             &[tip.to_owned()],

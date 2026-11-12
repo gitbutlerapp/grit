@@ -63,7 +63,7 @@ fn prune_removes_worktrees_without_git_file_like_git() {
     let grit_main = setup(&grit_tmp);
     let repo = Repository::discover(Some(&grit_main), &RepositoryOptions::empty()).unwrap();
     repo.worktrees()
-        .prune(&PruneWorktreesOptions { dry_run: false })
+        .prune(&PruneWorktreesOptions::default())
         .unwrap();
 
     let git_tmp = TempDir::new().unwrap();

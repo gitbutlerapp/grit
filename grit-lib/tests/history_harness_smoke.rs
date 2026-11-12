@@ -20,10 +20,7 @@ fn history_harness_smoke_three_commit_dag_matches_grit_rev_list() {
     assert_eq!(git_oids.len(), 3, "expected three commits on main");
 
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-    let opts = RevListOptions {
-        reverse: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_reverse(true);
     let grit_result = grit_repo
         .revwalk()
         .rev_list(

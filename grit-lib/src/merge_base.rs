@@ -1477,6 +1477,7 @@ fn drain_left_behind(
 
 /// Filters applied when counting reachable commits (parent count and committer dates).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ReachableCountFilter {
     /// Minimum parent count for a commit to be included.
     pub min_parents: Option<usize>,
@@ -1488,6 +1489,43 @@ pub struct ReachableCountFilter {
     pub since: Option<i64>,
     /// Exclude commits with committer date strictly after this Unix timestamp.
     pub until: Option<i64>,
+}
+
+impl ReachableCountFilter {
+    /// Sets [`min_parents`](Self::min_parents).
+    #[must_use]
+    pub const fn with_min_parents(mut self, min_parents: Option<usize>) -> Self {
+        self.min_parents = min_parents;
+        self
+    }
+
+    /// Sets [`max_parents`](Self::max_parents).
+    #[must_use]
+    pub const fn with_max_parents(mut self, max_parents: Option<usize>) -> Self {
+        self.max_parents = max_parents;
+        self
+    }
+
+    /// Sets [`first_parent_only`](Self::first_parent_only).
+    #[must_use]
+    pub const fn with_first_parent_only(mut self, first_parent_only: bool) -> Self {
+        self.first_parent_only = first_parent_only;
+        self
+    }
+
+    /// Sets [`since`](Self::since).
+    #[must_use]
+    pub const fn with_since(mut self, since: Option<i64>) -> Self {
+        self.since = since;
+        self
+    }
+
+    /// Sets [`until`](Self::until).
+    #[must_use]
+    pub const fn with_until(mut self, until: Option<i64>) -> Self {
+        self.until = until;
+        self
+    }
 }
 
 fn try_count_diff_via_stored_commit_bitmaps(

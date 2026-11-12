@@ -92,10 +92,7 @@ fn t6019_ancestry_path_upstream_cases_match_git() {
         &["--ancestry-path", &range],
         &[m.clone()],
         &[d.clone()],
-        RevListOptions {
-            ancestry_path: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_ancestry_path(true),
         "t6019 --ancestry-path D..M",
     );
 
@@ -115,10 +112,7 @@ fn t6019_ancestry_path_upstream_cases_match_git() {
         &["--ancestry-path", &range, "--", m_tag],
         &[m.clone()],
         &[d.clone(), m_tag.to_owned()],
-        RevListOptions {
-            ancestry_path: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_ancestry_path(true),
         "t6019 --ancestry-path D..M -- M.t",
     );
 
@@ -142,10 +136,7 @@ fn t6019_ancestry_path_upstream_cases_match_git() {
         &["--ancestry-path", &sym],
         &sym_pos,
         &sym_neg,
-        RevListOptions {
-            ancestry_path: true,
-            ..sym_opts
-        },
+        sym_opts.with_ancestry_path(true),
         "t6019 --ancestry-path F...I",
     );
 }
@@ -187,10 +178,7 @@ fn t6019_criss_cross_ancestry_path_empty_matches_git() {
         .rev_list(
             &[xbc.clone()],
             &[xcb.clone()],
-            &RevListOptions {
-                ancestry_path: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_ancestry_path(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -235,14 +223,12 @@ fn t6000_rev_list_unpacked_objects_matches_git() {
         .rev_list(
             &[],
             &[],
-            &RevListOptions {
-                all_refs: true,
-                objects: true,
-                no_object_names: true,
-                unpacked_only: true,
-                quiet: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default()
+                .with_all_refs(true)
+                .with_objects(true)
+                .with_no_object_names(true)
+                .with_unpacked_only(true)
+                .with_quiet(true),
             &mut NullProgress,
             &CancelToken::never(),
         )

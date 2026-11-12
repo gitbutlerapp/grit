@@ -327,10 +327,7 @@ fn refs_state_repo_caches_and_notes() {
             .with_ref_storage(RefStorageFormat::Reftable),
     )
     .expect("reftable init");
-    let items = vec![RefBatchItem {
-        name: "refs/heads/new".to_owned(),
-        new_oid: Some(oid),
-    }];
+    let items = vec![RefBatchItem::new("refs/heads/new".to_owned(), Some(oid))];
     let _ = verify_ref_transaction_batch_reftable(rt_repo.git_dir(), &items);
 }
 
@@ -401,23 +398,16 @@ fn porcelain_stash_tag_status_and_worktree() {
     let _ = verify_tag(&gpg, b"not a signed tag");
     let _ = repo.verify_tag(
         tag_oid,
-        &grit_lib::tree_sha256::TagVerifyOptions {
-            check_signature: false,
-            gpg: gpg.with_command_runner(repo.command_runner()),
-        },
+        &grit_lib::tree_sha256::TagVerifyOptions::new(
+            gpg.with_command_runner(repo.command_runner()),
+        )
+        .with_check_signature(false),
     );
 
     let identity = "User <u@example.com> 1700000000 +0000".to_owned();
     let _ = repo.stash().push(
-        &StashPushOptions {
-            message: Some("wip".into()),
-            include_untracked: false,
-            identity: identity.parse().expect("signature"),
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: grit_lib::stash::StashMode::default(),
-        },
+        &StashPushOptions::new(identity.parse().expect("signature"))
+            .with_message(Some("wip".into())),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     );

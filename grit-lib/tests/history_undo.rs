@@ -619,10 +619,7 @@ fn undo_after_hunk_selection_fixup_restores_the_work_tree() {
     let files = grit.index().unstaged_file_diffs(&[]).expect("diff");
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
-    let selection = HunkSelection {
-        ids: vec![ids[0].clone()],
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(vec![ids[0].clone()]);
     let plan = grit
         .history()
         .fixup(target, &fixup_opts(Some(selection.clone())))

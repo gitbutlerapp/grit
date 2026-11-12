@@ -151,10 +151,11 @@ fn stage_file_replaced_by_directory_on_bulk_restage_path() {
 
     let outcome = stage_all(
         tmp.path(),
-        Some(IndexStagingThresholds {
-            large_index_restage: 1,
-            parallel_tracked_restage: 1,
-        }),
+        Some(
+            IndexStagingThresholds::default()
+                .with_large_index_restage(1)
+                .with_parallel_tracked_restage(1),
+        ),
     );
     assert_eq!(outcome.removed, ["f"]);
     assert_eq!(outcome.added, ["f/i"]);

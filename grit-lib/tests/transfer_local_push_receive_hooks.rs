@@ -180,11 +180,9 @@ fn grit_push(
         .remotes()
         .push_plan_context(Some(remote), None)
         .expect("plan context");
-    let request = PushRequest {
-        remote: Some(remote.to_owned()),
-        refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
-        ..PushRequest::default()
-    };
+    let request = PushRequest::default()
+        .with_remote(Some(remote.to_owned()))
+        .with_refspecs(refspecs.iter().map(|s| (*s).to_owned()).collect());
     let plan = repo
         .remotes()
         .resolve_push(&request, &ctx)

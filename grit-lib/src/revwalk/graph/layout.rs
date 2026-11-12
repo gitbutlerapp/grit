@@ -80,11 +80,39 @@ impl GraphCharset {
 
 /// One commit row fed into [`GraphLayout`].
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct GraphCommitInput {
     /// Commit id for this row.
     pub id: ObjectId,
     /// Display parents (already rewritten); newest-first walk uses parents stored oldest-first.
     pub parents: Vec<ObjectId>,
+}
+
+impl GraphCommitInput {
+    /// Creates a [`GraphCommitInput`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `id`: commit id for this row.
+    /// - `parents`: display parents (already rewritten); newest-first walk uses parents stored oldest-first.
+    #[must_use]
+    pub fn new(id: ObjectId, parents: Vec<ObjectId>) -> Self {
+        Self { id, parents }
+    }
+
+    /// Sets [`id`](Self::id).
+    #[must_use]
+    pub const fn with_id(mut self, id: ObjectId) -> Self {
+        self.id = id;
+        self
+    }
+
+    /// Sets [`parents`](Self::parents).
+    #[must_use]
+    pub fn with_parents(mut self, parents: Vec<ObjectId>) -> Self {
+        self.parents = parents;
+        self
+    }
 }
 
 /// Kind of graph line relative to a commit entry.

@@ -260,15 +260,13 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
         anyhow::bail!("path arguments cannot be used with --hunks or --lines");
     }
     let push_paths = pathspecs.clone();
-    let options = StashPushOptions {
-        message: message.clone(),
-        include_untracked,
-        identity,
-        selection: selection.take(),
-        pathspecs,
-        dry_run,
-        mode,
-    };
+    let options = StashPushOptions::new(identity)
+        .with_message(message.clone())
+        .with_include_untracked(include_untracked)
+        .with_selection(selection.take())
+        .with_pathspecs(pathspecs)
+        .with_dry_run(dry_run)
+        .with_mode(mode);
     if dry_run {
         let preview = repo.stash().preview(&options).map_err(map_stash_error)?;
         return Ok(match preview {
@@ -343,7 +341,7 @@ pub fn run_show(
 ) -> Result<StashShowOutcome> {
     let repo = context::discover()?;
     let n = resolve_stash_index(&repo, index.as_deref())?;
-    let stash_options = StashDiffOptions { include_untracked };
+    let stash_options = StashDiffOptions::default().with_include_untracked(include_untracked);
     if patch {
         let entries = repo
             .stash()
@@ -448,10 +446,7 @@ pub fn run_apply(
         .stash()
         .apply_reference(
             reference,
-            &StashApplyOptions {
-                restore_index,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(restore_index),
             progress,
             &crate::interrupt::process_cancel_token(),
         )
@@ -481,10 +476,7 @@ pub fn run_pop(
         .stash()
         .pop_reference(
             reference,
-            &StashApplyOptions {
-                restore_index,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(restore_index),
             progress,
             &crate::interrupt::process_cancel_token(),
         )

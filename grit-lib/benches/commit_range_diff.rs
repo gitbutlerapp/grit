@@ -86,7 +86,7 @@ fn bench_commit_range_structured(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("line_level", label), &threads, |b, &t| {
             let repo = Repository::discover(Some(fx.root.path()), &RepositoryOptions::empty())
                 .expect("open")
-                .with_thread_policy(ThreadPolicy::with_threads_override(Some(t)));
+                .with_thread_policy(ThreadPolicy::default().with_threads_override(Some(t)));
             b.iter(|| {
                 black_box(
                     repo.diff()

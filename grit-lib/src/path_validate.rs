@@ -56,6 +56,7 @@ pub enum PathValidationKind {
 
 /// Whether NTFS and HFS+ spelling protections apply (from `core.protectNTFS` / `core.protectHFS`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
 pub struct ProtectOptions {
     /// Reject NTFS `.git` spellings, short names, `\\` segments, and `:` streams.
     pub protect_ntfs: bool,
@@ -94,6 +95,20 @@ impl ProtectOptions {
             protect_ntfs: true,
             protect_hfs: true,
         }
+    }
+
+    /// Sets [`protect_ntfs`](Self::protect_ntfs).
+    #[must_use]
+    pub const fn with_protect_ntfs(mut self, protect_ntfs: bool) -> Self {
+        self.protect_ntfs = protect_ntfs;
+        self
+    }
+
+    /// Sets [`protect_hfs`](Self::protect_hfs).
+    #[must_use]
+    pub const fn with_protect_hfs(mut self, protect_hfs: bool) -> Self {
+        self.protect_hfs = protect_hfs;
+        self
     }
 }
 

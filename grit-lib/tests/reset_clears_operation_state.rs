@@ -119,15 +119,8 @@ fn conflicted_merge_repo() -> (tempfile::TempDir, Repository, ObjectId) {
 }
 
 fn pick_req(commits: Vec<ObjectId>) -> ReplaySequenceRequest {
-    ReplaySequenceRequest {
-        commits,
-        direction: ReplayDirection::Pick,
-        committer: test_ident(),
-        options: ReplayOptions {
-            empty: ReplayEmptyPolicy::Stop,
-            ..ReplayOptions::default()
-        },
-    }
+    ReplaySequenceRequest::new(commits, ReplayDirection::Pick, test_ident())
+        .with_options(ReplayOptions::default())
 }
 
 fn conflicted_pick_repo() -> (tempfile::TempDir, Repository, ObjectId) {

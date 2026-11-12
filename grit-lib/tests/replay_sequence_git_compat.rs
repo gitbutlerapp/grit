@@ -188,21 +188,21 @@ fn head_tree_hex(root: &Path) -> String {
 }
 
 fn pick_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceRequest {
-    ReplaySequenceRequest {
+    ReplaySequenceRequest::new(
         commits,
-        direction: ReplayDirection::Pick,
-        committer: IDENT.parse().expect("IDENT"),
-        options: opts,
-    }
+        ReplayDirection::Pick,
+        IDENT.parse().expect("IDENT"),
+    )
+    .with_options(opts)
 }
 
 fn revert_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceRequest {
-    ReplaySequenceRequest {
+    ReplaySequenceRequest::new(
         commits,
-        direction: ReplayDirection::Revert,
-        committer: IDENT.parse().expect("IDENT"),
-        options: opts,
-    }
+        ReplayDirection::Revert,
+        IDENT.parse().expect("IDENT"),
+    )
+    .with_options(opts)
 }
 
 #[test]

@@ -105,12 +105,7 @@ fn snapshot_tree(root: &Path) -> Vec<u8> {
 fn replay_pick(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result<ReplayOutcome> {
     replay_commit(
         repo,
-        &ReplayRequest {
-            commit,
-            direction: ReplayDirection::Pick,
-            committer: IDENT.parse().expect("IDENT"),
-            message_override: None,
-        },
+        &ReplayRequest::new(commit, ReplayDirection::Pick, IDENT.parse().expect("IDENT")),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -119,12 +114,11 @@ fn replay_pick(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result<R
 fn replay_revert(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result<ReplayOutcome> {
     replay_commit(
         repo,
-        &ReplayRequest {
+        &ReplayRequest::new(
             commit,
-            direction: ReplayDirection::Revert,
-            committer: IDENT.parse().expect("IDENT"),
-            message_override: None,
-        },
+            ReplayDirection::Revert,
+            IDENT.parse().expect("IDENT"),
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

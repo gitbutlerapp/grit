@@ -217,12 +217,9 @@ fn format_object_lines(out: &mut String, objects: &[(ObjectId, String)]) {
 
 /// Walk all refs and print reachable objects (`rev-list --objects --all`).
 pub fn rev_list_objects(repo: &Repository) -> Result<()> {
-    let opts = RevListOptions {
-        all_refs: true,
-        objects: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_all_refs(true)
+        .with_objects(true);
     let result = repo
         .odb()
         .with_pack_read_context(|| {
@@ -247,11 +244,7 @@ pub fn rev_list_objects(repo: &Repository) -> Result<()> {
 /// Last `limit` commits with unified diffs (work matched to `git log -p -n`).
 pub fn log_patch(repo: &Repository, limit: usize) -> Result<()> {
     repo.odb().with_pack_read_context(|| {
-        let opts = RevListOptions {
-            max_count: Some(limit),
-            use_commit_graph: true,
-            ..Default::default()
-        };
+        let opts = RevListOptions::default().with_max_count(Some(limit));
         let result = repo
             .revwalk()
             .rev_list(
@@ -344,12 +337,9 @@ fn author_filter(pattern: &str) -> Result<Arc<grit_lib::revwalk::CommitFilter>> 
 
 /// `rev-list --count --author=<pattern> HEAD`.
 pub fn rev_list_count_author_head(repo: &Repository, author: &str) -> Result<()> {
-    let opts = RevListOptions {
-        count: true,
-        commit_filter: Some(author_filter(author)?),
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_count(true)
+        .with_commit_filter(Some(author_filter(author)?));
     let result = repo
         .revwalk()
         .rev_list(
@@ -366,12 +356,9 @@ pub fn rev_list_count_author_head(repo: &Repository, author: &str) -> Result<()>
 
 /// First `--max-count` commits on `HEAD` with `--author`.
 pub fn rev_list_author_n_head(repo: &Repository, author: &str, max_count: usize) -> Result<()> {
-    let opts = RevListOptions {
-        max_count: Some(max_count),
-        commit_filter: Some(author_filter(author)?),
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_max_count(Some(max_count))
+        .with_commit_filter(Some(author_filter(author)?));
     let result = repo
         .revwalk()
         .rev_list(
@@ -390,10 +377,7 @@ pub fn rev_list_author_n_head(repo: &Repository, author: &str, max_count: usize)
 pub fn rev_list_head(repo: &Repository) -> Result<()> {
     use std::io::Write;
 
-    let opts = RevListOptions {
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default();
     let result = repo
         .revwalk()
         .rev_list(
@@ -413,11 +397,7 @@ pub fn rev_list_head(repo: &Repository) -> Result<()> {
 }
 
 pub fn rev_list_count_head(repo: &Repository) -> Result<()> {
-    let opts = RevListOptions {
-        count: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_count(true);
     let result = repo
         .revwalk()
         .rev_list(
@@ -591,12 +571,9 @@ fn split_identity(identity: &str) -> (String, String, String, String) {
 
 /// `rev-list --count --all` (commit count only).
 pub fn rev_list_count(repo: &Repository) -> Result<()> {
-    let opts = RevListOptions {
-        all_refs: true,
-        count: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_all_refs(true)
+        .with_count(true);
     let result = repo
         .revwalk()
         .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
@@ -608,14 +585,11 @@ pub fn rev_list_count(repo: &Repository) -> Result<()> {
 
 /// `rev-list --count --objects --all --use-bitmap-index`.
 pub fn rev_list_count_objects(repo: &Repository) -> Result<()> {
-    let opts = RevListOptions {
-        all_refs: true,
-        count: true,
-        objects: true,
-        use_bitmap_index: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_all_refs(true)
+        .with_count(true)
+        .with_objects(true)
+        .with_use_bitmap_index(true);
     let result = repo
         .odb()
         .with_pack_read_context(|| {
@@ -740,14 +714,9 @@ pub fn pack_build_all_stdout(repo: &Repository, delta_threads: usize) -> Result<
     } else {
         delta_threads.max(1)
     };
-    let opts = PackObjectsOptions {
-        build: PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
-        search_threads: None,
-        write_threads: Some(workers),
-    };
+    let opts = PackObjectsOptions::default()
+        .with_build(PackBuildOptions::default().with_delta(true))
+        .with_write_threads(Some(workers));
     let mut stdout = io::stdout().lock();
     PackObjects::new(repo.odb(), opts)
         .wants(&wants)

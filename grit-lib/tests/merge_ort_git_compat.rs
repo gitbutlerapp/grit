@@ -1398,22 +1398,13 @@ fn issue_2431_cargo_workspaces_md_tree_merge_matches_git_ort() {
         "merged blob must match git merge-tree"
     );
 
-    let merge_file_out = merge(&MergeInput {
-        base: base_bytes,
-        ours: ours_bytes,
-        theirs: theirs_bytes,
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor: MergeFavor::None,
-        style: ConflictStyle::Merge,
-        marker_size: 7,
-        diff_algorithm: None,
-        ignore_all_space: false,
-        ignore_space_change: false,
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: false,
-    })
+    let merge_file_out = merge(
+        &MergeInput::new(base_bytes, ours_bytes, theirs_bytes)
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_marker_size(7),
+    )
     .expect("merge-file path");
     assert!(
         merge_file_out.conflicts > 0,

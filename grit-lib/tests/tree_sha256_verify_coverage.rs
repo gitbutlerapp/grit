@@ -16,10 +16,10 @@ fn public_tag_verify_types() {
     let _ = (
         TREE_SHA256_HEADER,
         TREE_SHA256_EXCLUDED_HEADER,
-        TagVerifyOptions {
-            check_signature: false,
-            gpg: GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
-        },
+        TagVerifyOptions::new(
+            GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
+        )
+        .with_check_signature(false),
         TagVerification::new(SignatureVerdict::NotChecked, None, vec![]),
         {
             let mut verdict = TreeSha256Verdict::new(
@@ -44,10 +44,10 @@ fn public_tag_verify_types() {
     let _ = verify_tag(
         &repo,
         "0000000000000000000000000000000000000001".parse().unwrap(),
-        &TagVerifyOptions {
-            check_signature: false,
-            gpg: GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
-        },
+        &TagVerifyOptions::new(
+            GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
+        )
+        .with_check_signature(false),
     );
     let _ = Repository::discover(Some(dir.path()), &RepositoryOptions::empty());
 }
@@ -56,10 +56,10 @@ fn public_tag_verify_types() {
 fn public_verify_tag_by_name() {
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &grit_lib::repo::InitOptions::default()).unwrap();
-    let options = TagVerifyOptions {
-        check_signature: false,
-        gpg: GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
-    };
+    let options = TagVerifyOptions::new(
+        GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
+    )
+    .with_check_signature(false);
     let err = repo.tags().verify("missing", &options).unwrap_err();
     assert!(matches!(
         err,

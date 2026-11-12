@@ -37,9 +37,19 @@ pub struct AuthorGroup {
 
 /// Options for [`RevWalk::group_by_author`] and [`RevWalk::group_by_author_in_walk`].
 #[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
 pub struct GroupByAuthorOptions {
     /// When true, omit per-commit oid lists (counts only; faster for `--count`).
     pub count_only: bool,
+}
+
+impl GroupByAuthorOptions {
+    /// Sets [`count_only`](Self::count_only).
+    #[must_use]
+    pub const fn with_count_only(mut self, count_only: bool) -> Self {
+        self.count_only = count_only;
+        self
+    }
 }
 
 impl RevWalk<'_> {

@@ -1260,7 +1260,7 @@ impl<'a> CheckoutClient<'a> {
         if let Some(body) = body {
             request = request
                 .header("Content-Type", "application/json")
-                .body(body);
+                .with_body(body);
         }
         let response = self.http.send(&request)?;
         let status = response.status;

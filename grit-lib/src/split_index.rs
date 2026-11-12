@@ -493,6 +493,7 @@ fn filetime_set_to_now(_path: &Path) -> io::Result<()> {
 
 /// Request from `update-index` for the next index write.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct WriteSplitIndexRequest {
     /// `Some(true)` / `Some(false)` for `--[no-]split-index`; `None` uses config only.
     pub explicit: Option<bool>,
@@ -516,6 +517,13 @@ impl WriteSplitIndexRequest {
                     || matches!(split_index_config(cfg), SplitIndexConfig::Enabled)
             }
         }
+    }
+
+    /// Sets [`explicit`](Self::explicit).
+    #[must_use]
+    pub const fn with_explicit(mut self, explicit: Option<bool>) -> Self {
+        self.explicit = explicit;
+        self
     }
 }
 

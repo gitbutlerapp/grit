@@ -20,6 +20,7 @@ type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
 /// Mutable ref + reflog state used to simulate or apply a transaction batch.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct RefBatchState {
     /// Stored ref values keyed by full ref name.
     pub refs: BTreeMap<String, RawRef>,
@@ -35,6 +36,20 @@ impl RefBatchState {
             refs: self.refs.clone(),
             reflogs: self.reflogs.clone(),
         }
+    }
+
+    /// Sets [`refs`](Self::refs).
+    #[must_use]
+    pub fn with_refs(mut self, refs: BTreeMap<String, RawRef>) -> Self {
+        self.refs = refs;
+        self
+    }
+
+    /// Sets [`reflogs`](Self::reflogs).
+    #[must_use]
+    pub fn with_reflogs(mut self, reflogs: BTreeMap<String, Vec<ReflogEntry>>) -> Self {
+        self.reflogs = reflogs;
+        self
     }
 }
 

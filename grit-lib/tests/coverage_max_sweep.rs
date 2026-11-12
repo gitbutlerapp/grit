@@ -103,16 +103,14 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
         OrderingMode::AuthorDateWalk,
         OrderingMode::AuthorDateTopo,
     ] {
-        let opts = RevListOptions {
-            ordering,
-            paths: vec!["a.txt".into(), "dir/".into()],
-            first_parent: ordering == OrderingMode::Topo,
-            simplify_merges: true,
-            full_history: true,
-            objects: true,
-            max_count: Some(64),
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_ordering(ordering)
+            .with_paths(vec!["a.txt".into(), "dir/".into()])
+            .with_first_parent(ordering == OrderingMode::Topo)
+            .with_simplify_merges(true)
+            .with_full_history(true)
+            .with_objects(true)
+            .with_max_count(Some(64));
         let _ = repo.revwalk().rev_list(
             &[String::from("main")],
             &[],

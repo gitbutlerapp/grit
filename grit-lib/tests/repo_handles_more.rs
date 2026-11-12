@@ -55,15 +55,8 @@ fn handle_stash_roundtrip_with_git() {
     let repo = open_grit(dir.path());
     repo.stash()
         .push(
-            &StashPushOptions {
-                message: Some("handle stash".into()),
-                include_untracked: false,
-                identity: IDENT.parse().expect("signature"),
-                selection: None,
-                pathspecs: Vec::new(),
-                dry_run: false,
-                mode: StashMode::default(),
-            },
+            &StashPushOptions::new(IDENT.parse().expect("signature"))
+                .with_message(Some("handle stash".into())),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -97,10 +90,7 @@ fn git_stash_applies_via_handle() {
         .stash()
         .apply(
             0,
-            &StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(true),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )
@@ -131,11 +121,7 @@ fn handle_notes_roundtrip_with_git() {
             &notes_ref,
             &commit,
             b"grit handle note\n",
-            &NotesWriteOptions {
-                message: "add".into(),
-                committer: IDENT.parse().expect("signature"),
-                author: None,
-            },
+            &NotesWriteOptions::new("add", IDENT.parse().expect("signature")),
             false,
         )
         .expect("add");
@@ -257,15 +243,10 @@ fn handle_worktree_add_matches_git_porcelain() {
     let wt_path = dir.path().join("linked");
     let repo = open_grit(dir.path());
     repo.worktrees()
-        .add(&grit_lib::worktree::AddLinkedWorktreeOptions {
-            path: wt_path.clone(),
-            branch: Some(WorktreeBranch::Create("feat".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &grit_lib::worktree::AddLinkedWorktreeOptions::new(wt_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat".into()))),
+        )
         .expect("add");
 
     let porcelain = git_cmd(dir.path(), &["worktree", "list", "--porcelain"]);
@@ -286,22 +267,15 @@ fn handle_worktree_lock_visible_to_git() {
     let wt_path = dir.path().join("linked");
     let repo = open_grit(dir.path());
     repo.worktrees()
-        .add(&grit_lib::worktree::AddLinkedWorktreeOptions {
-            path: wt_path.clone(),
-            branch: Some(WorktreeBranch::Create("side".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &grit_lib::worktree::AddLinkedWorktreeOptions::new(wt_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("side".into()))),
+        )
         .expect("add");
     repo.worktrees()
         .lock(
             &wt_path,
-            &LockWorktreeOptions {
-                reason: Some("hold".into()),
-            },
+            &LockWorktreeOptions::default().with_reason(Some("hold".into())),
         )
         .expect("lock");
     let porcelain = git_cmd(dir.path(), &["worktree", "list", "--porcelain"]);
@@ -321,22 +295,15 @@ fn handle_worktree_unlock_visible_to_git() {
     let wt_path = dir.path().join("linked");
     let repo = open_grit(dir.path());
     repo.worktrees()
-        .add(&grit_lib::worktree::AddLinkedWorktreeOptions {
-            path: wt_path.clone(),
-            branch: Some(WorktreeBranch::Create("side".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &grit_lib::worktree::AddLinkedWorktreeOptions::new(wt_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("side".into()))),
+        )
         .expect("add");
     repo.worktrees()
         .lock(
             &wt_path,
-            &LockWorktreeOptions {
-                reason: Some("hold".into()),
-            },
+            &LockWorktreeOptions::default().with_reason(Some("hold".into())),
         )
         .expect("lock");
     repo.worktrees().unlock(&wt_path).expect("unlock");
@@ -485,11 +452,7 @@ fn handle_notes_add_rejects_invalid_existing_notes_ref() {
             &NotesRef::commits(),
             &commit,
             b"note\n",
-            &NotesWriteOptions {
-                message: "add".into(),
-                committer: IDENT.parse().expect("signature"),
-                author: None,
-            },
+            &NotesWriteOptions::new("add", IDENT.parse().expect("signature")),
             false,
         )
         .expect_err("must not write on corrupt notes ref");

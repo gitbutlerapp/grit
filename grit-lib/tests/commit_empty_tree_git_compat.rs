@@ -120,10 +120,7 @@ fn grit_remove_everything_commit_git_fsck_clean() {
 
     remove_paths(
         &repo,
-        &RemoveOptions {
-            pathspecs: vec!["a".into()],
-            ..RemoveOptions::default()
-        },
+        &RemoveOptions::default().with_pathspecs(vec!["a".into()]),
         &grit_lib::progress::CancelToken::never(),
     )
     .expect("rm a");

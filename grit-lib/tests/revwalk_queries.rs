@@ -97,10 +97,7 @@ fn revs_matches_git_rev_list() {
         &["--first-parent", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            first_parent: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_first_parent(true),
         "first-parent main",
     );
 
@@ -1100,11 +1097,9 @@ fn exclude_first_parent_only_keeps_second_parent_ancestry_of_exclusions() {
     let wt = hist.worktree();
     let oids = first_parent_hide_fixture(wt);
     let repo = open_grit(wt);
-    let opts = RevListOptions {
-        first_parent: true,
-        exclude_first_parent_only: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_first_parent(true)
+        .with_exclude_first_parent_only(true);
     support::assert_rev_list_commits_match_git(
         wt,
         &repo,

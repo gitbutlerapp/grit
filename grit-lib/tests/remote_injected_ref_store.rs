@@ -351,14 +351,7 @@ fn remote_prune_set_head_and_inspect_use_the_injected_store() {
 
     let offline = repo
         .remotes()
-        .inspect(
-            "origin",
-            &InspectOptions {
-                query: false,
-                limit: None,
-            },
-            None,
-        )
+        .inspect("origin", &InspectOptions::default().with_query(false), None)
         .expect("inspect offline");
     assert_eq!(offline.head_branch.as_deref(), Some("main"));
     assert_eq!(offline.branches.len(), 2);

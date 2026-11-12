@@ -222,10 +222,8 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     repo.branches()
         .delete(
             "topic",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Safe,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Safe),
         )
         .expect("delete merged topic");
 
@@ -268,15 +266,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     let stash = repo
         .stash()
         .push(
-            &StashPushOptions {
-                message: None,
-                include_untracked: false,
-                identity: IDENT_TS.parse().expect("signature"),
-                selection: None,
-                pathspecs: Vec::new(),
-                dry_run: false,
-                mode: Default::default(),
-            },
+            &StashPushOptions::new(IDENT_TS.parse().expect("signature")),
             &mut NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

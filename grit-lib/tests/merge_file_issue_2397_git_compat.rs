@@ -82,12 +82,11 @@ fn issue_2397_pick_predict_and_apply_stop_on_content_conflict() {
     assert_ne!(main_oid, pick_oid);
 
     let repo = open_repo(root.path());
-    let req = ReplaySequenceRequest {
-        commits: vec![pick_oid],
-        direction: ReplayDirection::Pick,
-        committer: IDENT.parse().expect("IDENT"),
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(
+        vec![pick_oid],
+        ReplayDirection::Pick,
+        IDENT.parse().expect("IDENT"),
+    );
 
     let prediction = predict_replay_sequence(&repo, &req).expect("predict");
     match prediction {

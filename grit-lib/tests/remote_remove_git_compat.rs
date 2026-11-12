@@ -106,7 +106,7 @@ fn assert_twin_parity(seed: &Path) {
 
     open(&grit_dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: false })
+        .remove("origin", RemoveOptions::default())
         .expect("grit remove");
     git(&git_dir, &["remote", "remove", "origin"]);
 
@@ -191,7 +191,7 @@ fn remove_does_not_delete_non_remote_tracking_destinations() {
 
     open(&grit_dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: false })
+        .remove("origin", RemoveOptions::default())
         .expect("grit remove");
     git(&git_dir, &["remote", "remove", "origin"]);
 
@@ -218,7 +218,7 @@ fn remove_clears_pushremote_branch_config() {
 
     open(&grit_dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: false })
+        .remove("origin", RemoveOptions::default())
         .expect("grit remove");
     git(&git_dir, &["remote", "remove", "origin"]);
 
@@ -241,7 +241,7 @@ fn remove_dry_run_changes_nothing() {
 
     open(dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: true })
+        .remove("origin", RemoveOptions::default().with_dry_run(true))
         .expect("dry run");
 
     assert_eq!(git_config_local(dir), cfg_before);
@@ -254,7 +254,7 @@ fn remove_keeps_refs_shared_with_other_remote() {
     let dir = seed.path();
     open(dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: false })
+        .remove("origin", RemoveOptions::default())
         .expect("remove");
     assert!(
         git_cmd(&["show-ref", "--verify", "-q", "refs/remotes/upstream/shared"])
@@ -289,7 +289,7 @@ fn remove_clears_push_default() {
     let dir = seed.path();
     open(dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: false })
+        .remove("origin", RemoveOptions::default())
         .expect("remove");
     assert!(
         !git_cmd(&["config", "--get", "remote.pushDefault"])
@@ -340,7 +340,7 @@ fn remove_with_only_negative_fetch_does_not_invent_default_refspec() {
 
     open(&grit_dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: false })
+        .remove("origin", RemoveOptions::default())
         .expect("grit remove");
     git(&git_dir, &["remote", "remove", "origin"]);
 
@@ -425,7 +425,7 @@ fn remove_many_packed_and_loose_tracking_refs_matches_git() {
     let (_git_root, git_dir) = copy_seed(repo, "git");
     let removal = open(&grit_dir)
         .remotes()
-        .remove("origin", RemoveOptions { dry_run: false })
+        .remove("origin", RemoveOptions::default())
         .expect("grit remove");
     git(&git_dir, &["remote", "remove", "origin"]);
 

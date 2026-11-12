@@ -520,12 +520,7 @@ fn pick_copy_gets_new_change_id_not_source() {
 
     let outcome = replay_commit(
         &repo,
-        &ReplayRequest {
-            commit: source_oid,
-            direction: ReplayDirection::Pick,
-            committer: ident(),
-            message_override: None,
-        },
+        &ReplayRequest::new(source_oid, ReplayDirection::Pick, ident()),
         &mut NullProgress,
         &CancelToken::never(),
     )
@@ -586,12 +581,7 @@ fn revert_gets_new_change_id() {
 
     let outcome = replay_commit(
         &repo,
-        &ReplayRequest {
-            commit: reverted,
-            direction: ReplayDirection::Revert,
-            committer: ident(),
-            message_override: None,
-        },
+        &ReplayRequest::new(reverted, ReplayDirection::Revert, ident()),
         &mut NullProgress,
         &CancelToken::never(),
     )

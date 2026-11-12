@@ -151,15 +151,10 @@ fn assert_refused_by_foreign_lock<T: std::fmt::Debug>(
 }
 
 fn stash_opts(mode: StashMode, include_untracked: bool, pathspecs: &[&str]) -> StashPushOptions {
-    StashPushOptions {
-        message: None,
-        include_untracked,
-        identity: identity(),
-        selection: None,
-        pathspecs: pathspecs.iter().map(|s| (*s).to_owned()).collect(),
-        dry_run: false,
-        mode,
-    }
+    StashPushOptions::new(identity())
+        .with_include_untracked(include_untracked)
+        .with_pathspecs(pathspecs.iter().map(|s| (*s).to_owned()).collect())
+        .with_mode(mode)
 }
 
 fn read(root: &Path, rel: &str) -> String {

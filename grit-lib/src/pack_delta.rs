@@ -30,7 +30,7 @@ pub(crate) fn pack_delta_search_parallel_options(
     search_threads: Option<usize>,
 ) -> Result<ParallelOptions> {
     let cfg = pack_config(odb)?;
-    let policy = ThreadPolicy::with_threads_override(search_threads);
+    let policy = ThreadPolicy::default().with_threads_override(search_threads);
     Ok(policy.try_resolve(ParallelOp::PackDeltaSearch, &cfg)?)
 }
 
@@ -93,7 +93,7 @@ pub(crate) fn pack_write_parallel_options(
     write_threads: Option<usize>,
 ) -> Result<ParallelOptions> {
     let cfg = pack_config(odb)?;
-    let policy = ThreadPolicy::with_threads_override(write_threads);
+    let policy = ThreadPolicy::default().with_threads_override(write_threads);
     Ok(policy.try_resolve(ParallelOp::PackWrite, &cfg)?)
 }
 

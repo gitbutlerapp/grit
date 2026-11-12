@@ -30,14 +30,8 @@ fn verify_batch_rejects_prefix_pair_in_same_transaction() {
     .expect("init");
     let git_dir = dir.path().join(".git");
     let items = vec![
-        RefBatchItem {
-            name: "refs/heads/parent".into(),
-            new_oid: Some(oid(1)),
-        },
-        RefBatchItem {
-            name: "refs/heads/parent/child".into(),
-            new_oid: Some(oid(2)),
-        },
+        RefBatchItem::new("refs/heads/parent", Some(oid(1))),
+        RefBatchItem::new("refs/heads/parent/child", Some(oid(2))),
     ];
     let err = verify_ref_transaction_batch(&git_dir, &items).unwrap_err();
     assert!(matches!(err, RefnameUnavailable::SameBatch { .. }));

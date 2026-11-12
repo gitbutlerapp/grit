@@ -34,15 +34,7 @@ fn bench_frontier(c: &mut Criterion) {
     }
     let want = write_commit(&odb, tree, parent, 1);
     let empty = HashSet::new();
-    let opts = PackEnumerateOptions {
-        filter: None,
-        shallow_grafts: &empty,
-        have_shallow_grafts: None,
-        use_bitmaps: false,
-        exclude_objects: None,
-        peer_odb: None,
-        have_boundary: HaveBoundary::TipsOnly,
-    };
+    let opts = PackEnumerateOptions::new(&empty).with_have_boundary(HaveBoundary::TipsOnly);
     let selection = enumerate_pack_objects(&odb, &[want], &haves, &opts).expect("selection");
     assert_eq!(selection.send, [want]);
     c.bench_function("send_pack/backdated_want_1000_haves", |b| {

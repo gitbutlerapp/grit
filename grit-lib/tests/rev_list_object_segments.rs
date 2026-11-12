@@ -69,11 +69,7 @@ fn rev_list_object_segments_one_per_commit_plus_roots_trailer() {
     .expect("tree2");
     let child = write_commit(repo.odb(), tree2, &[root], "child").expect("child");
 
-    let opts = RevListOptions {
-        objects: true,
-        in_commit_order: false,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_objects(true);
     let result = repo
         .revwalk()
         .rev_list(

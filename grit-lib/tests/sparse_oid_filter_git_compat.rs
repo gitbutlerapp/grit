@@ -169,12 +169,10 @@ fn grit_object_ids(bare: &Path, patterns: &str) -> HashSet<ObjectId> {
     let filter = ObjectFilter::parse(&format!("sparse:oid={oid}")).unwrap();
     let repo = Repository::open(bare, &RepositoryOptions::empty()).unwrap();
     let head = git(&["rev-parse", "HEAD"], bare);
-    let opts = RevListOptions {
-        objects: true,
-        quiet: true,
-        filter: Some(filter),
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_quiet(true)
+        .with_filter(Some(filter));
     let result = repo
         .revwalk()
         .rev_list(
@@ -277,12 +275,10 @@ fn grit_blob_paths(bare: &Path, patterns: &str) -> Vec<String> {
     let filter = ObjectFilter::parse(&format!("sparse:oid={oid}")).unwrap();
     let repo = Repository::open(bare, &RepositoryOptions::empty()).unwrap();
     let head = git(&["rev-parse", "HEAD"], bare);
-    let opts = RevListOptions {
-        objects: true,
-        quiet: true,
-        filter: Some(filter),
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_quiet(true)
+        .with_filter(Some(filter));
     let result = repo
         .revwalk()
         .rev_list(

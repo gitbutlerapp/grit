@@ -70,7 +70,7 @@ Optional `pack.windowMemory` caps sliding-window retention during delta search (
 | **`1`** | Force serial pools (`threads = 1`) regardless of `index.threads` / `pack.threads` / `checkout.workers` (non-Windows checkout). |
 | **`N > 1`** | Cap workers at **`min(N, available CPUs)`** for index/pack/diff operations. Checkout honors the cap when the entry threshold is met; on **Windows**, parallel checkout requires an explicit **`checkout.workers`** (including **`0`** for auto), not an unset key. |
 
-Embedders pass the same semantics via [`ThreadPolicy::with_threads_override`](rustdoc:grit_lib::parallel::ThreadPolicy::with_threads_override).
+Embedders pass the same semantics via [`ThreadPolicy::with_threads_override`](rustdoc:grit_lib::parallel::ThreadPolicy::with_threads_override), for example `ThreadPolicy::default().with_threads_override(Some(4))`.
 
 ## Determinism
 

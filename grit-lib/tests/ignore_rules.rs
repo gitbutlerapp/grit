@@ -996,12 +996,10 @@ fn assert_clean_ignored_matches_git(home: &Path, root: &Path) {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                scope: CleanScope::OnlyIgnored,
-                dry_run: true,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_scope(CleanScope::OnlyIgnored)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("clean dry run");

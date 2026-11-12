@@ -65,11 +65,7 @@ pub fn git_index_pack_strict(pack_path: &std::path::Path) {
 }
 
 pub fn pack_options(use_bitmaps: bool) -> PackBuildOptions {
-    PackBuildOptions {
-        reuse_objects: true,
-        use_bitmaps,
-        ..PackBuildOptions::default()
-    }
+    PackBuildOptions::default().with_use_bitmaps(use_bitmaps)
 }
 
 pub fn stream_blob_to_sink(

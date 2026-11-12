@@ -223,15 +223,11 @@ fn worktree_add_runs_post_checkout_from_linked_worktree() {
     let linked_path = fx.wt().join("linked");
 
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked_path.clone(),
-            branch: Some(WorktreeBranch::Create("wt".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("wt".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add worktree");
     let null = "0".repeat(40);
     let canonical = linked_path.canonicalize().expect("canonical");
@@ -246,15 +242,11 @@ fn worktree_add_runs_post_checkout_from_linked_worktree() {
 
     let detached = fx.wt().join("detached");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: detached.clone(),
-            branch: Some(WorktreeBranch::Detach),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(detached.clone())
+                .with_branch(Some(WorktreeBranch::Detach))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("detach worktree");
     let detached_canonical = detached.canonicalize().expect("canonical");
     assert_eq!(
@@ -275,28 +267,20 @@ fn worktree_add_no_checkout_or_orphan_skips_post_checkout() {
     let repo = fx.repo();
 
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: fx.wt().join("bare-tree"),
-            branch: Some(WorktreeBranch::Create("nc".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: true,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(fx.wt().join("bare-tree"))
+                .with_branch(Some(WorktreeBranch::Create("nc".into())))
+                .with_start_point(Some("HEAD".into()))
+                .with_no_checkout(true),
+        )
         .expect("no checkout");
     assert!(fx.take_log().is_empty());
 
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: fx.wt().join("orphan"),
-            branch: Some(WorktreeBranch::Orphan("empty".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(fx.wt().join("orphan"))
+                .with_branch(Some(WorktreeBranch::Orphan("empty".into()))),
+        )
         .expect("orphan");
     assert!(fx.take_log().is_empty());
 }
@@ -310,15 +294,11 @@ fn worktree_add_failing_post_checkout_still_succeeds() {
     let linked_path = fx.wt().join("linked");
 
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked_path.clone(),
-            branch: Some(WorktreeBranch::Create("wt".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("wt".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add despite hook failure");
     assert!(linked_path.join("f").is_file());
 }
@@ -332,15 +312,11 @@ fn worktree_add_post_checkout_matches_git() {
 
     let grit_path = fx.wt().join("grit-wt");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: grit_path.clone(),
-            branch: Some(WorktreeBranch::Create("grit-branch".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(grit_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("grit-branch".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("grit add");
     let grit_line = fx.take_log().pop().expect("grit hook line");
 

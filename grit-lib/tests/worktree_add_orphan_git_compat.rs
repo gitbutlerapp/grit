@@ -43,15 +43,10 @@ fn init_repo(tmp: &TempDir, with_commit: bool) -> PathBuf {
 fn add_orphan(main: &Path, wt: &Path, branch: &str) -> grit_lib::error::Result<()> {
     let repo = Repository::discover(Some(main), &RepositoryOptions::empty()).unwrap();
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.to_owned(),
-            branch: Some(WorktreeBranch::Orphan(branch.to_owned())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.to_owned())
+                .with_branch(Some(WorktreeBranch::Orphan(branch.to_owned()))),
+        )
         .map(|_| ())
 }
 

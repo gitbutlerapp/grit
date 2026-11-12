@@ -2,22 +2,15 @@
 use grit_lib::diff::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
 
 fn main() -> grit_lib::error::Result<()> {
-    let result = merge(&MergeInput {
-        base: b"base\n",
-        ours: b"ours\n",
-        theirs: b"theirs\n",
-        label_ours: "ours",
-        label_base: "base",
-        label_theirs: "theirs",
-        favor: MergeFavor::None,
-        style: ConflictStyle::Merge,
-        marker_size: 7,
-        diff_algorithm: None,
-        ignore_all_space: false,
-        ignore_space_change: false,
-        ignore_space_at_eol: false,
-        ignore_cr_at_eol: false,
-    })?;
+    let result = merge(
+        &MergeInput::new(b"base\n", b"ours\n", b"theirs\n")
+            .with_label_ours("ours")
+            .with_label_base("base")
+            .with_label_theirs("theirs")
+            .with_favor(MergeFavor::None)
+            .with_style(ConflictStyle::Merge)
+            .with_marker_size(7),
+    )?;
 
     println!("{}", String::from_utf8_lossy(&result.content));
     Ok(())

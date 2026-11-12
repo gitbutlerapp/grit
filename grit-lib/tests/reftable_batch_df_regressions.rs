@@ -64,14 +64,8 @@ fn reftable_verify_batch_rejects_existing_ancestor_with_unrelated_sibling() {
     .expect("parent");
 
     let items = vec![
-        RefBatchItem {
-            name: "refs/heads/parent/child".into(),
-            new_oid: Some(oid(2)),
-        },
-        RefBatchItem {
-            name: "refs/heads/unrelated".into(),
-            new_oid: Some(oid(3)),
-        },
+        RefBatchItem::new("refs/heads/parent/child", Some(oid(2))),
+        RefBatchItem::new("refs/heads/unrelated", Some(oid(3))),
     ];
     let err = verify_ref_transaction_batch(&git_dir, &items).unwrap_err();
     assert!(matches!(
@@ -167,10 +161,7 @@ fn reftable_verify_batch_allows_parent_after_deleted_descendant() {
     )
     .expect("delete child");
 
-    let items = vec![RefBatchItem {
-        name: "refs/heads/topic".into(),
-        new_oid: Some(oid(0x32)),
-    }];
+    let items = vec![RefBatchItem::new("refs/heads/topic", Some(oid(0x32)))];
     verify_ref_transaction_batch(&git_dir, &items).expect("parent create allowed");
 
     update_refs(

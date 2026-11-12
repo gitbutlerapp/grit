@@ -110,59 +110,51 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
     ];
     for ordering in orderings {
         for use_graph in [false, true] {
-            let opts = RevListOptions {
-                ordering,
-                all_refs: use_graph,
-                first_parent: ordering == OrderingMode::Topo,
-                ancestry_path: true,
-                ancestry_path_bottoms: vec![tip],
-                simplify_by_decoration: true,
-                simplify_by_decoration_oids: deco.clone(),
-                full_history: true,
-                simplify_merges: true,
-                preserve_simplify_merges_graph_merges: true,
-                show_pulls: true,
-                sparse: true,
-                parent_rewrite: true,
-                paths: vec!["tracked.txt".into()],
-                objects: true,
-                no_object_names: false,
-                boundary: true,
-                left_right: true,
-                left_right_explicit: true,
-                left_only: false,
-                right_only: false,
-                cherry_mark: true,
-                cherry_pick: false,
-                min_parents: Some(1),
-                max_parents: Some(3),
-                symmetric_left: Some(tip),
-                symmetric_right: Some(side),
-                exclude_first_parent_only: true,
-                filter: Some(ObjectFilter::Combine(vec![
+            let opts = RevListOptions::default()
+                .with_ordering(ordering)
+                .with_all_refs(use_graph)
+                .with_first_parent(ordering == OrderingMode::Topo)
+                .with_ancestry_path(true)
+                .with_ancestry_path_bottoms(vec![tip])
+                .with_simplify_by_decoration(true)
+                .with_simplify_by_decoration_oids(deco.clone())
+                .with_full_history(true)
+                .with_simplify_merges(true)
+                .with_preserve_simplify_merges_graph_merges(true)
+                .with_show_pulls(true)
+                .with_sparse(true)
+                .with_parent_rewrite(true)
+                .with_paths(vec!["tracked.txt".into()])
+                .with_objects(true)
+                .with_boundary(true)
+                .with_left_right(true)
+                .with_left_right_explicit(true)
+                .with_cherry_mark(true)
+                .with_min_parents(Some(1))
+                .with_max_parents(Some(3))
+                .with_symmetric_left(Some(tip))
+                .with_symmetric_right(Some(side))
+                .with_exclude_first_parent_only(true)
+                .with_filter(Some(ObjectFilter::Combine(vec![
                     ObjectFilter::BlobLimit(8192),
                     ObjectFilter::TreeDepth(8),
-                ])),
-                filter_raw_specs: vec!["blob:limit=8k".into(), "tree:8".into()],
-                filter_provided_objects: true,
-                filter_print_omitted: true,
-                include_reflog_entries: true,
-                include_indexed_objects: true,
-                use_commit_graph: use_graph,
-                use_commit_graph_bloom: use_graph,
-                commit_graph_read_changed_paths: use_graph,
-                use_bitmap_index: use_graph,
-                bitmap_oid_only_objects: use_graph,
-                in_commit_order: true,
-                maximal_only: false,
-                reverse: true,
-                skip: 1,
-                max_count: Some(128),
-                count: false,
-                path_graph_reorder: true,
-                ignore_missing: true,
-                ..RevListOptions::default()
-            };
+                ])))
+                .with_filter_raw_specs(vec!["blob:limit=8k".into(), "tree:8".into()])
+                .with_filter_provided_objects(true)
+                .with_filter_print_omitted(true)
+                .with_include_reflog_entries(true)
+                .with_include_indexed_objects(true)
+                .with_use_commit_graph(use_graph)
+                .with_use_commit_graph_bloom(use_graph)
+                .with_commit_graph_read_changed_paths(use_graph)
+                .with_use_bitmap_index(use_graph)
+                .with_bitmap_oid_only_objects(use_graph)
+                .with_in_commit_order(true)
+                .with_reverse(true)
+                .with_skip(1)
+                .with_max_count(Some(128))
+                .with_path_graph_reorder(true)
+                .with_ignore_missing(true);
             let _out = repo.revwalk().rev_list(
                 &[String::from("main"), String::from("side")],
                 &[],
@@ -181,23 +173,19 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
     // `git rev-list --left-right main...side -- tracked.txt` is empty here.
     let path_limited = walk.walk(
         "main...side",
-        &RevListOptions {
-            ordering: OrderingMode::AuthorDateTopo,
-            left_right: true,
-            paths: vec!["tracked.txt".into()],
-            ..RevListOptions::default()
-        },
+        &RevListOptions::default()
+            .with_ordering(OrderingMode::AuthorDateTopo)
+            .with_left_right(true)
+            .with_paths(vec!["tracked.txt".into()]),
         &mut NullProgress,
         &CancelToken::never(),
     )?;
     assert!(path_limited.commits.is_empty());
     let via_handle = walk.walk(
         "main...side",
-        &RevListOptions {
-            ordering: OrderingMode::AuthorDateTopo,
-            left_right: true,
-            ..RevListOptions::default()
-        },
+        &RevListOptions::default()
+            .with_ordering(OrderingMode::AuthorDateTopo)
+            .with_left_right(true),
         &mut NullProgress,
         &CancelToken::never(),
     )?;

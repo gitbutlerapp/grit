@@ -15,6 +15,7 @@ use crate::transfer::{match_positive, ref_excluded, tracking_refs_gone_in};
 
 /// Options for [`Remotes::inspect`](crate::repo_handles::Remotes::inspect).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct InspectOptions {
     /// When `true`, contact the remote (or read its git dir) to classify branch states.
     pub query: bool,
@@ -28,6 +29,22 @@ impl Default for InspectOptions {
             query: true,
             limit: None,
         }
+    }
+}
+
+impl InspectOptions {
+    /// Sets [`query`](Self::query).
+    #[must_use]
+    pub const fn with_query(mut self, query: bool) -> Self {
+        self.query = query;
+        self
+    }
+
+    /// Sets [`limit`](Self::limit).
+    #[must_use]
+    pub const fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
     }
 }
 

@@ -160,11 +160,9 @@ fn dry_run_lists_same_as_git_clean_nd() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: true,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("dry run");
@@ -194,11 +192,7 @@ fn force_removes_same_as_git_clean_fd() {
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("force clean");
@@ -226,12 +220,9 @@ fn include_ignored_matches_git_clean_fdx() {
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                scope: CleanScope::UntrackedAndIgnored,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_scope(CleanScope::UntrackedAndIgnored),
             &mut NullProgress,
         )
         .expect("clean -x");
@@ -266,11 +257,9 @@ fn collapsed_parent_with_nested_repo_preserves_nested_and_matches_git() {
     let preview = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: true,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("dry run");
@@ -287,11 +276,7 @@ fn collapsed_parent_with_nested_repo_preserves_nested_and_matches_git() {
 
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("force clean");
@@ -322,11 +307,7 @@ fn nested_empty_directories_removed_at_highest_level_like_git() {
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("clean");
@@ -382,11 +363,9 @@ fn collapsed_dir_preserves_ignored_files_like_git() {
     let preview = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: true,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("dry run");
@@ -403,11 +382,7 @@ fn collapsed_dir_preserves_ignored_files_like_git() {
 
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("force clean");
@@ -436,11 +411,7 @@ fn nested_repo_directory_is_untouched() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("clean");
@@ -459,14 +430,7 @@ fn directories_false_preserves_empty_parent_dir() {
 
     let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
-        .clean(
-            &CleanOptions {
-                directories: false,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
-            &mut NullProgress,
-        )
+        .clean(&CleanOptions::default(), &mut NullProgress)
         .expect("clean without -d");
 
     assert!(
@@ -519,11 +483,7 @@ fn empty_ignored_directory_preserves_collapsed_parent_like_git() {
         Repository::discover(Some(grit_root.path()), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("force clean");
@@ -557,12 +517,9 @@ fn pathspec_limits_removal() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .clean(
-            &CleanOptions {
-                pathspecs: vec!["only".to_owned()],
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_pathspecs(vec!["only".to_owned()])
+                .with_directories(true),
             &mut NullProgress,
         )
         .expect("clean scoped");
@@ -597,11 +554,9 @@ fn clean_dry_run_collapsed_dirs_match_git_on_dense_tree() {
     let grit_default: BTreeSet<String> = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("grit clean -n -d")
@@ -618,12 +573,10 @@ fn clean_dry_run_collapsed_dirs_match_git_on_dense_tree() {
     let grit_ignored: BTreeSet<String> = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                scope: CleanScope::OnlyIgnored,
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_scope(CleanScope::OnlyIgnored)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("grit clean only-ignored dry-run")
@@ -660,11 +613,9 @@ fn force_removes_non_utf8_untracked_paths_like_git() {
     let dry = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: true,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("dry run");
@@ -681,11 +632,7 @@ fn force_removes_non_utf8_untracked_paths_like_git() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("force clean");
@@ -721,11 +668,7 @@ fn force_removes_non_utf8_untracked_directory_like_git() {
     let repo = Repository::discover(Some(root.path()), &RepositoryOptions::empty()).expect("open");
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("force clean");
@@ -761,11 +704,9 @@ fn force_removes_literal_grit_pathhex_filename() {
     let dry = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: true,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("dry run");
@@ -773,11 +714,7 @@ fn force_removes_literal_grit_pathhex_filename() {
 
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: false,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default().with_directories(true),
             &mut NullProgress,
         )
         .expect("force clean");

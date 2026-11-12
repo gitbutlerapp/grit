@@ -675,7 +675,8 @@ mod tests {
         let ext_off = read_eoie_extension(body, algo).expect("EOIE");
         assert!(read_ieot_extension(body, ext_off, body.len()).is_some());
         PARALLEL_IEOT_ENTRY_LOADS.store(0, Ordering::Relaxed);
-        let ctx = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(4)));
+        let ctx =
+            IndexParseContext::from_policy(ThreadPolicy::default().with_threads_override(Some(4)));
         Index::parse(
             &bytes,
             &crate::index::IndexParseOptions::default()

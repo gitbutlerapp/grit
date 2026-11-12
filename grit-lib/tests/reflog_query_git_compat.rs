@@ -84,13 +84,7 @@ fn reflog_query_limit_matches_git() {
     let dir = repo.worktree();
     for n in [0usize, 1, 3, 100] {
         let git_idx = git_reflog_indices(dir, &["--max-count", &n.to_string()]);
-        let grit_idx = grit_indices(
-            repo.worktree(),
-            &ReflogQuery {
-                limit: Some(n),
-                ..ReflogQuery::default()
-            },
-        );
+        let grit_idx = grit_indices(repo.worktree(), &ReflogQuery::default().with_limit(Some(n)));
         assert_eq!(git_idx, grit_idx, "-n {n}");
     }
 }
@@ -109,17 +103,11 @@ fn reflog_query_since_until_matches_git() {
     for (git_args, query) in [
         (
             vec!["--since", "@1700000000"],
-            ReflogQuery {
-                since: Some(since),
-                ..ReflogQuery::default()
-            },
+            ReflogQuery::default().with_since(Some(since)),
         ),
         (
             vec!["--until", "@1750000000"],
-            ReflogQuery {
-                until: Some(until),
-                ..ReflogQuery::default()
-            },
+            ReflogQuery::default().with_until(Some(until)),
         ),
     ] {
         let git_idx = git_reflog_indices(dir, &git_args);
@@ -182,10 +170,7 @@ fn reflog_query_index_skips_unparseable_newer_line_like_git() {
     let git_idx = git_reflog_indices(repo.worktree(), &["--max-count", &limit.to_string()]);
     let grit_idx = grit_indices(
         repo.worktree(),
-        &ReflogQuery {
-            limit: Some(limit),
-            ..ReflogQuery::default()
-        },
+        &ReflogQuery::default().with_limit(Some(limit)),
     );
     assert_eq!(git_idx, grit_idx);
     assert_eq!(
@@ -208,11 +193,9 @@ fn reflog_query_grep_matches_git_log_g() {
             let git_idx = git_grep_reflog_indices(dir, pattern, n);
             let grit_idx = grit_indices(
                 repo.worktree(),
-                &ReflogQuery {
-                    limit: Some(n),
-                    grep: Some(MessageMatcher::new(pattern)),
-                    ..ReflogQuery::default()
-                },
+                &ReflogQuery::default()
+                    .with_limit(Some(n))
+                    .with_grep(Some(MessageMatcher::new(pattern))),
             );
             assert_eq!(git_idx, grit_idx, "grep={pattern} n={n}");
         }

@@ -32,10 +32,7 @@ fn rev_list_objects_v1_s1_median_under_ceiling() {
         );
     }
     let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open git.git bare");
-    let opts = RevListOptions {
-        objects: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_objects(true);
     let mut times = Vec::with_capacity(7);
     for _ in 0..7 {
         let start = Instant::now();

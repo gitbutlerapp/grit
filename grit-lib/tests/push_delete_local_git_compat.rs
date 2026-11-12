@@ -53,12 +53,10 @@ fn remote_refs(work: &Path, remote: &str) -> String {
 }
 
 fn delete_request(remote: &str, names: &[&str]) -> PushRequest {
-    PushRequest {
-        remote: Some(remote.to_owned()),
-        refspecs: names.iter().map(|s| (*s).to_owned()).collect(),
-        delete_refs: true,
-        ..PushRequest::default()
-    }
+    PushRequest::default()
+        .with_remote(Some(remote.to_owned()))
+        .with_refspecs(names.iter().map(|s| (*s).to_owned()).collect())
+        .with_delete_refs(true)
 }
 
 #[test]

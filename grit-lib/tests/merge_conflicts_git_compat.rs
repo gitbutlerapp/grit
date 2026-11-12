@@ -519,12 +519,11 @@ fn pick_sibling_dirs_a_and_a0_reports_conflicts() {
 
     let outcome = start_replay_sequence(
         &repo,
-        &ReplaySequenceRequest {
-            commits: vec![pick_oid],
-            direction: ReplayDirection::Pick,
-            committer: ident().parse().expect("committer"),
-            options: ReplayOptions::default(),
-        },
+        &ReplaySequenceRequest::new(
+            vec![pick_oid],
+            ReplayDirection::Pick,
+            ident().parse().expect("committer"),
+        ),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

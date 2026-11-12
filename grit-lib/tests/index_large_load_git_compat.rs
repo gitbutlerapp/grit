@@ -106,7 +106,8 @@ fn large_index_reports_checksum_mismatch_before_structural_errors() {
 
     assert_checksum_mismatch(Index::load(&index_path));
     for threads in [None, Some(1), Some(4)] {
-        let context = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(threads));
+        let context =
+            IndexParseContext::from_policy(ThreadPolicy::default().with_threads_override(threads));
         assert_checksum_mismatch(Index::parse(
             &bytes,
             &grit_lib::index::IndexParseOptions::default()
@@ -131,7 +132,7 @@ fn large_index_serial_thread_policy_parses_identically() {
         &grit_lib::index::IndexParseOptions::default()
             .with_hash_algo(HashAlgo::Sha1)
             .with_parse_context(IndexParseContext::from_policy(
-                ThreadPolicy::with_threads_override(Some(1)),
+                ThreadPolicy::default().with_threads_override(Some(1)),
             )),
     )
     .expect("serial parse");

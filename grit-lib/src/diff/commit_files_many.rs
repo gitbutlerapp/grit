@@ -532,10 +532,11 @@ mod tests {
         )?;
         assert_eq!(many[0].output.files, single.files);
 
-        let policy_serial = ThreadPolicy::with_threads_override(Some(1));
-        let policy_par = ThreadPolicy::with_threads_override(Some(4))
-            .min_items_override(Some(1))
-            .min_total_bytes_override(Some(0));
+        let policy_serial = ThreadPolicy::default().with_threads_override(Some(1));
+        let policy_par = ThreadPolicy::default()
+            .with_threads_override(Some(4))
+            .with_min_items_override(Some(1))
+            .with_min_total_bytes_override(Some(0));
         let tree3 = tree_with(&repo, &[("f.txt", b"c\n")]);
         let mid = write_commit(&repo, tree3, vec![child], "mid");
         let tree4 = tree_with(&repo, &[("f.txt", b"d\n")]);
@@ -619,7 +620,7 @@ mod tests {
             ),
             DiffOptions::default(),
             &config,
-            &ThreadPolicy::with_threads_override(Some(1)),
+            &ThreadPolicy::default().with_threads_override(Some(1)),
         )?;
         assert_eq!(
             only_b.into_iter().map(lines).collect::<Vec<_>>(),

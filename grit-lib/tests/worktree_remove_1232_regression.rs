@@ -88,15 +88,11 @@ fn remove_linked_worktree_with_system_inherited_autocrlf_and_crlf_worktree_file(
     let linked = root.path().join("w");
     main_repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("f".to_owned())),
-            start_point: Some("HEAD".to_owned()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("f".to_owned())))
+                .with_start_point(Some("HEAD".to_owned())),
+        )
         .expect("worktree add");
 
     std::fs::write(linked.join("new.txt"), b"new\r\n").expect("CRLF new file");

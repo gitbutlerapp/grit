@@ -42,11 +42,10 @@ fn log_decorations_cover_all_ref_namespaces() -> grit_lib::error::Result<()> {
     assert!(!map_short.is_empty());
     assert_targeted_matches_full(&repo, wt);
 
-    let filter = DecorationFilter {
-        include: vec!["refs/heads/*".into()],
-        exclude: vec!["refs/heads/topic".into()],
-        exclude_config: vec!["refs/remotes/origin/HEAD".into()],
-    };
+    let filter = DecorationFilter::default()
+        .with_include(vec!["refs/heads/*".into()])
+        .with_exclude(vec!["refs/heads/topic".into()])
+        .with_exclude_config(vec!["refs/remotes/origin/HEAD".into()]);
     assert!(filter.matches("refs/heads/main"));
     assert!(!filter.matches("refs/heads/topic"));
 

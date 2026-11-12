@@ -239,15 +239,9 @@ fn read_only_linked_worktree_metadata_on_detached_commit_names_head_lock() {
 
     let linked_wt = dir.path().join("linked");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked_wt.clone(),
-            branch: None,
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked_wt.clone()).with_start_point(Some("HEAD".into())),
+        )
         .expect("add linked worktree");
 
     let linked_repo = Repository::discover(Some(linked_wt.as_path()), &RepositoryOptions::empty())
@@ -292,15 +286,11 @@ fn linked_worktree_commit_readonly_admin_names_git_path() {
 
     let linked_wt = dir.path().join("linked");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked_wt.clone(),
-            branch: Some(WorktreeBranch::Detach),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked_wt.clone())
+                .with_branch(Some(WorktreeBranch::Detach))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add linked worktree");
 
     let linked_repo = Repository::discover(Some(linked_wt.as_path()), &RepositoryOptions::empty())

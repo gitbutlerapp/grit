@@ -111,20 +111,15 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     } else {
         read_message_input(&opts.message)?
     };
-    let req = ReplaySequenceRequest {
-        commits: sources,
-        direction: ReplayDirection::Revert,
-        committer,
-        options: ReplayOptions {
-            no_commit: opts.no_commit,
-            empty: opts.empty.into(),
-            message_override,
-            mainline: mainline_parent(opts.mainline)?,
-            favor,
-            conflict_style,
-            ..ReplayOptions::default()
-        },
-    };
+    let req = ReplaySequenceRequest::new(sources, ReplayDirection::Revert, committer).with_options(
+        ReplayOptions::default()
+            .with_no_commit(opts.no_commit)
+            .with_empty(opts.empty.into())
+            .with_message_override(message_override)
+            .with_mainline(mainline_parent(opts.mainline)?)
+            .with_favor(favor)
+            .with_conflict_style(conflict_style),
+    );
     if opts.check {
         let prediction = repo
             .merge()

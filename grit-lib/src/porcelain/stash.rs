@@ -428,6 +428,7 @@ pub struct StashPreview {
 /// [`RepositoryStash::create`](crate::repo_handles::RepositoryStash::create), and
 /// [`RepositoryStash::preview`](crate::repo_handles::RepositoryStash::preview).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct StashPushOptions {
     /// Reflog/stash message override; when set, the W commit message is `On <branch>: <msg>`.
     pub message: Option<String>,
@@ -520,11 +521,61 @@ impl StashPushOptions {
         }
         Ok(())
     }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`include_untracked`](Self::include_untracked).
+    #[must_use]
+    pub const fn with_include_untracked(mut self, include_untracked: bool) -> Self {
+        self.include_untracked = include_untracked;
+        self
+    }
+
+    /// Sets [`identity`](Self::identity).
+    #[must_use]
+    pub fn with_identity(mut self, identity: Signature) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Sets [`selection`](Self::selection).
+    #[must_use]
+    pub fn with_selection(mut self, selection: Option<HunkSelection>) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// Sets [`pathspecs`](Self::pathspecs).
+    #[must_use]
+    pub fn with_pathspecs(mut self, pathspecs: Vec<String>) -> Self {
+        self.pathspecs = pathspecs;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets [`mode`](Self::mode).
+    #[must_use]
+    pub fn with_mode(mut self, mode: StashMode) -> Self {
+        self.mode = mode;
+        self
+    }
 }
 
 /// Options for [`RepositoryStash::apply`](crate::repo_handles::RepositoryStash::apply) and
 /// [`RepositoryStash::pop`](crate::repo_handles::RepositoryStash::pop).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StashApplyOptions {
     /// Restore the stashed index parent instead of keeping the current index at touched paths.
     ///
@@ -536,11 +587,40 @@ pub struct StashApplyOptions {
     pub overwrite_identical_untracked: bool,
 }
 
+impl StashApplyOptions {
+    /// Sets [`restore_index`](Self::restore_index).
+    #[must_use]
+    pub const fn with_restore_index(mut self, restore_index: bool) -> Self {
+        self.restore_index = restore_index;
+        self
+    }
+
+    /// Sets [`overwrite_identical_untracked`](Self::overwrite_identical_untracked).
+    #[must_use]
+    pub const fn with_overwrite_identical_untracked(
+        mut self,
+        overwrite_identical_untracked: bool,
+    ) -> Self {
+        self.overwrite_identical_untracked = overwrite_identical_untracked;
+        self
+    }
+}
+
 /// Options for [`RepositoryStash::diff`](crate::repo_handles::RepositoryStash::diff).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StashDiffOptions {
     /// Include untracked files from the stash U parent (same as `git stash show -u`).
     pub include_untracked: bool,
+}
+
+impl StashDiffOptions {
+    /// Sets [`include_untracked`](Self::include_untracked).
+    #[must_use]
+    pub const fn with_include_untracked(mut self, include_untracked: bool) -> Self {
+        self.include_untracked = include_untracked;
+        self
+    }
 }
 
 /// Result of [`RepositoryStash::branch`](crate::repo_handles::RepositoryStash::branch).

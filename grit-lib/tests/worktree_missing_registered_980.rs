@@ -35,15 +35,11 @@ fn missing_registered_worktree_rejects_duplicate_add() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).expect("discover");
     let wt = root.join("w9");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("feat9".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat9".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("first add");
 
     std::fs::remove_dir_all(&wt).expect("simulate user deleting worktree dir");
@@ -55,15 +51,11 @@ fn missing_registered_worktree_rejects_duplicate_add() {
 
     let err = repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("feat10".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat10".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect_err("must not register a second admin dir");
     assert!(err.to_string().contains("already registered"));
 
@@ -75,15 +67,12 @@ fn missing_registered_worktree_rejects_duplicate_add() {
 
     let entry = repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("feat10".into())),
-            start_point: Some("HEAD".into()),
-            force: true,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat10".into())))
+                .with_start_point(Some("HEAD".into()))
+                .with_force(true),
+        )
         .expect("force add");
     assert_eq!(
         entry.head.branch_name(),
@@ -122,28 +111,21 @@ fn forced_add_keeps_stale_registration_when_validation_fails() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).expect("discover");
     let wt = root.join("w9");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("feat9".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat9".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("first add");
     std::fs::remove_dir_all(&wt).unwrap();
 
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("feat10".into())),
-            start_point: Some("no-such-revision".into()),
-            force: true,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat10".into())))
+                .with_start_point(Some("no-such-revision".into()))
+                .with_force(true),
+        )
         .expect_err("invalid revision must not drop stale registration");
 
     let admins: Vec<_> = std::fs::read_dir(main.join(".git/worktrees"))
@@ -178,15 +160,11 @@ fn forced_add_restores_stale_registration_when_checkout_fails() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).expect("discover");
     let wt = root.join("w9");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("feat9".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat9".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("first add");
     std::fs::remove_dir_all(&wt).unwrap();
 
@@ -205,15 +183,12 @@ fn forced_add_restores_stale_registration_when_checkout_fails() {
         .expect("commit");
 
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("feat10".into())),
-            start_point: Some(bad_commit.to_hex()),
-            force: true,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("feat10".into())))
+                .with_start_point(Some(bad_commit.to_hex()))
+                .with_force(true),
+        )
         .expect_err("checkout must fail on missing blob");
 
     assert!(
@@ -255,15 +230,11 @@ fn prune_drops_missing_worktree_registration() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).expect("discover");
     let wt = root.join("gone");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("side".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("side".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .unwrap();
     std::fs::remove_dir_all(&wt).unwrap();
 

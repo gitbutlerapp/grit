@@ -541,12 +541,10 @@ fn remotes_plan_a_push_and_record_its_upstream() {
         .push_plan_context(Some("origin"), None)
         .expect("context");
     assert!(ctx.remote_ref_names.contains("refs/heads/main"));
-    let request = PushRequest {
-        remote: Some("origin".to_owned()),
-        refspecs: vec!["main".to_owned()],
-        set_upstream: true,
-        ..Default::default()
-    };
+    let request = PushRequest::default()
+        .with_remote(Some("origin".to_owned()))
+        .with_refspecs(vec!["main".to_owned()])
+        .with_set_upstream(true);
     let plan = local
         .remotes()
         .resolve_push(&request, &ctx)

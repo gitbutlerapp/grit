@@ -256,7 +256,7 @@ fn local_clone_checkout_honors_thread_policy_on_repository() {
     );
 
     let dest = tempfile::tempdir().expect("dest");
-    let policy = ThreadPolicy::with_threads_override(Some(1));
+    let policy = ThreadPolicy::default().with_threads_override(Some(1));
     let outcome = clone_repo(
         CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
             .with_thread_policy(policy),

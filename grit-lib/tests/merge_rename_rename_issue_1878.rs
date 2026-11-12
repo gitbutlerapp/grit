@@ -271,12 +271,11 @@ fn pick_of_the_other_rename_conflicts() {
     let fx = rename_rename_repo(Edit::None, Edit::None);
     let outcome = replay_commit(
         &fx.repo,
-        &ReplayRequest {
-            commit: fx.topic,
-            direction: ReplayDirection::Pick,
-            committer: COMMITTER.parse().expect("COMMITTER"),
-            message_override: None,
-        },
+        &ReplayRequest::new(
+            fx.topic,
+            ReplayDirection::Pick,
+            COMMITTER.parse().expect("COMMITTER"),
+        ),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )

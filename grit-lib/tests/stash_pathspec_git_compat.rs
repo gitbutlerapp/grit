@@ -29,15 +29,11 @@ fn open_grit(root: &std::path::Path) -> Repository {
 }
 
 fn stash_opts(include_untracked: bool, pathspecs: Vec<String>) -> StashPushOptions {
-    StashPushOptions {
-        message: Some("pathspec".into()),
-        include_untracked,
-        identity: IDENTITY.parse().expect("signature"),
-        selection: None,
-        pathspecs,
-        dry_run: false,
-        mode: StashMode::All,
-    }
+    StashPushOptions::new(IDENTITY.parse().expect("signature"))
+        .with_message(Some("pathspec".into()))
+        .with_include_untracked(include_untracked)
+        .with_pathspecs(pathspecs)
+        .with_mode(StashMode::All)
 }
 
 fn ls_files_stage(repo: &std::path::Path) -> String {
@@ -322,10 +318,7 @@ fn stash_apply_index_restores_staged_state() {
         .stash()
         .apply(
             0,
-            &StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(true),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -365,10 +358,7 @@ fn stash_pop_index_conflict_keeps_entry() {
         .stash()
         .pop(
             0,
-            &StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(true),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -447,10 +437,7 @@ fn grit_apply_index_on_git_stash() {
         .stash()
         .apply(
             0,
-            &StashApplyOptions {
-                restore_index: true,
-                ..Default::default()
-            },
+            &StashApplyOptions::default().with_restore_index(true),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )

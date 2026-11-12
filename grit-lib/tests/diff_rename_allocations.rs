@@ -98,8 +98,8 @@ fn inexact_document_renames_do_not_allocate_per_candidate_pair() {
         .filter(|entry| entry.status == DiffStatus::Added)
         .cloned()
         .collect();
-    let serial =
-        TreeDiffOptions::default().with_threads(Some(ThreadPolicy::with_threads_override(Some(1))));
+    let serial = TreeDiffOptions::default()
+        .with_threads(Some(ThreadPolicy::default().with_threads_override(Some(1))));
     let renames = serial.clone().with_renames(RenameDetection::Similarity(50));
 
     let before = ALLOCATIONS.with(Cell::get);

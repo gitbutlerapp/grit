@@ -187,10 +187,7 @@ fn build_delta_fixture() -> DeltaFixture {
 fn pack_write_threads_byte_identical_delta_fixture() {
     let fx = build_delta_fixture();
     let odb = open_odb(fx.dir.path());
-    let opts = PackBuildOptions {
-        delta: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     assert_byte_identical_threads(&odb, &[fx.tip], &[], &opts, "delta fixture", false);
 }
 
@@ -211,11 +208,7 @@ fn pack_write_threads_byte_identical_reuse_deltas() {
         ],
     );
     let odb = open_odb(dir);
-    let opts = PackBuildOptions {
-        delta: true,
-        reuse_deltas: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     assert_byte_identical_threads(&odb, &[fx.tip], &[], &opts, "reuse deltas", false);
 }
 
@@ -223,11 +216,7 @@ fn pack_write_threads_byte_identical_reuse_deltas() {
 fn pack_write_threads_byte_identical_thin_pack() {
     let fx = build_delta_fixture();
     let odb = open_odb(fx.dir.path());
-    let opts = PackBuildOptions {
-        delta: true,
-        thin: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true).with_thin(true);
     assert_byte_identical_threads(&odb, &[fx.tip], &[fx.prev], &opts, "thin pack", true);
 }
 
@@ -256,11 +245,9 @@ fn pack_write_threads_byte_identical_delta_islands() {
 
     git(dir, &["config", "pack.island", "refs/heads/(.*)"]);
     let odb = open_odb(dir);
-    let opts = PackBuildOptions {
-        delta: true,
-        respect_islands: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default()
+        .with_delta(true)
+        .with_respect_islands(true);
     assert_byte_identical_threads(&odb, &[tip_a, tip_b], &[], &opts, "delta islands", false);
 }
 
@@ -293,10 +280,7 @@ fn pack_write_threads_byte_identical_sha256() {
     };
     let odb = open_odb(dir.path());
     assert_eq!(odb.hash_algo(), HashAlgo::Sha256);
-    let opts = PackBuildOptions {
-        delta: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     assert_byte_identical_threads(&odb, &[tip], &[], &opts, "sha256 repo", false);
 }
 
@@ -306,10 +290,7 @@ fn pack_write_config_threads_matches_explicit_one() {
     let dir = fx.dir.path();
     git(dir, &["config", "pack.threads", "4"]);
     let odb = open_odb(dir);
-    let opts = PackBuildOptions {
-        delta: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let explicit_one =
         build_pack_with_write_threads(&odb, &[fx.tip], &[], &opts, Some(1)).expect("explicit 1");
     let from_config = build_pack(&odb, &[fx.tip], &[], &opts).expect("config auto");

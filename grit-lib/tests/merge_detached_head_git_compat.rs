@@ -182,11 +182,9 @@ fn conflict_then_continue_and_abort_on_detached_head() {
     let id = "Merge Test <merge@example.com> 1700000000 +0000".to_owned();
     let cont = continue_merge(
         &repo,
-        &ContinueOptions {
-            message: None,
-            author: Some(id.parse().expect("sig")),
-            committer: Some(id.parse().expect("sig")),
-        },
+        &ContinueOptions::default()
+            .with_author(Some(id.parse().expect("sig")))
+            .with_committer(Some(id.parse().expect("sig"))),
         &mut NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

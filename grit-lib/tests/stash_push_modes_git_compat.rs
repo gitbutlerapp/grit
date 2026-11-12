@@ -44,17 +44,13 @@ fn open_grit(root: &Path) -> Repository {
 }
 
 fn stash_opts(mode: StashMode, include_untracked: bool) -> StashPushOptions {
-    StashPushOptions {
-        message: None,
-        include_untracked,
-        identity: "Test <t@example.com> 1000000000 +0000"
+    StashPushOptions::new(
+        "Test <t@example.com> 1000000000 +0000"
             .parse()
             .expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode,
-    }
+    )
+    .with_include_untracked(include_untracked)
+    .with_mode(mode)
 }
 
 fn porcelain_v2(root: &Path) -> String {

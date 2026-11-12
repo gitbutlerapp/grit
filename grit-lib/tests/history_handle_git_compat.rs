@@ -379,10 +379,7 @@ fn fixup_hunks_through_the_handle_fold_only_the_selected_hunk() {
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
     assert_eq!(ids.len(), 2, "two separate hunks");
-    let selection = HunkSelection {
-        ids: vec![ids[0].clone()],
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(vec![ids[0].clone()]);
     assert_eq!(
         history
             .fixup_selection_paths(&selection, &[])

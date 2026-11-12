@@ -262,8 +262,8 @@ pub(crate) fn push(
     let request = HttpRequest::new(HttpMethod::Post, &url)
         .header("Content-Type", "application/x-git-receive-pack-request")
         .header("Accept", "application/x-git-receive-pack-result")
-        .body(commands)
-        .long_running();
+        .with_body(commands)
+        .with_long_running(true);
     let response = client.send(&request)?;
     if !response.is_success() {
         let status = response.status;

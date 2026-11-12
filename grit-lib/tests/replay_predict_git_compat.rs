@@ -108,12 +108,12 @@ fn index_mtime(git_dir: &Path) -> SystemTime {
 }
 
 fn pick_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceRequest {
-    ReplaySequenceRequest {
+    ReplaySequenceRequest::new(
         commits,
-        direction: ReplayDirection::Pick,
-        committer: IDENT.parse().expect("IDENT"),
-        options: opts,
-    }
+        ReplayDirection::Pick,
+        IDENT.parse().expect("IDENT"),
+    )
+    .with_options(opts)
 }
 
 #[test]
@@ -162,10 +162,7 @@ fn predict_no_commit_chains_index_tree_across_pick_range() {
     git(root.path(), &["switch", "main"]);
 
     let repo = open_repo(root.path());
-    let opts = ReplayOptions {
-        no_commit: true,
-        ..ReplayOptions::default()
-    };
+    let opts = ReplayOptions::default().with_no_commit(true);
     let req = pick_req(vec![c1, c2], opts.clone());
     let out =
         start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
@@ -191,16 +188,13 @@ fn predict_no_commit_chains_index_tree_across_revert_range() {
     let c2 = commit_file(root.path(), "two.txt", "two\n", "two");
 
     let repo = open_repo(root.path());
-    let opts = ReplayOptions {
-        no_commit: true,
-        ..ReplayOptions::default()
-    };
-    let req = ReplaySequenceRequest {
-        commits: vec![c2, c1],
-        direction: ReplayDirection::Revert,
-        committer: IDENT.parse().expect("IDENT"),
-        options: opts.clone(),
-    };
+    let opts = ReplayOptions::default().with_no_commit(true);
+    let req = ReplaySequenceRequest::new(
+        vec![c2, c1],
+        ReplayDirection::Revert,
+        IDENT.parse().expect("IDENT"),
+    )
+    .with_options(opts.clone());
     let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never())
         .expect("revert");
     assert!(matches!(out, SequenceOutcome::Completed { .. }));
@@ -296,10 +290,7 @@ fn x_theirs_pick_matches_git_cherry_pick_X_theirs_tree() {
     );
 
     let repo = open_repo(root.path());
-    let opts = ReplayOptions {
-        favor: MergeFavor::Theirs,
-        ..ReplayOptions::default()
-    };
+    let opts = ReplayOptions::default().with_favor(MergeFavor::Theirs);
     let out = start_replay_sequence(
         &repo,
         &pick_req(vec![pick], opts),
@@ -350,10 +341,7 @@ fn diff3_pick_markers_byte_equal_git() {
     assert!(!cp.status.success(), "expected git conflict");
 
     let repo = open_repo(root.path());
-    let opts = ReplayOptions {
-        conflict_style: ConflictStyle::Diff3,
-        ..ReplayOptions::default()
-    };
+    let opts = ReplayOptions::default().with_conflict_style(ConflictStyle::Diff3);
     let out = start_replay_sequence(
         &repo,
         &pick_req(vec![pick], opts),

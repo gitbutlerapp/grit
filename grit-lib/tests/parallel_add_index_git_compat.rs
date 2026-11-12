@@ -25,7 +25,7 @@ fn init_grit_repo(root: &Path, sha256: bool, threads: Option<usize>) -> Reposito
     fs::write(git_dir.join("config"), config).expect("config");
     let mut options = RepositoryOptions::empty();
     if let Some(n) = threads {
-        options.thread_policy = ThreadPolicy::with_threads_override(Some(n));
+        options.thread_policy = ThreadPolicy::default().with_threads_override(Some(n));
     }
     Repository::open(&git_dir, &options.clone().with_work_tree(root)).expect("open grit repo")
 }

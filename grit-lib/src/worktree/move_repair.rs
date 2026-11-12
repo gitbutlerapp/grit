@@ -15,11 +15,28 @@ use super::error::{LinkedWorktreeError, LinkedWorktreeOperation};
 
 /// Options for [`move_linked_worktree`].
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct MoveWorktreeOptions {
     /// Allow move when the worktree is locked (Git requires `-f` twice; grit uses one `--force`).
     pub force: bool,
     /// Report the move without changing disk state.
     pub dry_run: bool,
+}
+
+impl MoveWorktreeOptions {
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub const fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// What [`repair_worktrees`] fixed for one worktree path.

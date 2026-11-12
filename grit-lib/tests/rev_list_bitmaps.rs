@@ -112,12 +112,10 @@ fn count_all_matches_git() {
     write_commit_graph(&fixture);
     let repo = open_repo(fixture.path());
     let git_n = git_count(&fixture, &["--all"]);
-    let opts = RevListOptions {
-        all_refs: true,
-        count: true,
-        use_commit_graph: false,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_all_refs(true)
+        .with_count(true)
+        .with_use_commit_graph(false);
     let listed = repo
         .revwalk()
         .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
@@ -137,14 +135,11 @@ fn count_objects_matches_git_use_bitmap_index() {
     write_commit_graph(&fixture);
     let repo = open_repo(fixture.path());
     let git_n = git_count(&fixture, &["--objects", "--all", "--use-bitmap-index"]);
-    let opts = RevListOptions {
-        all_refs: true,
-        count: true,
-        objects: true,
-        use_bitmap_index: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_all_refs(true)
+        .with_count(true)
+        .with_objects(true)
+        .with_use_bitmap_index(true);
     assert_eq!(grit_count(&repo, opts.clone()), git_n);
     let listed = repo
         .revwalk()
@@ -160,13 +155,10 @@ fn count_objects_auto_bitmap_without_flag() {
     repack_with_bitmap(&fixture);
     let repo = open_repo(fixture.path());
     let git_n = git_count(&fixture, &["--objects", "--all", "--use-bitmap-index"]);
-    let opts = RevListOptions {
-        all_refs: true,
-        count: true,
-        objects: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_all_refs(true)
+        .with_count(true)
+        .with_objects(true);
     assert_eq!(grit_count(&repo, opts.clone()), git_n);
     let listed = repo
         .revwalk()
@@ -181,12 +173,9 @@ fn objects_listing_with_bitmap_is_same_set_as_walk() {
     build_history(&fixture);
     repack_with_bitmap(&fixture);
     let repo = open_repo(fixture.path());
-    let base = RevListOptions {
-        all_refs: true,
-        objects: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let base = RevListOptions::default()
+        .with_all_refs(true)
+        .with_objects(true);
     let walk = grit_object_set(&repo, base.clone());
     let mut bitmap = base;
     bitmap.use_bitmap_index = true;
@@ -200,48 +189,23 @@ fn incompatible_options_fall_back() {
     build_history(&fixture);
     repack_with_bitmap(&fixture);
     let repo = open_repo(fixture.path());
-    let baseline = RevListOptions {
-        all_refs: true,
-        count: true,
-        objects: true,
-        use_bitmap_index: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let baseline = RevListOptions::default()
+        .with_all_refs(true)
+        .with_count(true)
+        .with_objects(true)
+        .with_use_bitmap_index(true);
 
     let cases: Vec<RevListOptions> = vec![
-        RevListOptions {
-            max_count: Some(2),
-            ..baseline.clone()
-        },
-        RevListOptions {
-            skip: 1,
-            ..baseline.clone()
-        },
-        RevListOptions {
-            paths: vec!["readme".into()],
-            ..baseline.clone()
-        },
-        RevListOptions {
-            first_parent: true,
-            ..baseline.clone()
-        },
-        RevListOptions {
-            boundary: true,
-            ..baseline.clone()
-        },
-        RevListOptions {
-            ordering: OrderingMode::Topo,
-            ..baseline.clone()
-        },
-        RevListOptions {
-            reverse: true,
-            ..baseline.clone()
-        },
-        RevListOptions {
-            filter: Some(ObjectFilter::TreeDepth(1)),
-            ..baseline.clone()
-        },
+        baseline.clone().with_max_count(Some(2)),
+        baseline.clone().with_skip(1),
+        baseline.clone().with_paths(vec!["readme".into()]),
+        baseline.clone().with_first_parent(true),
+        baseline.clone().with_boundary(true),
+        baseline.clone().with_ordering(OrderingMode::Topo),
+        baseline.clone().with_reverse(true),
+        baseline
+            .clone()
+            .with_filter(Some(ObjectFilter::TreeDepth(1))),
     ];
 
     for opts in cases {
@@ -296,12 +260,9 @@ fn objects_max_count_one_use_bitmap_index_matches_git_and_skips_bitmap() {
         .rev_list(
             &["HEAD".into()],
             &[],
-            &RevListOptions {
-                objects: true,
-                use_bitmap_index: true,
-                use_commit_graph: true,
-                ..Default::default()
-            },
+            &RevListOptions::default()
+                .with_objects(true)
+                .with_use_bitmap_index(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -316,13 +277,10 @@ fn objects_max_count_one_use_bitmap_index_matches_git_and_skips_bitmap() {
         "unlimited bitmap walk should emit more lines than git --max-count=1 (git_n={git_n}, unlimited_n={unlimited_n})"
     );
 
-    let opts = RevListOptions {
-        objects: true,
-        max_count: Some(1),
-        use_bitmap_index: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_max_count(Some(1))
+        .with_use_bitmap_index(true);
     let result = repo
         .revwalk()
         .rev_list(
@@ -423,12 +381,9 @@ fn grit_rev_list_object_set(
         .iter()
         .map(|s| s.strip_prefix('^').unwrap_or(s).to_string())
         .collect();
-    let opts = RevListOptions {
-        objects: true,
-        use_bitmap_index: use_bitmap,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_use_bitmap_index(use_bitmap);
     let result = repo
         .revwalk()
         .rev_list(&pos, &neg, &opts, &mut NullProgress, &CancelToken::never())
@@ -484,12 +439,9 @@ fn no_bitmap_count_uses_commit_graph() {
     assert!(!has_bitmap, "fixture should have no pack bitmap");
     let repo = open_repo(fixture.path());
     let git_n = git_count(&fixture, &["--all"]);
-    let opts = RevListOptions {
-        all_refs: true,
-        count: true,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_all_refs(true)
+        .with_count(true);
     assert_eq!(grit_count(&repo, opts), git_n);
 }
 
@@ -594,13 +546,10 @@ fn grit_rev_list_object_set_with_filter(
         .iter()
         .map(|s| s.strip_prefix('^').unwrap_or(s).to_string())
         .collect();
-    let opts = RevListOptions {
-        objects: true,
-        filter: Some(filter),
-        use_bitmap_index: use_bitmap,
-        use_commit_graph: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_filter(Some(filter))
+        .with_use_bitmap_index(use_bitmap);
     let result = repo
         .revwalk()
         .rev_list(&pos, &neg, &opts, &mut NullProgress, &CancelToken::never())

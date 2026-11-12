@@ -121,10 +121,7 @@ fn modify_delete_conflict_resolves_by_accepting_deletion() {
     let rm_out = repo
         .checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["f".into()],
-                ..RemoveOptions::default()
-            },
+            &RemoveOptions::default().with_pathspecs(vec!["f".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm f");

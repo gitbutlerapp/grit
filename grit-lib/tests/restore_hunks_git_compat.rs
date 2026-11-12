@@ -68,10 +68,7 @@ fn unstaged_ids(repo: &Repository, path: &str) -> Vec<HunkId> {
 }
 
 fn restore(repo: &Repository, ids: Vec<HunkId>, path: &str) {
-    let selection = HunkSelection {
-        ids,
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(ids);
     repo.index()
         .restore_hunks(&selection, &[path.to_string()], false, true, false)
         .expect("restore hunks");
@@ -280,10 +277,7 @@ fn held_index_lock_fails_before_touching_the_worktree() {
     let ids = unstaged_ids(&repo, "f.txt");
     fs::write(root.join(".git/index.lock"), b"").unwrap();
 
-    let selection = HunkSelection {
-        ids: ids[..1].to_vec(),
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(ids[..1].to_vec());
     let result = restore_hunks(
         &repo,
         &selection,

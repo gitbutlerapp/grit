@@ -58,13 +58,11 @@ fn grit_object_set(
 ) -> HashSet<ObjectId> {
     let wants: Vec<String> = wants.iter().map(|o| o.to_hex()).collect();
     let haves: Vec<String> = haves.iter().map(|o| o.to_hex()).collect();
-    let opts = RevListOptions {
-        objects: true,
-        no_object_names: true,
-        quiet: true,
-        filter: filter.cloned(),
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_no_object_names(true)
+        .with_quiet(true)
+        .with_filter(filter.cloned());
     let result = repo
         .revwalk()
         .rev_list(

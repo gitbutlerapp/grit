@@ -550,6 +550,7 @@ pub enum WorktreeBranch {
 
 /// Options for [`add_linked_worktree`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct AddLinkedWorktreeOptions {
     /// Directory for the new working tree (created when missing).
     pub path: PathBuf,
@@ -567,19 +568,108 @@ pub struct AddLinkedWorktreeOptions {
     pub track: bool,
 }
 
+impl AddLinkedWorktreeOptions {
+    /// Creates a [`AddLinkedWorktreeOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: directory for the new working tree (created when missing).
+    #[must_use]
+    pub fn new(path: PathBuf) -> Self {
+        Self {
+            path,
+            branch: None,
+            start_point: None,
+            force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
+        }
+    }
+
+    /// Sets [`path`](Self::path).
+    #[must_use]
+    pub fn with_path(mut self, path: PathBuf) -> Self {
+        self.path = path;
+        self
+    }
+
+    /// Sets [`branch`](Self::branch).
+    #[must_use]
+    pub fn with_branch(mut self, branch: Option<WorktreeBranch>) -> Self {
+        self.branch = branch;
+        self
+    }
+
+    /// Sets [`start_point`](Self::start_point).
+    #[must_use]
+    pub fn with_start_point(mut self, start_point: Option<String>) -> Self {
+        self.start_point = start_point;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub const fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`lock`](Self::lock).
+    #[must_use]
+    pub fn with_lock(mut self, lock: Option<LockWorktreeOptions>) -> Self {
+        self.lock = lock;
+        self
+    }
+
+    /// Sets [`no_checkout`](Self::no_checkout).
+    #[must_use]
+    pub const fn with_no_checkout(mut self, no_checkout: bool) -> Self {
+        self.no_checkout = no_checkout;
+        self
+    }
+
+    /// Sets [`track`](Self::track).
+    #[must_use]
+    pub const fn with_track(mut self, track: bool) -> Self {
+        self.track = track;
+        self
+    }
+}
+
 /// Options for locking during [`add_linked_worktree`] or
 /// [`Worktrees::lock`](crate::repo_handles::Worktrees::lock).
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct LockWorktreeOptions {
     /// Optional reason stored in the `locked` file (shown by `git worktree list`).
     pub reason: Option<String>,
 }
 
+impl LockWorktreeOptions {
+    /// Sets [`reason`](Self::reason).
+    #[must_use]
+    pub fn with_reason(mut self, reason: Option<String>) -> Self {
+        self.reason = reason;
+        self
+    }
+}
+
 /// Options for [`prune_linked_worktrees`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct PruneWorktreesOptions {
     /// List prunable worktrees without removing admin directories.
     pub dry_run: bool,
+}
+
+impl PruneWorktreesOptions {
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// One linked worktree removed or that would be removed by [`prune_linked_worktrees`].

@@ -52,14 +52,13 @@ pub fn run(
     let lib_outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                pathspecs,
-                directories: true,
-                files_only,
-                scope,
-                excludes: excludes.to_vec(),
-                dry_run,
-            },
+            &CleanOptions::default()
+                .with_pathspecs(pathspecs)
+                .with_directories(true)
+                .with_files_only(files_only)
+                .with_scope(scope)
+                .with_excludes(excludes.to_vec())
+                .with_dry_run(dry_run),
             &mut NullProgress,
             &cancel,
         )

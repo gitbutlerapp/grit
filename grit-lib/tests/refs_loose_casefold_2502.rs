@@ -38,11 +38,7 @@ fn create_branch_with_many_loose_tags_stays_fast() {
     let dir = tempfile::tempdir().expect("tempdir");
     let (git_dir, tip) = repo_with_many_loose_tags(dir.path(), 2_000);
 
-    let store = FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.clone(),
-        common_dir: git_dir,
-        namespace_prefix: None,
-    });
+    let store = FilesRefStore::open(FilesRefStoreConfig::new(git_dir.clone(), git_dir));
 
     let start = Instant::now();
     prepare_branch_zz(&store, tip);
@@ -59,11 +55,7 @@ fn create_tag_with_many_loose_tags_still_rejects_casefold_collision() {
     let (git_dir, tip) = repo_with_many_loose_tags(dir.path(), 100);
     git(&git_dir, &["update-ref", "refs/tags/Foo", &tip.to_hex()]);
 
-    let store = FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.clone(),
-        common_dir: git_dir,
-        namespace_prefix: None,
-    });
+    let store = FilesRefStore::open(FilesRefStoreConfig::new(git_dir.clone(), git_dir));
     let update = RefUpdate::new("refs/tags/foo".to_owned(), Some(RawRef::Direct(tip)))
         .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
@@ -82,11 +74,7 @@ fn create_rejects_loose_nested_casefold_path_collision() {
         &["update-ref", "refs/heads/Foo/bar", &tip.to_hex()],
     );
 
-    let store = FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.clone(),
-        common_dir: git_dir,
-        namespace_prefix: None,
-    });
+    let store = FilesRefStore::open(FilesRefStoreConfig::new(git_dir.clone(), git_dir));
     let update = RefUpdate::new("refs/heads/foo/baz".to_owned(), Some(RawRef::Direct(tip)))
         .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
@@ -114,11 +102,7 @@ fn create_rejects_packed_nested_casefold_path_collision() {
     )
     .expect("packed-refs");
 
-    let store = FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.clone(),
-        common_dir: git_dir,
-        namespace_prefix: None,
-    });
+    let store = FilesRefStore::open(FilesRefStoreConfig::new(git_dir.clone(), git_dir));
     let update = RefUpdate::new("refs/heads/foo/baz".to_owned(), Some(RawRef::Direct(tip)))
         .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");

@@ -55,12 +55,11 @@ pub fn run(args: &DescribeCliArgs) -> Result<Option<DescribeOutcome>> {
     let _interrupt = crate::interrupt::InterruptCancel::install();
     let cancel = crate::interrupt::process_cancel_token();
     let repo = context::discover()?;
-    let opts = DescribeOptions {
-        tags: args.tags,
-        match_glob: args.match_glob.clone(),
-        first_parent: args.first_parent,
-        abbrev: args.abbrev,
-    };
+    let opts = DescribeOptions::default()
+        .with_tags(args.tags)
+        .with_match_glob(args.match_glob.clone())
+        .with_first_parent(args.first_parent)
+        .with_abbrev(args.abbrev);
     let described = repo
         .revwalk()
         .describe(&args.rev, &opts, &mut NullProgress, &cancel)?;

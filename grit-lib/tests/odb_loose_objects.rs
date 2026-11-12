@@ -495,10 +495,7 @@ fn odb_exists_local_freshen_and_write_options() {
         .write_with(
             ObjectKind::Blob,
             b"opts",
-            WriteOptions {
-                silent: true,
-                ..WriteOptions::default()
-            },
+            WriteOptions::default().with_silent(true),
         )
         .expect("silent rewrite");
     assert_eq!(again, oid);
@@ -532,10 +529,7 @@ fn write_trust_new_loose_and_assume_loose_only_existence() {
         .write_with(
             ObjectKind::Blob,
             data,
-            WriteOptions {
-                trust_new_loose: true,
-                ..WriteOptions::default()
-            },
+            WriteOptions::default().with_trust_new_loose(true),
         )
         .expect("trust write");
     assert_eq!(odb.read(&oid).unwrap().data, data);
@@ -544,10 +538,7 @@ fn write_trust_new_loose_and_assume_loose_only_existence() {
         .write_with(
             ObjectKind::Blob,
             data,
-            WriteOptions {
-                assume_loose_only_existence: true,
-                ..WriteOptions::default()
-            },
+            WriteOptions::default().with_assume_loose_only_existence(true),
         )
         .expect("assume loose");
     assert_eq!(oid2, oid);

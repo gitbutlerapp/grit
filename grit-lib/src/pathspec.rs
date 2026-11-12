@@ -265,6 +265,7 @@ impl ResolvedPathspecs {
 
 /// Git global pathspec mode flags (`GIT_LITERAL_PATHSPECS`, `GIT_GLOB_PATHSPECS`, …).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PathspecGlobalFlags {
     /// `GIT_LITERAL_PATHSPECS` — treat `*` and `?` in argv pathspecs as literal.
     pub literal_pathspecs: bool,
@@ -303,6 +304,34 @@ impl PathspecGlobalFlags {
             return Err(PathspecGlobalsError::LiteralWithOthers);
         }
         Ok(())
+    }
+
+    /// Sets [`literal_pathspecs`](Self::literal_pathspecs).
+    #[must_use]
+    pub const fn with_literal_pathspecs(mut self, literal_pathspecs: bool) -> Self {
+        self.literal_pathspecs = literal_pathspecs;
+        self
+    }
+
+    /// Sets [`glob_pathspecs`](Self::glob_pathspecs).
+    #[must_use]
+    pub const fn with_glob_pathspecs(mut self, glob_pathspecs: bool) -> Self {
+        self.glob_pathspecs = glob_pathspecs;
+        self
+    }
+
+    /// Sets [`noglob_pathspecs`](Self::noglob_pathspecs).
+    #[must_use]
+    pub const fn with_noglob_pathspecs(mut self, noglob_pathspecs: bool) -> Self {
+        self.noglob_pathspecs = noglob_pathspecs;
+        self
+    }
+
+    /// Sets [`icase_pathspecs`](Self::icase_pathspecs).
+    #[must_use]
+    pub const fn with_icase_pathspecs(mut self, icase_pathspecs: bool) -> Self {
+        self.icase_pathspecs = icase_pathspecs;
+        self
     }
 }
 

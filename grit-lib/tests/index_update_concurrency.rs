@@ -193,12 +193,10 @@ fn remove_reads_index_after_waiting_for_lock() {
     let racer_dir = dir.to_path_buf();
     let racer = thread::spawn(move || {
         let repo = open_grit_repo(&racer_dir);
-        let opts = RemoveOptions {
-            pathspecs: vec!["base".to_owned()],
-            cached: true,
-            force: true,
-            ..RemoveOptions::default()
-        };
+        let opts = RemoveOptions::default()
+            .with_pathspecs(vec!["base".to_owned()])
+            .with_cached(true)
+            .with_force(true);
         repo.checkout()
             .opts
             .checkout()

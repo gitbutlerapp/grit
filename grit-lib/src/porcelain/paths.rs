@@ -27,6 +27,7 @@ use std::sync::{Arc, Mutex};
 
 /// Options for [`remove_paths`].
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct RemoveOptions {
     /// Resolved pathspec patterns (repository-relative).
     pub pathspecs: Vec<String>,
@@ -56,6 +57,55 @@ impl RemoveOptions {
         }
         self.recursive = infer_remove_recursive(repo, &self.pathspec_sources, &self.pathspecs)?;
         Ok(())
+    }
+
+    /// Sets [`pathspecs`](Self::pathspecs).
+    #[must_use]
+    pub fn with_pathspecs(mut self, pathspecs: Vec<String>) -> Self {
+        self.pathspecs = pathspecs;
+        self
+    }
+
+    /// Sets [`pathspec_sources`](Self::pathspec_sources).
+    #[must_use]
+    pub fn with_pathspec_sources(mut self, pathspec_sources: Vec<String>) -> Self {
+        self.pathspec_sources = pathspec_sources;
+        self
+    }
+
+    /// Sets [`cached`](Self::cached).
+    #[must_use]
+    pub const fn with_cached(mut self, cached: bool) -> Self {
+        self.cached = cached;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub const fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`recursive`](Self::recursive).
+    #[must_use]
+    pub const fn with_recursive(mut self, recursive: bool) -> Self {
+        self.recursive = recursive;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets [`ignore_unmatch`](Self::ignore_unmatch).
+    #[must_use]
+    pub const fn with_ignore_unmatch(mut self, ignore_unmatch: bool) -> Self {
+        self.ignore_unmatch = ignore_unmatch;
+        self
     }
 }
 
@@ -167,6 +217,7 @@ pub struct PathMove {
 
 /// Options for [`move_paths`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct MoveOptions {
     /// Tracked source paths to move (repository-relative).
     pub sources: Vec<String>,
@@ -176,6 +227,52 @@ pub struct MoveOptions {
     pub force: bool,
     /// Validate and report [`MoveOutcome::moves`] without writing the index or work tree.
     pub dry_run: bool,
+}
+
+impl MoveOptions {
+    /// Creates a [`MoveOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `sources`: tracked source paths to move (repository-relative).
+    /// - `destination`: destination path or existing directory.
+    #[must_use]
+    pub fn new(sources: Vec<String>, destination: impl Into<String>) -> Self {
+        Self {
+            sources,
+            destination: destination.into(),
+            force: false,
+            dry_run: false,
+        }
+    }
+
+    /// Sets [`sources`](Self::sources).
+    #[must_use]
+    pub fn with_sources(mut self, sources: Vec<String>) -> Self {
+        self.sources = sources;
+        self
+    }
+
+    /// Sets [`destination`](Self::destination).
+    #[must_use]
+    pub fn with_destination(mut self, destination: String) -> Self {
+        self.destination = destination;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub const fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// Result of [`move_paths`] and [`move_path`].

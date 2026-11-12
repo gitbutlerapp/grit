@@ -43,32 +43,16 @@ fn grit_midx_write_variants_pass_git_verify_sha1() {
 
     let variants = [
         WriteMultiPackIndexOptions::default(),
-        WriteMultiPackIndexOptions {
-            version: Some(1),
-            ..Default::default()
-        },
-        WriteMultiPackIndexOptions {
-            version: Some(2),
-            ..Default::default()
-        },
-        WriteMultiPackIndexOptions {
-            preferred_pack_idx: Some(0),
-            ..Default::default()
-        },
-        WriteMultiPackIndexOptions {
-            preferred_pack_name: Some(idx_names[1].clone()),
-            ..Default::default()
-        },
-        WriteMultiPackIndexOptions {
-            write_bitmap: true,
-            write_rev_sidecar: true,
-            version: Some(1),
-            ..Default::default()
-        },
-        WriteMultiPackIndexOptions {
-            pack_names_subset_ordered: Some(vec![idx_names[0].clone(), idx_names[2].clone()]),
-            ..Default::default()
-        },
+        WriteMultiPackIndexOptions::default().with_version(Some(1)),
+        WriteMultiPackIndexOptions::default().with_version(Some(2)),
+        WriteMultiPackIndexOptions::default().with_preferred_pack_idx(Some(0)),
+        WriteMultiPackIndexOptions::default().with_preferred_pack_name(Some(idx_names[1].clone())),
+        WriteMultiPackIndexOptions::default()
+            .with_write_bitmap(true)
+            .with_write_rev_sidecar(true)
+            .with_version(Some(1)),
+        WriteMultiPackIndexOptions::default()
+            .with_pack_names_subset_ordered(Some(vec![idx_names[0].clone(), idx_names[2].clone()])),
     ];
 
     for opts in variants {
@@ -122,10 +106,8 @@ fn grit_midx_default_write_is_v1_and_git_reads_repository() {
     for opts in [
         WriteMultiPackIndexOptions::default(),
         // Caller order is not lexical; a v1 file must still list packs sorted.
-        WriteMultiPackIndexOptions {
-            pack_names_subset_ordered: Some(idx_names.clone()),
-            ..Default::default()
-        },
+        WriteMultiPackIndexOptions::default()
+            .with_pack_names_subset_ordered(Some(idx_names.clone())),
     ] {
         grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("reset midx");
         grit_write_midx(&pack_dir, &opts);
@@ -163,12 +145,10 @@ fn grit_midx_write_variants_pass_git_verify_sha256() {
         return;
     };
     let pack_dir = objects.join("pack");
-    let opts = WriteMultiPackIndexOptions {
-        write_bitmap: true,
-        write_rev_sidecar: true,
-        version: Some(1),
-        ..Default::default()
-    };
+    let opts = WriteMultiPackIndexOptions::default()
+        .with_write_bitmap(true)
+        .with_write_rev_sidecar(true)
+        .with_version(Some(1));
     grit_write_midx(&pack_dir, &opts);
     assert_git_midx_verify(&repo);
     verify_midx(&objects).expect("verify");
@@ -225,22 +205,18 @@ fn duplicate_oid_respects_preferred_pack() {
         panic!("duplicate-oid two-pack fixture setup failed");
     };
     let pack_dir = objects.join("pack");
-    let opts_old = WriteMultiPackIndexOptions {
-        preferred_pack_idx: Some(0),
-        version: Some(1),
-        ..Default::default()
-    };
+    let opts_old = WriteMultiPackIndexOptions::default()
+        .with_preferred_pack_idx(Some(0))
+        .with_version(Some(1));
     grit_write_midx(&pack_dir, &opts_old);
     let (pack_id_old, _) = midx_lookup_pack_and_offset_opt(&objects, &dup_oid)
         .expect("lookup")
         .expect("listed");
 
     grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("clear");
-    let opts_new = WriteMultiPackIndexOptions {
-        preferred_pack_idx: Some(1),
-        version: Some(1),
-        ..Default::default()
-    };
+    let opts_new = WriteMultiPackIndexOptions::default()
+        .with_preferred_pack_idx(Some(1))
+        .with_version(Some(1));
     grit_write_midx(&pack_dir, &opts_new);
     let (pack_id_new, _) = midx_lookup_pack_and_offset_opt(&objects, &dup_oid)
         .expect("lookup")
@@ -260,12 +236,9 @@ fn reuse_tables_and_preferred_pack_with_ridx() {
         return;
     };
     let pack_dir = objects.join("pack");
-    let opts = WriteMultiPackIndexOptions {
-        write_bitmap: true,
-        write_rev_sidecar: false,
-        version: Some(1),
-        ..Default::default()
-    };
+    let opts = WriteMultiPackIndexOptions::default()
+        .with_write_bitmap(true)
+        .with_version(Some(1));
     grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("clear");
     grit_write_midx(&pack_dir, &opts);
     let tables = load_midx_reuse_tables(&objects)
@@ -492,11 +465,9 @@ fn midx_public_api_smoke_sha1_and_sha256() {
         evict_midx_read_cache_for_pack_dir(&pack_dir);
         grit_write_midx(
             &pack_dir,
-            &WriteMultiPackIndexOptions {
-                write_bitmap: true,
-                write_rev_sidecar: true,
-                ..Default::default()
-            },
+            &WriteMultiPackIndexOptions::default()
+                .with_write_bitmap(true)
+                .with_write_rev_sidecar(true),
         );
         verify_midx(&objects).expect("verify");
         for oid in &oids {
@@ -527,11 +498,9 @@ fn grit_incremental_chain_compact_roundtrip() {
         assert!(midx_support::pack_objects_layer(repo.path(), 100 + i));
         grit_lib::objects::midx::write_multi_pack_index(
             &pack_dir,
-            &WriteMultiPackIndexOptions {
-                incremental: true,
-                version: Some(1),
-                ..Default::default()
-            },
+            &WriteMultiPackIndexOptions::default()
+                .with_incremental(true)
+                .with_version(Some(1)),
         )
         .expect("incremental write");
     }
@@ -624,10 +593,7 @@ fn midx_write_rejects_empty_and_bad_preferred() {
     let pack_dir = objects.join("pack");
     let err = grit_lib::objects::midx::write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            preferred_pack_idx: Some(99),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default().with_preferred_pack_idx(Some(99)),
     );
     assert!(err.is_err());
 }
@@ -644,11 +610,9 @@ fn grit_incremental_write_layer() {
     repo.git(&["add", "incr-grit.txt"]);
     repo.git(&["commit", "-q", "-m", "incr grit"]);
     assert!(midx_support::pack_objects_layer(repo.path(), 99));
-    let opts = WriteMultiPackIndexOptions {
-        incremental: true,
-        version: Some(1),
-        ..Default::default()
-    };
+    let opts = WriteMultiPackIndexOptions::default()
+        .with_incremental(true)
+        .with_version(Some(1));
     grit_lib::objects::midx::write_multi_pack_index(&pack_dir, &opts).expect("grit incremental");
     if let Some(chain) = read_chain_hashes(&pack_dir) {
         assert!(!chain.is_empty());
@@ -682,10 +646,7 @@ fn large_offset_loff_chunk_passes_git_verify() {
     let pack_dir = objects.join("pack");
     grit_write_midx(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default().with_version(Some(1)),
     );
     let midx_bytes = std::fs::read(tip_midx_path(&pack_dir)).expect("midx");
     assert!(

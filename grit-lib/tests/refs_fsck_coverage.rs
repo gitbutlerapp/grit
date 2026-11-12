@@ -209,15 +209,11 @@ fn refs_fsck_reftable_linked_worktree_placeholders_and_missing_object() {
     let wt_path = dir.path().join("linked");
     let entry = repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt_path.clone(),
-            branch: Some(WorktreeBranch::Create("linked".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("linked".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("worktree");
     assert_eq!(
         std::fs::read(entry.admin_dir.join("refs/heads")).expect("stub"),
@@ -303,15 +299,11 @@ fn refs_fsck_reftable_worktree_local_stack_and_head_sentinel_bytes() {
     let wt_path = dir.path().join("linked");
     let entry = repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt_path.clone(),
-            branch: Some(WorktreeBranch::Create("linked".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("linked".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("worktree");
     let wt_id = entry
         .admin_dir

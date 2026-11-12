@@ -100,10 +100,20 @@ pub enum TreeEntryError {
 
 /// Options for [`Objects::write_tree_with`](super::Objects::write_tree_with).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct WriteTreeOptions {
     /// When `true`, blob and tree entries may reference oids not stored locally (partial
     /// clone and bottom-up tree assembly). Wrong kinds are still rejected.
     pub allow_missing: bool,
+}
+
+impl WriteTreeOptions {
+    /// Sets [`allow_missing`](Self::allow_missing).
+    #[must_use]
+    pub const fn with_allow_missing(mut self, allow_missing: bool) -> Self {
+        self.allow_missing = allow_missing;
+        self
+    }
 }
 
 /// Validate `entries` for `algo` and return them in canonical Git tree order.

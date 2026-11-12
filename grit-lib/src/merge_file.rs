@@ -51,6 +51,7 @@ pub enum ConflictStyle {
 }
 
 /// Input and options for a three-way merge.
+#[non_exhaustive]
 pub struct MergeInput<'a> {
     /// Base (ancestor) content.
     pub base: &'a [u8],
@@ -80,6 +81,133 @@ pub struct MergeInput<'a> {
     pub ignore_space_at_eol: bool,
     /// Ignore CR at end of line.
     pub ignore_cr_at_eol: bool,
+}
+
+impl<'a> MergeInput<'a> {
+    /// Creates a [`MergeInput`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `base`: base (ancestor) content.
+    /// - `ours`: our version of the file.
+    /// - `theirs`: their version of the file.
+    #[must_use]
+    pub fn new(base: &'a [u8], ours: &'a [u8], theirs: &'a [u8]) -> Self {
+        Self {
+            base,
+            ours,
+            theirs,
+            label_ours: Default::default(),
+            label_base: Default::default(),
+            label_theirs: Default::default(),
+            favor: Default::default(),
+            style: Default::default(),
+            marker_size: Default::default(),
+            diff_algorithm: None,
+            ignore_all_space: false,
+            ignore_space_change: false,
+            ignore_space_at_eol: false,
+            ignore_cr_at_eol: false,
+        }
+    }
+
+    /// Sets [`base`](Self::base).
+    #[must_use]
+    pub const fn with_base(mut self, base: &'a [u8]) -> Self {
+        self.base = base;
+        self
+    }
+
+    /// Sets [`ours`](Self::ours).
+    #[must_use]
+    pub const fn with_ours(mut self, ours: &'a [u8]) -> Self {
+        self.ours = ours;
+        self
+    }
+
+    /// Sets [`theirs`](Self::theirs).
+    #[must_use]
+    pub const fn with_theirs(mut self, theirs: &'a [u8]) -> Self {
+        self.theirs = theirs;
+        self
+    }
+
+    /// Sets [`label_ours`](Self::label_ours).
+    #[must_use]
+    pub const fn with_label_ours(mut self, label_ours: &'a str) -> Self {
+        self.label_ours = label_ours;
+        self
+    }
+
+    /// Sets [`label_base`](Self::label_base).
+    #[must_use]
+    pub const fn with_label_base(mut self, label_base: &'a str) -> Self {
+        self.label_base = label_base;
+        self
+    }
+
+    /// Sets [`label_theirs`](Self::label_theirs).
+    #[must_use]
+    pub const fn with_label_theirs(mut self, label_theirs: &'a str) -> Self {
+        self.label_theirs = label_theirs;
+        self
+    }
+
+    /// Sets [`favor`](Self::favor).
+    #[must_use]
+    pub fn with_favor(mut self, favor: MergeFavor) -> Self {
+        self.favor = favor;
+        self
+    }
+
+    /// Sets [`style`](Self::style).
+    #[must_use]
+    pub fn with_style(mut self, style: ConflictStyle) -> Self {
+        self.style = style;
+        self
+    }
+
+    /// Sets [`marker_size`](Self::marker_size).
+    #[must_use]
+    pub const fn with_marker_size(mut self, marker_size: usize) -> Self {
+        self.marker_size = marker_size;
+        self
+    }
+
+    /// Sets [`diff_algorithm`](Self::diff_algorithm).
+    #[must_use]
+    pub fn with_diff_algorithm(mut self, diff_algorithm: Option<String>) -> Self {
+        self.diff_algorithm = diff_algorithm;
+        self
+    }
+
+    /// Sets [`ignore_all_space`](Self::ignore_all_space).
+    #[must_use]
+    pub const fn with_ignore_all_space(mut self, ignore_all_space: bool) -> Self {
+        self.ignore_all_space = ignore_all_space;
+        self
+    }
+
+    /// Sets [`ignore_space_change`](Self::ignore_space_change).
+    #[must_use]
+    pub const fn with_ignore_space_change(mut self, ignore_space_change: bool) -> Self {
+        self.ignore_space_change = ignore_space_change;
+        self
+    }
+
+    /// Sets [`ignore_space_at_eol`](Self::ignore_space_at_eol).
+    #[must_use]
+    pub const fn with_ignore_space_at_eol(mut self, ignore_space_at_eol: bool) -> Self {
+        self.ignore_space_at_eol = ignore_space_at_eol;
+        self
+    }
+
+    /// Sets [`ignore_cr_at_eol`](Self::ignore_cr_at_eol).
+    #[must_use]
+    pub const fn with_ignore_cr_at_eol(mut self, ignore_cr_at_eol: bool) -> Self {
+        self.ignore_cr_at_eol = ignore_cr_at_eol;
+        self
+    }
 }
 
 /// Default line diff algorithm for ort-style tree merges (matches Git `merge-ort`).

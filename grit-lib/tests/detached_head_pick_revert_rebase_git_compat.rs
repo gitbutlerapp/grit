@@ -138,12 +138,7 @@ fn grit_pick_on_detached_head_matches_git() {
     let repo = open_grit(root.path());
     let outcome = replay_commit(
         &repo,
-        &ReplayRequest {
-            commit: side_tip,
-            direction: ReplayDirection::Pick,
-            committer: ident(),
-            message_override: None,
-        },
+        &ReplayRequest::new(side_tip, ReplayDirection::Pick, ident()),
         &mut NullProgress,
         &CancelToken::never(),
     )
@@ -170,12 +165,7 @@ fn grit_revert_on_detached_head_matches_git() {
     let repo = open_grit(root.path());
     let outcome = replay_commit(
         &repo,
-        &ReplayRequest {
-            commit: main_tip,
-            direction: ReplayDirection::Revert,
-            committer: ident(),
-            message_override: None,
-        },
+        &ReplayRequest::new(main_tip, ReplayDirection::Revert, ident()),
         &mut NullProgress,
         &CancelToken::never(),
     )
@@ -285,12 +275,7 @@ fn grit_predict_pick_on_detached_head() {
     use grit_test_support::predict_replay_sequence;
     let prediction = predict_replay_sequence(
         &repo,
-        &ReplaySequenceRequest {
-            commits: vec![side_tip],
-            direction: ReplayDirection::Pick,
-            committer: ident(),
-            options: ReplayOptions::default(),
-        },
+        &ReplaySequenceRequest::new(vec![side_tip], ReplayDirection::Pick, ident()),
     )
     .expect("predict on detached HEAD");
     assert!(matches!(prediction, SequencePrediction::Clean { .. }));

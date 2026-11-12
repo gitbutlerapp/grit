@@ -991,12 +991,11 @@ fn pull_and_pick_refuse_during_grit_rebase_conflict_stop() {
         "pull: {pull_err:?}"
     );
 
-    let pick_req = ReplaySequenceRequest {
-        commits: vec![onto],
-        direction: ReplayDirection::Pick,
-        committer: COMMITTER.parse().expect("signature"),
-        options: ReplayOptions::default(),
-    };
+    let pick_req = ReplaySequenceRequest::new(
+        vec![onto],
+        ReplayDirection::Pick,
+        COMMITTER.parse().expect("signature"),
+    );
     let pick_err =
         start_replay_sequence(&grit, &pick_req, &mut NullProgress, &CancelToken::never())
             .unwrap_err();

@@ -645,10 +645,7 @@ fn fixup_hunks_folds_only_selected() {
     let grit = open_grit(wt);
     let ids = unstaged_hunk_ids(&grit);
     assert!(ids.len() >= 2);
-    let selection = HunkSelection {
-        ids: vec![ids[0].clone()],
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(vec![ids[0].clone()]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -689,10 +686,7 @@ fn fixup_hunks_leaves_other_unstaged() {
     fs::write(wt.join("f.txt"), &edited).expect("write");
     let grit = open_grit(wt);
     let ids = unstaged_hunk_ids(&grit);
-    let selection = HunkSelection {
-        ids: vec![ids[0].clone()],
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(vec![ids[0].clone()]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -719,10 +713,7 @@ fn fixup_hunks_preserves_preexisting_staged_on_same_path() {
     grit.index()
         .stage_hunks(
             DiffSide::Unstaged,
-            &HunkSelection {
-                ids: vec![ids[0].clone()],
-                ranges: Vec::new(),
-            },
+            &HunkSelection::default().with_ids(vec![ids[0].clone()]),
             &[],
             grit_lib::diff::DiffOptions::default(),
             false,
@@ -740,10 +731,7 @@ fn fixup_hunks_preserves_preexisting_staged_on_same_path() {
         staged_before.status.success() && !staged_before.stdout.is_empty(),
         "line-5 hunk should be staged before fixup"
     );
-    let selection = HunkSelection {
-        ids: vec![ids[1].clone()],
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(vec![ids[1].clone()]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -802,20 +790,14 @@ fn fixup_lines_preserves_preexisting_staged_and_consumes_selected_line() {
     grit.index()
         .stage_hunks(
             DiffSide::Unstaged,
-            &HunkSelection {
-                ids: vec![ids[0].clone()],
-                ranges: Vec::new(),
-            },
+            &HunkSelection::default().with_ids(vec![ids[0].clone()]),
             &[],
             grit_lib::diff::DiffOptions::default(),
             false,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage line-5 hunk");
-    let selection = HunkSelection {
-        ids: Vec::new(),
-        ranges: vec![LineRange::new("f.txt", 19, 19)],
-    };
+    let selection = HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 19, 19)]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -876,20 +858,14 @@ fn fixup_lines_same_structured_hunk_preserves_unselected_and_staged() {
     grit.index()
         .stage_hunks(
             DiffSide::Unstaged,
-            &HunkSelection {
-                ids: Vec::new(),
-                ranges: vec![LineRange::new("f.txt", 19, 19)],
-            },
+            &HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 19, 19)]),
             &[],
             grit_lib::diff::DiffOptions::default(),
             false,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage line-18 only");
-    let selection = HunkSelection {
-        ids: Vec::new(),
-        ranges: vec![LineRange::new("f.txt", 6, 6)],
-    };
+    let selection = HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 6, 6)]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -959,20 +935,14 @@ fn fixup_lines_pre_staged_same_hunk_preserves_unselected_and_staged() {
     grit.index()
         .stage_hunks(
             DiffSide::Unstaged,
-            &HunkSelection {
-                ids: Vec::new(),
-                ranges: vec![LineRange::new("f.txt", 6, 6)],
-            },
+            &HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 6, 6)]),
             &[],
             grit_lib::diff::DiffOptions::default(),
             false,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage line-5 only");
-    let selection = HunkSelection {
-        ids: Vec::new(),
-        ranges: vec![LineRange::new("f.txt", 8, 8)],
-    };
+    let selection = HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 8, 8)]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -1032,10 +1002,8 @@ fn fixup_hunks_stale_id_no_rewrite() {
     fs::write(wt.join("f.txt"), "two\n").expect("write");
     let grit = open_grit(wt);
     let head_before = git_rev_parse(wt, "HEAD").expect("head");
-    let selection = HunkSelection {
-        ids: vec![HunkId::from_str("000000000001").expect("id")],
-        ranges: Vec::new(),
-    };
+    let selection =
+        HunkSelection::default().with_ids(vec![HunkId::from_str("000000000001").expect("id")]);
     let err = grit
         .history()
         .fixup(
@@ -1079,10 +1047,7 @@ fn fixup_hunk_insertion_shifts_remaining_unstaged_exact_bytes() {
     edited = edited.replacen("line20\n", "KEEP20\n", 1);
     fs::write(wt.join("f.txt"), &edited).expect("write");
     let grit = open_grit(wt);
-    let selection = HunkSelection {
-        ids: Vec::new(),
-        ranges: vec![LineRange::new("f.txt", 6, 9)],
-    };
+    let selection = HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 6, 9)]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -1122,20 +1087,14 @@ fn fixup_lines_insertion_with_pre_staged_restores_shifted_unselected_below() {
     grit.index()
         .stage_hunks(
             DiffSide::Unstaged,
-            &HunkSelection {
-                ids: Vec::new(),
-                ranges: vec![LineRange::new("f.txt", 4, 4)],
-            },
+            &HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 4, 4)]),
             &[],
             grit_lib::diff::DiffOptions::default(),
             false,
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("stage line-3");
-    let selection = HunkSelection {
-        ids: Vec::new(),
-        ranges: vec![LineRange::new("f.txt", 6, 9)],
-    };
+    let selection = HunkSelection::default().with_ranges(vec![LineRange::new("f.txt", 6, 9)]);
     plan_and_apply_hunks(
         &grit,
         wt,
@@ -1166,10 +1125,7 @@ fn fixup_hunk_selection_plans_against_index_worktree_base_non_head_target() {
     let files = grit.index().unstaged_file_diffs(&[]).expect("diff");
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
-    let selection = HunkSelection {
-        ids: vec![ids[0].clone()],
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(vec![ids[0].clone()]);
     grit.index()
         .resolve_hunk_selection(
             DiffSide::Unstaged,

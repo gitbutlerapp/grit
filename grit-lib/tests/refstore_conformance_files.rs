@@ -15,11 +15,10 @@ fn files_store() -> Arc<dyn RefStore> {
     fs::create_dir_all(base.join("refs/heads")).expect("refs");
     fs::create_dir_all(base.join("objects")).expect("objects");
     let git_dir = fs::canonicalize(&base).unwrap_or(base);
-    Arc::new(FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.clone(),
-        common_dir: git_dir,
-        namespace_prefix: None,
-    }))
+    Arc::new(FilesRefStore::open(FilesRefStoreConfig::new(
+        git_dir.clone(),
+        git_dir,
+    )))
 }
 
 #[test]

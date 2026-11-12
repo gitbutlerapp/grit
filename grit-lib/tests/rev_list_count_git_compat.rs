@@ -125,10 +125,7 @@ fn assert_counts_match_git(wt: &Path, specs: &[&str]) {
         .rev_list(
             &positive,
             &[],
-            &RevListOptions {
-                count: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_count(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -310,10 +307,7 @@ fn count_fails_like_git_on_a_bad_zlib_checksum_after_the_headers() {
             .rev_list(
                 &["HEAD".to_owned()],
                 &[],
-                &RevListOptions {
-                    count: true,
-                    ..RevListOptions::default()
-                },
+                &RevListOptions::default().with_count(true),
                 &mut NullProgress,
                 &CancelToken::never()
             )

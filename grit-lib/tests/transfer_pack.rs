@@ -281,10 +281,7 @@ fn delta_pack_is_smaller_and_reparses() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("delta");
 
@@ -334,11 +331,7 @@ fn thin_pack_omits_peer_held_base_and_resolves() {
         &odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("thin pack");
 
@@ -631,10 +624,7 @@ fn delta_pack_reindexes_fscks_and_is_near_pack_objects_size() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("delta");
 
@@ -697,10 +687,7 @@ fn islands_forbid_cross_island_blob_delta() {
         &odb,
         &wants,
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("pack without islands");
     let edges_off = pack_delta_edges_resolved(&no_islands, &odb);
@@ -719,11 +706,9 @@ fn islands_forbid_cross_island_blob_delta() {
         &odb,
         &wants,
         &[],
-        &PackBuildOptions {
-            delta: true,
-            respect_islands: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_respect_islands(true),
     )
     .expect("pack with islands");
 
@@ -1020,11 +1005,7 @@ fn reuse_deltas_produces_valid_pack() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            reuse_deltas: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("reuse pack");
 
@@ -1039,10 +1020,7 @@ fn reuse_deltas_produces_valid_pack() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("fresh pack");
     let m1 = pack_bytes_to_object_map(&reuse, &odb).expect("reparse reuse");

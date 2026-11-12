@@ -55,6 +55,7 @@ impl ResetMode {
 
 /// Inputs for [`reset_to_commit`] and [`preview_reset`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ResetOptions {
     /// Commit to reset to.
     pub target: ObjectId,
@@ -100,6 +101,48 @@ impl ResetOptions {
         } else {
             self.orphan_limit
         }
+    }
+
+    /// Sets [`target`](Self::target).
+    #[must_use]
+    pub const fn with_target(mut self, target: ObjectId) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// Sets [`mode`](Self::mode).
+    #[must_use]
+    pub fn with_mode(mut self, mode: ResetMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Sets [`identity`](Self::identity).
+    #[must_use]
+    pub fn with_identity(mut self, identity: Signature) -> Self {
+        self.identity = identity;
+        self
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: String) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets [`orphan_limit`](Self::orphan_limit).
+    #[must_use]
+    pub const fn with_orphan_limit(mut self, orphan_limit: usize) -> Self {
+        self.orphan_limit = orphan_limit;
+        self
     }
 }
 

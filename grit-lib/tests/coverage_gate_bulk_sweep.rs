@@ -224,32 +224,30 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
         .expect("mid");
     for ordering in orderings {
         for ancestry in [false, true] {
-            let opts = RevListOptions {
-                ordering,
-                parent_rewrite: true,
-                ancestry_path: ancestry,
-                ancestry_path_bottoms: vec![mid],
-                left_right: true,
-                cherry_mark: true,
-                boundary: true,
-                first_parent: true,
-                simplify_merges: true,
-                simplify_by_decoration: ancestry,
-                simplify_by_decoration_oids: [tip, mid].into_iter().collect(),
-                full_history: true,
-                objects: true,
-                in_commit_order: true,
-                include_reflog_entries: true,
-                all_refs: true,
-                max_count: Some(80),
-                missing_action: MissingAction::Allow,
-                filter: Some(ObjectFilter::Combine(vec![
+            let opts = RevListOptions::default()
+                .with_ordering(ordering)
+                .with_parent_rewrite(true)
+                .with_ancestry_path(ancestry)
+                .with_ancestry_path_bottoms(vec![mid])
+                .with_left_right(true)
+                .with_cherry_mark(true)
+                .with_boundary(true)
+                .with_first_parent(true)
+                .with_simplify_merges(true)
+                .with_simplify_by_decoration(ancestry)
+                .with_simplify_by_decoration_oids([tip, mid].into_iter().collect())
+                .with_full_history(true)
+                .with_objects(true)
+                .with_in_commit_order(true)
+                .with_include_reflog_entries(true)
+                .with_all_refs(true)
+                .with_max_count(Some(80))
+                .with_missing_action(MissingAction::Allow)
+                .with_filter(Some(ObjectFilter::Combine(vec![
                     ObjectFilter::BlobLimit(65536),
                     ObjectFilter::TreeDepth(8),
-                ])),
-                filter_print_omitted: true,
-                ..RevListOptions::default()
-            };
+                ])))
+                .with_filter_print_omitted(true);
             let out = repo.revwalk().rev_list(
                 &[String::from("main")],
                 &[],
@@ -266,13 +264,11 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
         .resolve_commits(&["main".to_owned(), "side".to_owned()])?;
     let _ = repo.revwalk().tag_targets()?;
     let _ = repo.revwalk().shallow_boundary_oids();
-    let filtered = RevListOptions {
-        all_refs: true,
-        objects: true,
-        no_object_names: true,
-        filter: Some(ObjectFilter::BlobLimit(4096)),
-        ..RevListOptions::default()
-    };
+    let filtered = RevListOptions::default()
+        .with_all_refs(true)
+        .with_objects(true)
+        .with_no_object_names(true)
+        .with_filter(Some(ObjectFilter::BlobLimit(4096)));
     let _ = repo.revwalk().rev_list(
         &[],
         &[],

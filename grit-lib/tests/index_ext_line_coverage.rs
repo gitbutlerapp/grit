@@ -643,12 +643,10 @@ fn split_index_remove_entries_emits_delete_bitmaps() {
     let to_remove: Vec<String> = (0..10).map(|n| format!("f{n:04}.txt")).collect();
     repo.checkout()
         .remove_paths(
-            &grit_lib::porcelain::paths::RemoveOptions {
-                pathspecs: to_remove.clone(),
-                pathspec_sources: to_remove,
-                cached: true,
-                ..grit_lib::porcelain::paths::RemoveOptions::default()
-            },
+            &grit_lib::porcelain::paths::RemoveOptions::default()
+                .with_pathspecs(to_remove.clone())
+                .with_pathspec_sources(to_remove)
+                .with_cached(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("grit rm --cached through locked split write");

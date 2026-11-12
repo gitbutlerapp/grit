@@ -57,10 +57,7 @@ fn grit_delta_pack(odb: &Odb, wants: &[ObjectId], haves: &[ObjectId]) -> Vec<u8>
         odb,
         wants,
         haves,
-        &PackBuildOptions {
-            delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("pack")
 }
@@ -247,15 +244,7 @@ fn incremental_thin_pack_divergent_tips_matches_git_send_size() {
         &odb,
         &[want],
         &[have],
-        &PackEnumerateOptions {
-            filter: None,
-            shallow_grafts: &empty,
-            have_shallow_grafts: Some(&empty),
-            use_bitmaps: false,
-            exclude_objects: None,
-            peer_odb: None,
-            have_boundary: grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
-        },
+        &PackEnumerateOptions::new(&empty).with_have_shallow_grafts(Some(&empty)),
     )
     .expect("enumerate");
     assert!(
@@ -268,11 +257,7 @@ fn incremental_thin_pack_divergent_tips_matches_git_send_size() {
         &odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("thin pack");
     let git_pack = git_pack_objects(dir, &[want], &[have]);
@@ -288,15 +273,9 @@ fn incremental_thin_pack_divergent_tips_matches_git_send_size() {
         &odb,
         &[want],
         &[have],
-        &PackEnumerateOptions {
-            filter: None,
-            shallow_grafts: &empty,
-            have_shallow_grafts: Some(&empty),
-            use_bitmaps: false,
-            exclude_objects: None,
-            peer_odb: None,
-            have_boundary: HaveBoundary::TipsOnly,
-        },
+        &PackEnumerateOptions::new(&empty)
+            .with_have_shallow_grafts(Some(&empty))
+            .with_have_boundary(HaveBoundary::TipsOnly),
     )
     .expect("push enumerate");
     assert!(
@@ -309,12 +288,10 @@ fn incremental_thin_pack_divergent_tips_matches_git_send_size() {
         &odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            use_bitmaps: false,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_thin(true)
+            .with_use_bitmaps(false),
     )
     .expect("push pack");
     let git_push = git_pack_objects_with_thin(dir, &[want], &[have], true);
@@ -357,12 +334,10 @@ fn send_pack_revs_matches_git_on_merge_history() {
         &odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            use_bitmaps: false,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_thin(true)
+            .with_use_bitmaps(false),
     )
     .expect("grit push pack");
     let git_pack = git_pack_objects_with_thin(dir, &[want], &[have], true);
@@ -403,12 +378,10 @@ fn send_pack_ignores_blob_tag_haves() {
         &odb,
         &[want],
         &[have, blob_tag],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            use_bitmaps: false,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_thin(true)
+            .with_use_bitmaps(false),
     )
     .expect("push with blob tag have");
 }
@@ -429,15 +402,9 @@ fn push_send_pack_uses_tips_only_have_boundary() {
         &odb,
         &[tip],
         &haves,
-        &PackEnumerateOptions {
-            filter: None,
-            shallow_grafts: &empty,
-            have_shallow_grafts: Some(&empty),
-            use_bitmaps: false,
-            exclude_objects: None,
-            peer_odb: None,
-            have_boundary: HaveBoundary::TipsOnly,
-        },
+        &PackEnumerateOptions::new(&empty)
+            .with_have_shallow_grafts(Some(&empty))
+            .with_have_boundary(HaveBoundary::TipsOnly),
     )
     .expect("enumerate");
     assert!(
@@ -449,12 +416,10 @@ fn push_send_pack_uses_tips_only_have_boundary() {
         &odb,
         &[tip],
         &haves,
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            use_bitmaps: false,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default()
+            .with_delta(true)
+            .with_thin(true)
+            .with_use_bitmaps(false),
     )
     .expect("push pack");
 }
@@ -470,15 +435,9 @@ fn incremental_thin_pack_send_list_is_bounded() {
         &odb,
         &[tip],
         &[have],
-        &PackEnumerateOptions {
-            filter: None,
-            shallow_grafts: &empty,
-            have_shallow_grafts: Some(&empty),
-            use_bitmaps: true,
-            exclude_objects: None,
-            peer_odb: None,
-            have_boundary: grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
-        },
+        &PackEnumerateOptions::new(&empty)
+            .with_have_shallow_grafts(Some(&empty))
+            .with_use_bitmaps(true),
     )
     .expect("enumerate");
     assert!(
@@ -490,11 +449,7 @@ fn incremental_thin_pack_send_list_is_bounded() {
         &odb,
         &[tip],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("thin pack");
     git_index_pack_stdin_fix_thin(dir.path(), have, &thin);
@@ -528,11 +483,7 @@ fn pack_objects_thin_pack_fixes_with_git_index_pack() {
         let mut buf = Vec::new();
         PackObjects::new(
             &odb,
-            PackObjectsOptions::from(PackBuildOptions {
-                delta: true,
-                thin: true,
-                ..PackBuildOptions::default()
-            }),
+            PackObjectsOptions::from(PackBuildOptions::default().with_delta(true).with_thin(true)),
         )
         .wants(&[tip])
         .haves(&[have])
@@ -549,10 +500,7 @@ fn pack_objects_thin_pack_fixes_with_git_index_pack() {
 fn pack_objects_write_to_matches_build_pack_bytes() {
     let (dir, tip, have) = build_deep_history_repo(12);
     let odb = open_odb(dir.path());
-    let opts = PackBuildOptions {
-        delta: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let via_build = build_pack(&odb, &[tip], &[have], &opts).expect("build_pack");
     let mut via_api = Vec::new();
     PackObjects::new(&odb, PackObjectsOptions::from(opts))
@@ -618,10 +566,7 @@ fn reuse_only_thin_pack_keeps_deltas_against_have_bases() {
     let tip = rev_parse(dir.path(), "HEAD");
     git(dir.path(), &["repack", "-adfq"]);
     let odb = open_odb(dir.path());
-    let opts = PackBuildOptions {
-        thin: true,
-        ..PackBuildOptions::for_repack_rewrite(None)
-    };
+    let opts = PackBuildOptions::for_repack_rewrite(None).with_thin(true);
     let mut thin = Vec::new();
     let stats = PackObjects::new(&odb, PackObjectsOptions::from(opts))
         .wants(&[tip])
@@ -730,18 +675,12 @@ fn upload_pack_thin(repo_dir: &Path, want: ObjectId, have: ObjectId) -> Vec<u8> 
     use grit_lib::repo::Repository;
     let repo = Repository::open(&repo_dir.join(".git"), &RepositoryOptions::empty()).unwrap();
     let mut pack = Vec::new();
-    UploadPackStream::new(
-        &[want],
-        PackBuildOptions {
-            thin: true,
-            ..PackBuildOptions::for_serve(None)
-        },
-    )
-    .with_haves(&[have])
-    .with_source_shallow(&HashSet::new())
-    .with_have_shallow(&HashSet::new())
-    .write(&repo, &mut grit_lib::progress::NullProgress, &mut pack)
-    .expect("upload-pack stream");
+    UploadPackStream::new(&[want], PackBuildOptions::for_serve(None).with_thin(true))
+        .with_haves(&[have])
+        .with_source_shallow(&HashSet::new())
+        .with_have_shallow(&HashSet::new())
+        .write(&repo, &mut grit_lib::progress::NullProgress, &mut pack)
+        .expect("upload-pack stream");
     pack
 }
 

@@ -154,10 +154,7 @@ fn status_literal_pathspec_matches_git_for_bracket_filename() {
     std::fs::write(dir.path().join("f[o][o]"), b"dirty").unwrap();
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let globals = PathspecGlobalFlags {
-        literal_pathspecs: true,
-        ..PathspecGlobalFlags::default()
-    };
+    let globals = PathspecGlobalFlags::default().with_literal_pathspecs(true);
     let options = PathspecOptions::default().with_globals(globals);
     let pathspec = repo.pathspec(["f[o][o]"], &options).expect("pathspec");
     assert!(!pathspec.is_entire_tree());

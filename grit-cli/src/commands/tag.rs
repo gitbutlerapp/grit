@@ -252,10 +252,7 @@ fn verify(repo: &Repository, opts: &TagRunOptions) -> Result<TagOutcome> {
     let gpg = GpgConfig::from_config(config.as_ref())
         .context("could not load signing config")?
         .with_command_runner(repo.command_runner());
-    let verify_opts = TagVerifyOptions {
-        check_signature: !opts.no_signature,
-        gpg,
-    };
+    let verify_opts = TagVerifyOptions::new(gpg).with_check_signature(!opts.no_signature);
 
     let mut tags = Vec::with_capacity(opts.verify_names.len());
     let mut all_ok = true;

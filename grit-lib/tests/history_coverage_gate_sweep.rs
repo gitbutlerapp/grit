@@ -123,16 +123,13 @@ fn history_walk_diff_and_resolve_sweep() -> grit_lib::error::Result<()> {
         OrderingMode::AuthorDateWalk,
     ];
     for ordering in orderings {
-        let opts = RevListOptions {
-            ordering,
-            paths: vec!["tracked.txt".to_owned()],
-            cherry_pick: false,
-            left_right: true,
-            boundary: true,
-            reverse: true,
-            max_count: Some(20),
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_ordering(ordering)
+            .with_paths(vec!["tracked.txt".to_owned()])
+            .with_left_right(true)
+            .with_boundary(true)
+            .with_reverse(true)
+            .with_max_count(Some(20));
         let out = repo.revwalk().rev_list(
             &[String::from("main")],
             &[],

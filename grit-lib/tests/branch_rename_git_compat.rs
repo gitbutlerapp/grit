@@ -91,12 +91,7 @@ fn grit_rename_files_packed_git_compat() {
     let repo = open(&dir);
 
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "new".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "new"))
         .unwrap();
 
     assert_git_rename_checks(&dir, "topic", "new");
@@ -143,12 +138,11 @@ fn rename_force_overwrite_and_dry_run() {
 
     let preview = repo
         .branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "other".into(),
-            force: true,
-            dry_run: true,
-        })
+        .rename(
+            &BranchRenameOptions::new("topic", "other")
+                .with_force(true)
+                .with_dry_run(true),
+        )
         .unwrap();
     assert!(preview.dry_run);
     assert!(git_cmd(&["show-ref", "--verify", "refs/heads/topic"])
@@ -157,12 +151,7 @@ fn rename_force_overwrite_and_dry_run() {
         .ok());
 
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "other".into(),
-            force: true,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "other").with_force(true))
         .unwrap();
     assert!(!git_cmd(&["show-ref", "--verify", "refs/heads/topic"])
         .in_dir(&dir)
@@ -182,12 +171,7 @@ fn rename_refuses_without_force_when_target_exists() {
     let repo = open(&dir);
     let err = repo
         .branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "other".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "other"))
         .unwrap_err();
     assert!(
         matches!(&err, Error::Branch(BranchError::AlreadyExists { name }) if name == "other"),
@@ -203,12 +187,7 @@ fn rename_unborn_head_on_current_branch() {
     git(&dir, &["init", "-q", "-b", "main"]);
     let repo = open(&dir);
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "main".into(),
-            new: "start".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("main", "start"))
         .unwrap();
     assert_eq!(
         git(&dir, &["symbolic-ref", "HEAD"]).trim(),
@@ -225,12 +204,7 @@ fn rename_updates_linked_worktree_head_when_checked_out() {
     git(&wt, &["switch", "-q", "wt"]);
     let repo = open(&wt);
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "wt".into(),
-            new: "working".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("wt", "working"))
         .unwrap();
     assert_eq!(
         git(&wt, &["symbolic-ref", "HEAD"]).trim(),
@@ -249,12 +223,7 @@ fn rename_force_refuses_when_target_checked_out_in_worktree() {
     let repo = open(&dir);
     let err = repo
         .branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "wt".into(),
-            force: true,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "wt").with_force(true))
         .unwrap_err();
     assert!(
         matches!(err, Error::Branch(BranchError::CheckedOut { .. })),
@@ -278,12 +247,7 @@ fn rename_on_reftable_backend() {
     git(dir, &["config", "branch.topic.merge", "refs/heads/topic"]);
     let repo = open(dir);
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "new".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "new"))
         .unwrap();
     assert_git_rename_checks(dir, "topic", "new");
 }
@@ -332,12 +296,7 @@ fn rename_on_injected_memory_ref_store() {
 
     let repo = open(&dir).with_ref_store(store.clone());
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "renamed".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "renamed"))
         .unwrap();
     assert_eq!(
         store
@@ -408,12 +367,7 @@ fn rename_retargets_head_on_injected_store_when_branch_checked_out() {
 
     let repo = open(&dir).with_ref_store(store.clone());
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "renamed".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "renamed"))
         .unwrap();
     assert_eq!(
         store
@@ -432,12 +386,7 @@ fn rename_same_missing_branch_returns_not_found() {
     let repo = open(&dir);
     let err = repo
         .branches()
-        .rename(&BranchRenameOptions {
-            old: "nope".into(),
-            new: "nope".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("nope", "nope"))
         .unwrap_err();
     assert!(
         matches!(&err, Error::Branch(BranchError::NotFound { name }) if name == "nope"),
@@ -455,12 +404,7 @@ fn rename_same_invalid_name_returns_invalid() {
     let repo = open(&dir);
     let err = repo
         .branches()
-        .rename(&BranchRenameOptions {
-            old: "bad name".into(),
-            new: "bad name".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("bad name", "bad name"))
         .unwrap_err();
     assert!(
         matches!(&err, Error::Branch(BranchError::InvalidName { .. })),
@@ -478,12 +422,7 @@ fn rename_aborts_when_destination_reflog_path_is_directory() {
     let repo = open(&dir);
     let err = repo
         .branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "new".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "new"))
         .unwrap_err();
     assert!(
         matches!(
@@ -528,12 +467,7 @@ fn rename_clears_an_empty_directory_at_the_destination_reflog_path() {
 
     open(&dir)
         .branches()
-        .rename(&BranchRenameOptions {
-            old: "topic".into(),
-            new: "new".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("topic", "new"))
         .expect("rename over an empty log directory, as git does");
     assert!(dir.join(".git/logs/refs/heads/new").is_file());
     git(&dir, &["show-ref", "--verify", "refs/heads/new"]);

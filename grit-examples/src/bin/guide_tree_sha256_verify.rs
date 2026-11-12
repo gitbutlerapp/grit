@@ -18,13 +18,7 @@ fn main() -> Result<()> {
     let oid = repo.revwalk().resolve(&tag, &ResolveOptions::default())?;
     let gpg = GpgConfig::from_config(repo.config().snapshot()?.as_ref())?
         .with_command_runner(repo.command_runner());
-    let report = repo.verify_tag(
-        oid,
-        &TagVerifyOptions {
-            check_signature: true,
-            gpg,
-        },
-    )?;
+    let report = repo.verify_tag(oid, &TagVerifyOptions::new(gpg))?;
     println!("signature: {:?}", report.signature);
     if let Some(v) = &report.tree_sha256 {
         println!("claimed: {}", v.claimed);

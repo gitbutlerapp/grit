@@ -49,9 +49,10 @@ fn rev_parse_tree(dir: &Path, rev: &str) -> ObjectId {
 }
 
 fn serial_policy() -> ThreadPolicy {
-    ThreadPolicy::with_threads_override(Some(1))
-        .min_items_override(Some(0))
-        .min_total_bytes_override(Some(0))
+    ThreadPolicy::default()
+        .with_threads_override(Some(1))
+        .with_min_items_override(Some(0))
+        .with_min_total_bytes_override(Some(0))
 }
 
 fn parallel_policy() -> ThreadPolicy {

@@ -130,12 +130,10 @@ fn build_three_pack_duplicate_fixture(repo: &RepoFixture) -> String {
 fn grit_write_midx_bitmap(pack_dir: &Path, preferred_pack: Option<&str>) {
     let result = write_multi_pack_index(
         pack_dir,
-        &WriteMultiPackIndexOptions {
-            write_bitmap: true,
-            preferred_pack_name: preferred_pack.map(str::to_string),
-            version: Some(1),
-            ..WriteMultiPackIndexOptions::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_write_bitmap(true)
+            .with_preferred_pack_name(preferred_pack.map(str::to_string))
+            .with_version(Some(1)),
     )
     .expect("grit MIDX write");
     assert_eq!(result.bitmap, MidxBitmapWriteOutcome::Written);
@@ -162,12 +160,10 @@ fn ref_commit_tips(repo: &RepoFixture) -> Vec<ObjectId> {
 
 fn reachability_positions(repo: &Repository, index: &BitmapIndex, tip: &ObjectId) -> HashSet<u32> {
     let hex = tip.to_hex();
-    let opts = RevListOptions {
-        objects: true,
-        no_object_names: true,
-        quiet: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_no_object_names(true)
+        .with_quiet(true);
     let result = repo
         .revwalk()
         .rev_list(&[hex], &[], &opts, &mut NullProgress, &CancelToken::never())
@@ -315,12 +311,10 @@ fn incremental_layer_writes_no_placeholder() {
     assert!(pack_objects_layer(fixture.path(), 200));
     let result = write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            write_bitmap: true,
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_write_bitmap(true)
+            .with_version(Some(1)),
     )
     .expect("incremental write");
     assert_eq!(
@@ -345,11 +339,9 @@ fn extend_chain_with_incremental_layers(
         assert!(pack_objects_layer(repo.path(), 300 + i));
         write_multi_pack_index(
             pack_dir,
-            &WriteMultiPackIndexOptions {
-                incremental: true,
-                version: Some(2),
-                ..Default::default()
-            },
+            &WriteMultiPackIndexOptions::default()
+                .with_incremental(true)
+                .with_version(Some(2)),
         )
         .expect("incremental layer");
     }
@@ -424,12 +416,10 @@ fn grit_opens_bitmap_on_compacted_layer_when_upper_chain_has_no_bitmap() {
     assert!(pack_objects_layer(fixture.path(), 400));
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            version: Some(2),
-            write_bitmap: true,
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_version(Some(2))
+            .with_write_bitmap(true),
     )
     .expect("upper incremental without bitmap sidecar");
     let repo = open_repo(fixture.path());

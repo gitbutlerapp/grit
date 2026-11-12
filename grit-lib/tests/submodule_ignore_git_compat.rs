@@ -164,17 +164,11 @@ fn stash_skips_dirty_submodule_only_worktree() {
     );
 
     let repo = grit_repo(&main);
-    let opts = StashPushOptions {
-        message: None,
-        include_untracked: false,
-        identity: "Test <t@example.com> 1000000000 +0000"
+    let opts = StashPushOptions::new(
+        "Test <t@example.com> 1000000000 +0000"
             .parse()
             .expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: grit_lib::stash::StashMode::default(),
-    };
+    );
     let pushed = repo
         .stash()
         .push(&opts, &mut NullProgress, &CancelToken::never())

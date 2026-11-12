@@ -190,16 +190,7 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                     &fx.odb,
                     &[fx.sample_commit],
                     &[fx.have_commit],
-                    &PackEnumerateOptions {
-                        filter: None,
-                        shallow_grafts: &empty,
-                        have_shallow_grafts: None,
-                        use_bitmaps: false,
-                        exclude_objects: None,
-                        peer_odb: None,
-                        have_boundary:
-                            grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
-                    },
+                    &PackEnumerateOptions::new(&empty),
                 )
                 .expect("enumerate"),
             );
@@ -213,16 +204,7 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                     &fx.odb,
                     &[fx.sample_commit],
                     &[fx.have_commit],
-                    &PackEnumerateOptions {
-                        filter: None,
-                        shallow_grafts: &empty,
-                        have_shallow_grafts: None,
-                        use_bitmaps: true,
-                        exclude_objects: None,
-                        peer_odb: None,
-                        have_boundary:
-                            grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
-                    },
+                    &PackEnumerateOptions::new(&empty).with_use_bitmaps(true),
                 )
                 .expect("enumerate"),
             );

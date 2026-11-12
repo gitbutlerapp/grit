@@ -17,11 +17,44 @@ use crate::tree_sha256::{
 
 /// Options for [`verify_tag`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct TagVerifyOptions {
     /// When false, [`SignatureVerdict::NotChecked`] is returned without running a verifier.
     pub check_signature: bool,
     /// Signing configuration and subprocess runner for signature verification.
     pub gpg: GpgConfig,
+}
+
+impl TagVerifyOptions {
+    /// Creates a [`TagVerifyOptions`] that checks the signature with `gpg`.
+    ///
+    /// [`check_signature`](Self::check_signature) starts `true`; turn it off with
+    /// [`with_check_signature`](Self::with_check_signature).
+    ///
+    /// # Parameters
+    ///
+    /// - `gpg`: signing configuration and subprocess runner for signature verification.
+    #[must_use]
+    pub fn new(gpg: GpgConfig) -> Self {
+        Self {
+            gpg,
+            check_signature: true,
+        }
+    }
+
+    /// Sets [`check_signature`](Self::check_signature).
+    #[must_use]
+    pub const fn with_check_signature(mut self, check_signature: bool) -> Self {
+        self.check_signature = check_signature;
+        self
+    }
+
+    /// Sets [`gpg`](Self::gpg).
+    #[must_use]
+    pub fn with_gpg(mut self, gpg: GpgConfig) -> Self {
+        self.gpg = gpg;
+        self
+    }
 }
 
 /// Combined signature and tree-sha256 verification outcome.

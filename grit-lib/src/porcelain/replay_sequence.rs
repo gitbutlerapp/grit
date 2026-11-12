@@ -71,6 +71,7 @@ pub enum ReplayEmptyPolicy {
 
 /// Per-sequence merge and message options (stored under `.git/sequencer/opts` for grit starts).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ReplayOptions {
     /// Parent number (1-based) when replaying merge commits (`-m`).
     pub mainline: Option<NonZeroU32>,
@@ -102,8 +103,60 @@ impl Default for ReplayOptions {
     }
 }
 
+impl ReplayOptions {
+    /// Sets [`mainline`](Self::mainline).
+    #[must_use]
+    pub fn with_mainline(mut self, mainline: Option<NonZeroU32>) -> Self {
+        self.mainline = mainline;
+        self
+    }
+
+    /// Sets [`record_origin`](Self::record_origin).
+    #[must_use]
+    pub const fn with_record_origin(mut self, record_origin: bool) -> Self {
+        self.record_origin = record_origin;
+        self
+    }
+
+    /// Sets [`no_commit`](Self::no_commit).
+    #[must_use]
+    pub const fn with_no_commit(mut self, no_commit: bool) -> Self {
+        self.no_commit = no_commit;
+        self
+    }
+
+    /// Sets [`empty`](Self::empty).
+    #[must_use]
+    pub fn with_empty(mut self, empty: ReplayEmptyPolicy) -> Self {
+        self.empty = empty;
+        self
+    }
+
+    /// Sets [`message_override`](Self::message_override).
+    #[must_use]
+    pub fn with_message_override(mut self, message_override: Option<String>) -> Self {
+        self.message_override = message_override;
+        self
+    }
+
+    /// Sets [`favor`](Self::favor).
+    #[must_use]
+    pub fn with_favor(mut self, favor: MergeFavor) -> Self {
+        self.favor = favor;
+        self
+    }
+
+    /// Sets [`conflict_style`](Self::conflict_style).
+    #[must_use]
+    pub fn with_conflict_style(mut self, conflict_style: ConflictStyle) -> Self {
+        self.conflict_style = conflict_style;
+        self
+    }
+}
+
 /// Inputs for [`start_replay_sequence`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ReplaySequenceRequest {
     /// Commits to replay, in apply order.
     pub commits: Vec<ObjectId>,
@@ -113,6 +166,57 @@ pub struct ReplaySequenceRequest {
     pub committer: crate::ident::Signature,
     /// Merge, empty, and message options for the whole sequence.
     pub options: ReplayOptions,
+}
+
+impl ReplaySequenceRequest {
+    /// Creates a [`ReplaySequenceRequest`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `commits`: commits to replay, in apply order.
+    /// - `direction`: pick or revert semantics for every commit in `commits`.
+    /// - `committer`: committer for replay commits and reflog entries.
+    #[must_use]
+    pub fn new(
+        commits: Vec<ObjectId>,
+        direction: ReplayDirection,
+        committer: crate::ident::Signature,
+    ) -> Self {
+        Self {
+            commits,
+            direction,
+            committer,
+            options: Default::default(),
+        }
+    }
+
+    /// Sets [`commits`](Self::commits).
+    #[must_use]
+    pub fn with_commits(mut self, commits: Vec<ObjectId>) -> Self {
+        self.commits = commits;
+        self
+    }
+
+    /// Sets [`direction`](Self::direction).
+    #[must_use]
+    pub fn with_direction(mut self, direction: ReplayDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
+    /// Sets [`committer`](Self::committer).
+    #[must_use]
+    pub fn with_committer(mut self, committer: crate::ident::Signature) -> Self {
+        self.committer = committer;
+        self
+    }
+
+    /// Sets [`options`](Self::options).
+    #[must_use]
+    pub fn with_options(mut self, options: ReplayOptions) -> Self {
+        self.options = options;
+        self
+    }
 }
 
 /// One commit produced by a replay step, paired with its source.

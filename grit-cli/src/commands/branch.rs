@@ -432,13 +432,11 @@ fn create(
         None
     };
 
-    let create_opts = BranchCreateOptions {
-        name: name.to_owned(),
-        start: start_point,
-        force: opts.force,
-        track: track_mode(opts),
-        dry_run: opts.dry_run,
-    };
+    let create_opts = BranchCreateOptions::at_head(name.to_owned())
+        .with_start(start_point)
+        .with_force(opts.force)
+        .with_track(track_mode(opts))
+        .with_dry_run(opts.dry_run);
     let created = repo
         .branches()
         .create(&create_opts)
@@ -467,7 +465,12 @@ fn remove(
     };
     let deleted = repo
         .branches()
-        .delete(name, &BranchDeleteOptions { mode, dry_run })
+        .delete(
+            name,
+            &BranchDeleteOptions::default()
+                .with_mode(mode)
+                .with_dry_run(dry_run),
+        )
         .map_err(map_branch_error)?;
     let oid = deleted.oid.to_hex();
     let short_oid = deleted.oid.to_short_hex();
@@ -488,12 +491,11 @@ fn rename(
 ) -> Result<BranchOutcome> {
     let outcome = repo
         .branches()
-        .rename(&BranchRenameOptions {
-            old: old.to_owned(),
-            new: new.to_owned(),
-            force,
-            dry_run,
-        })
+        .rename(
+            &BranchRenameOptions::new(old.to_owned(), new.to_owned())
+                .with_force(force)
+                .with_dry_run(dry_run),
+        )
         .map_err(map_branch_error)?;
     Ok(BranchOutcome::Rename {
         old: outcome.old,

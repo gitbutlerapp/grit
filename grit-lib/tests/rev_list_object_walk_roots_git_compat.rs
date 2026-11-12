@@ -69,11 +69,9 @@ fn object_walk_filters_and_missing_print_match_git() {
         .rev_list(
             &[String::from("HEAD")],
             &[],
-            &RevListOptions {
-                objects: true,
-                missing_action: MissingAction::Print,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default()
+                .with_objects(true)
+                .with_missing_action(MissingAction::Print),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -113,13 +111,11 @@ fn object_walk_combine_filter_provided_objects_match_git() {
         .rev_list(
             &[String::from("HEAD")],
             &[],
-            &RevListOptions {
-                objects: true,
-                no_object_names: true,
-                filter: Some(combine),
-                filter_provided_objects: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default()
+                .with_objects(true)
+                .with_no_object_names(true)
+                .with_filter(Some(combine))
+                .with_filter_provided_objects(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -144,10 +140,7 @@ fn object_walk_annotated_tag_on_blob_peels_like_git() {
         .rev_list(
             &[String::from("blob-tag")],
             &[],
-            &RevListOptions {
-                objects: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_objects(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -176,12 +169,10 @@ fn object_walk_sparse_pathspec_limits_objects_match_git() {
         .rev_list(
             &[String::from("HEAD")],
             &[],
-            &RevListOptions {
-                objects: true,
-                no_object_names: true,
-                paths: vec!["dir/".to_owned()],
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default()
+                .with_objects(true)
+                .with_no_object_names(true)
+                .with_paths(vec!["dir/".to_owned()]),
             &mut NullProgress,
             &CancelToken::never(),
         )

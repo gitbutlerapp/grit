@@ -390,10 +390,7 @@ fn list_refs_empty_bare_over_ssh_flush_only_v0_succeeds() {
     let refs = remote
         .list_refs(
             None,
-            &ListRefsOptions {
-                protocol_version: Some(0),
-                ..Default::default()
-            },
+            &ListRefsOptions::default().with_protocol_version(Some(0)),
             None,
         )
         .expect("list refs");

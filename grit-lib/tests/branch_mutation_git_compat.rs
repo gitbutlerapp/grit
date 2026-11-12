@@ -63,13 +63,11 @@ fn create_at_start_point_reflog_matches_git() {
     let start = oid(dir, "main~1");
     let repo = open(dir);
     repo.branches()
-        .create(&BranchCreateOptions {
-            name: "topic".into(),
-            start: Some(StartPoint::new(start, "main~1")),
-            force: false,
-            track: TrackMode::Never,
-            dry_run: false,
-        })
+        .create(
+            &BranchCreateOptions::at_head("topic")
+                .with_start(Some(StartPoint::new(start, "main~1")))
+                .with_track(TrackMode::Never),
+        )
         .unwrap();
     fsck(dir);
     let grit_log = git(dir, &["reflog", "show", "-1", "topic"]);
@@ -96,13 +94,12 @@ fn force_overwrite_reflog_and_refuse_checked_out() {
     commit(dir, "c2");
     let repo = open(dir);
     repo.branches()
-        .create(&BranchCreateOptions {
-            name: "topic".into(),
-            start: Some(StartPoint::new(oid(dir, "main"), "main")),
-            force: true,
-            track: TrackMode::Never,
-            dry_run: false,
-        })
+        .create(
+            &BranchCreateOptions::at_head("topic")
+                .with_start(Some(StartPoint::new(oid(dir, "main"), "main")))
+                .with_force(true)
+                .with_track(TrackMode::Never),
+        )
         .unwrap();
     assert_eq!(oid(dir, "topic"), oid(dir, "main"));
     let msg = git(dir, &["reflog", "show", "-1", "--format=%gs", "topic"]);
@@ -115,13 +112,11 @@ fn force_overwrite_reflog_and_refuse_checked_out() {
     );
     let err = repo
         .branches()
-        .create(&BranchCreateOptions {
-            name: "held".into(),
-            start: None,
-            force: true,
-            track: TrackMode::Never,
-            dry_run: false,
-        })
+        .create(
+            &BranchCreateOptions::at_head("held")
+                .with_force(true)
+                .with_track(TrackMode::Never),
+        )
         .unwrap_err();
     assert!(matches!(
         err,
@@ -153,16 +148,12 @@ fn auto_track_matches_git_branch_track() {
     let repo = open(&clone);
 
     repo.branches()
-        .create(&BranchCreateOptions {
-            name: "upstream".into(),
-            start: Some(StartPoint::new(
+        .create(
+            &BranchCreateOptions::at_head("upstream").with_start(Some(StartPoint::new(
                 oid(&clone, "refs/remotes/origin/upstream"),
                 "origin/upstream",
-            )),
-            force: false,
-            track: TrackMode::Auto,
-            dry_run: false,
-        })
+            ))),
+        )
         .unwrap();
     fsck(&clone);
     let ours = branch_config(&clone);
@@ -239,10 +230,8 @@ fn safe_delete_unmerged_returns_not_fully_merged() {
         .branches()
         .delete(
             "side",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Safe,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Safe),
         )
         .unwrap_err();
     assert!(matches!(
@@ -265,21 +254,14 @@ fn dry_run_leaves_refs_config_and_reflogs_unchanged() {
     let repo = open(dir);
 
     repo.branches()
-        .create(&BranchCreateOptions {
-            name: "new".into(),
-            start: None,
-            force: false,
-            track: TrackMode::Auto,
-            dry_run: true,
-        })
+        .create(&BranchCreateOptions::at_head("new").with_dry_run(true))
         .unwrap();
     repo.branches()
         .delete(
             "topic",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Safe,
-                dry_run: true,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Safe)
+                .with_dry_run(true),
         )
         .unwrap();
     assert_eq!(before, snapshot_bytes(dir));
@@ -295,13 +277,11 @@ fn invalid_start_oid_is_rejected_before_writing_ref() {
     let bad: ObjectId = "0000000000000000000000000000000000000001".parse().unwrap();
     let err = repo
         .branches()
-        .create(&BranchCreateOptions {
-            name: "invalid-tip".into(),
-            start: Some(StartPoint::new(bad, bad.to_hex())),
-            force: false,
-            track: TrackMode::Never,
-            dry_run: false,
-        })
+        .create(
+            &BranchCreateOptions::at_head("invalid-tip")
+                .with_start(Some(StartPoint::new(bad, bad.to_hex())))
+                .with_track(TrackMode::Never),
+        )
         .unwrap_err();
     assert!(matches!(
         err,
@@ -350,13 +330,11 @@ fn non_commit_start_oid_is_rejected_before_writing_ref() {
     let repo = open(dir);
     let err = repo
         .branches()
-        .create(&BranchCreateOptions {
-            name: "blob-tip".into(),
-            start: Some(StartPoint::new(blob, blob.to_hex())),
-            force: false,
-            track: TrackMode::Never,
-            dry_run: false,
-        })
+        .create(
+            &BranchCreateOptions::at_head("blob-tip")
+                .with_start(Some(StartPoint::new(blob, blob.to_hex())))
+                .with_track(TrackMode::Never),
+        )
         .unwrap_err();
     assert!(matches!(
         err,
@@ -396,13 +374,11 @@ fn always_track_accepts_local_branch_start() {
     commit(dir, "c2");
     let repo = open(dir);
     repo.branches()
-        .create(&BranchCreateOptions {
-            name: "topic".into(),
-            start: Some(StartPoint::new(oid(dir, "base"), "base")),
-            force: false,
-            track: TrackMode::Always,
-            dry_run: false,
-        })
+        .create(
+            &BranchCreateOptions::at_head("topic")
+                .with_start(Some(StartPoint::new(oid(dir, "base"), "base")))
+                .with_track(TrackMode::Always),
+        )
         .unwrap();
     assert_eq!(
         branch_config(dir),
@@ -429,13 +405,13 @@ fn dry_run_force_does_not_reset_existing_branch() {
     let tip = oid(dir, "topic");
     let repo = open(dir);
     repo.branches()
-        .create(&BranchCreateOptions {
-            name: "topic".into(),
-            start: Some(StartPoint::new(oid(dir, "main"), "main")),
-            force: true,
-            track: TrackMode::Never,
-            dry_run: true,
-        })
+        .create(
+            &BranchCreateOptions::at_head("topic")
+                .with_start(Some(StartPoint::new(oid(dir, "main"), "main")))
+                .with_force(true)
+                .with_track(TrackMode::Never)
+                .with_dry_run(true),
+        )
         .unwrap();
     assert_eq!(oid(dir, "topic"), tip);
 }
@@ -454,13 +430,10 @@ fn create_from(
     track: TrackMode,
     dry_run: bool,
 ) -> BranchCreateOptions {
-    BranchCreateOptions {
-        name: name.into(),
-        start: Some(start),
-        force: false,
-        track,
-        dry_run,
-    }
+    BranchCreateOptions::at_head(name)
+        .with_start(Some(start))
+        .with_track(track)
+        .with_dry_run(dry_run)
 }
 
 #[test]
@@ -594,10 +567,8 @@ fn public_branch_mutation_api_smoke() {
         .branches()
         .delete(
             "x",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Force,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Force),
         )
         .unwrap();
 }

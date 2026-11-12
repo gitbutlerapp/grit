@@ -361,13 +361,8 @@ fn concurrent_create_branch_on_injected_store_never_lock_held() {
                     (0..CREATES)
                         .filter_map(|k| {
                             let name = format!("t{t}/b{k}");
-                            let opts = BranchCreateOptions {
-                                name,
-                                start: None,
-                                force: false,
-                                track: TrackMode::Never,
-                                dry_run: false,
-                            };
+                            let opts =
+                                BranchCreateOptions::at_head(name).with_track(TrackMode::Never);
                             repo.branches()
                                 .create(&opts)
                                 .err()
@@ -418,15 +413,10 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
             let path = root.join(format!("w{i}"));
             let entry = main
                 .worktrees()
-                .add(&AddLinkedWorktreeOptions {
-                    path: path.clone(),
-                    branch: Some(WorktreeBranch::Create(format!("b{i}"))),
-                    start_point: None,
-                    force: false,
-                    lock: None,
-                    no_checkout: false,
-                    track: false,
-                })
+                .add(
+                    &AddLinkedWorktreeOptions::new(path.clone())
+                        .with_branch(Some(WorktreeBranch::Create(format!("b{i}")))),
+                )
                 .expect("add worktree");
             let repo = Repository::open(
                 &entry.admin_dir,
@@ -489,11 +479,7 @@ fn concurrent_commits_in_linked_worktrees_over_shared_stores() {
 
 fn files_store(git_dir: &Path) -> FilesRefStore {
     let git_dir = fs::canonicalize(git_dir).unwrap_or_else(|_| git_dir.to_path_buf());
-    FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.clone(),
-        common_dir: git_dir,
-        namespace_prefix: None,
-    })
+    FilesRefStore::open(FilesRefStoreConfig::new(git_dir.clone(), git_dir))
 }
 
 #[test]

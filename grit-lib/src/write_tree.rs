@@ -31,6 +31,7 @@ pub enum WriteTreePersistence {
 
 /// Options for `cache_tree_update` and `write_tree_update_index`.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WriteTreeFlags {
     /// Allow missing blob OIDs when building trees.
     pub missing_ok: bool,
@@ -51,6 +52,34 @@ impl WriteTreeFlags {
             silent: true,
             ..Self::default()
         }
+    }
+
+    /// Sets [`missing_ok`](Self::missing_ok).
+    #[must_use]
+    pub const fn with_missing_ok(mut self, missing_ok: bool) -> Self {
+        self.missing_ok = missing_ok;
+        self
+    }
+
+    /// Sets [`ignore_cache_tree`](Self::ignore_cache_tree).
+    #[must_use]
+    pub const fn with_ignore_cache_tree(mut self, ignore_cache_tree: bool) -> Self {
+        self.ignore_cache_tree = ignore_cache_tree;
+        self
+    }
+
+    /// Sets [`persistence`](Self::persistence).
+    #[must_use]
+    pub const fn with_persistence(mut self, persistence: WriteTreePersistence) -> Self {
+        self.persistence = persistence;
+        self
+    }
+
+    /// Sets [`silent`](Self::silent).
+    #[must_use]
+    pub const fn with_silent(mut self, silent: bool) -> Self {
+        self.silent = silent;
+        self
     }
 }
 

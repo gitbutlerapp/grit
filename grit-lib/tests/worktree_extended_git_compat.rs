@@ -34,15 +34,11 @@ fn add_detach_linked_worktree_and_list_locked_state() {
     let linked = tmp.path().join("detached");
     let repo = discover(&main);
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Detach),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Detach))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("detach add");
 
     let entry = repo
@@ -80,15 +76,10 @@ fn add_worktree_on_existing_branch() {
     let linked = tmp.path().join("feature-wt");
     discover(&main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Existing("feature".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Existing("feature".into()))),
+        )
         .expect("existing branch checkout");
     assert!(linked.join("f").is_file());
 }
@@ -106,15 +97,11 @@ fn remove_dirty_worktree_requires_force() {
     let linked = tmp.path().join("dirty");
     let repo = discover(&main);
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("dirty".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("dirty".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add");
     fs::write(linked.join("f"), "dirty change\n").unwrap();
     assert!(repo.worktrees().remove(&linked, false).is_err());
@@ -136,29 +123,20 @@ fn second_worktree_same_branch_is_rejected() {
     let first = tmp.path().join("first");
     let repo = discover(&main);
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: first.clone(),
-            branch: Some(WorktreeBranch::Create("shared".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(first.clone())
+                .with_branch(Some(WorktreeBranch::Create("shared".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("first");
 
     let second = tmp.path().join("second");
     assert!(repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: second,
-            branch: Some(WorktreeBranch::Existing("shared".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        },)
+        .add(
+            &AddLinkedWorktreeOptions::new(second)
+                .with_branch(Some(WorktreeBranch::Existing("shared".into()))),
+        )
         .is_err());
     let found = repo
         .worktrees()
@@ -212,15 +190,10 @@ fn bare_repo_head_does_not_block_worktree_add_on_default_branch() {
 
     let wt = tmp.path().join("wt");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Existing("main".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Existing("main".into()))),
+        )
         .expect("add main from bare repo");
 
     git_cmd(&wt, &["status"]);
@@ -230,15 +203,10 @@ fn bare_repo_head_does_not_block_worktree_add_on_default_branch() {
     let second = tmp.path().join("wt2");
     assert!(
         repo.worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: second,
-                branch: Some(WorktreeBranch::Existing("main".into())),
-                start_point: None,
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            },)
+            .add(
+                &AddLinkedWorktreeOptions::new(second)
+                    .with_branch(Some(WorktreeBranch::Existing("main".into()))),
+            )
             .is_err(),
         "second checkout of main must still fail"
     );

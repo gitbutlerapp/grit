@@ -18,10 +18,7 @@ fn parent_rewrite_walk_matches_git() {
     git(wt, &["merge", "side", "-m", "merge", "--no-ff"]);
     git(wt, &["tag", "release"]);
 
-    let parents = RevListOptions {
-        parent_rewrite: true,
-        ..RevListOptions::default()
-    };
+    let parents = RevListOptions::default().with_parent_rewrite(true);
     assert_grit_commits_match_git(
         wt,
         &["--parents", "main"],
@@ -34,10 +31,7 @@ fn parent_rewrite_walk_matches_git() {
         &["--parents", "main", "--", "b.txt"],
         &[String::from("main")],
         &[],
-        &RevListOptions {
-            paths: vec![String::from("b.txt")],
-            ..parents.clone()
-        },
+        &parents.clone().with_paths(vec![String::from("b.txt")]),
     );
     assert_grit_commits_match_git(
         wt,

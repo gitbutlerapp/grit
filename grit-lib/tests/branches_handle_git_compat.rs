@@ -38,13 +38,13 @@ fn branches_handle_round_trips_with_git() {
         .unwrap();
 
     repo.branches()
-        .create(&BranchCreateOptions {
-            name: "feature".into(),
-            start: Some(grit_lib::porcelain::branch::StartPoint::new(tip, "HEAD")),
-            force: false,
-            track: grit_lib::porcelain::branch::TrackMode::Never,
-            dry_run: false,
-        })
+        .create(
+            &BranchCreateOptions::at_head("feature")
+                .with_start(Some(grit_lib::porcelain::branch::StartPoint::new(
+                    tip, "HEAD",
+                )))
+                .with_track(grit_lib::porcelain::branch::TrackMode::Never),
+        )
         .expect("create");
 
     let listed = repo
@@ -59,21 +59,13 @@ fn branches_handle_round_trips_with_git() {
     assert!(listed.iter().any(|b| b.name == "feature"));
 
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: "feature".into(),
-            new: "renamed".into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new("feature", "renamed"))
         .expect("rename");
 
     repo.branches()
         .delete(
             "renamed",
-            &BranchDeleteOptions {
-                mode: BranchDeleteMode::Force,
-                dry_run: false,
-            },
+            &BranchDeleteOptions::default().with_mode(BranchDeleteMode::Force),
         )
         .expect("delete");
 

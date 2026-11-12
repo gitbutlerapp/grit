@@ -79,7 +79,7 @@ fn all_groups(repo: &Repository) -> Vec<(String, Vec<AuthorGroup>)> {
                     scenario.tokens,
                     &scenario.options,
                     None,
-                    GroupByAuthorOptions { count_only },
+                    GroupByAuthorOptions::default().with_count_only(count_only),
                 )
                 .unwrap_or_else(|e| panic!("{} count_only={count_only}: {e}", scenario.name));
             out.push((format!("{} count_only={count_only}", scenario.name), groups));
@@ -297,7 +297,7 @@ fn memory_store_author_groups_match_the_files_backend() {
                 &["main"],
                 &RevWalkListOptions::default(),
                 None,
-                GroupByAuthorOptions { count_only: true },
+                GroupByAuthorOptions::default().with_count_only(true),
             )
             .expect("count main")
     };

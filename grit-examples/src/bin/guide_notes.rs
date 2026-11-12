@@ -50,11 +50,7 @@ fn main() -> Result<()> {
         &notes_ref,
         &commit,
         b"library guide note\n",
-        &NotesWriteOptions {
-            message: "add note".into(),
-            committer: IDENT.parse()?,
-            author: None,
-        },
+        &NotesWriteOptions::new("add note", IDENT.parse()?),
         false,
     )?;
     println!("added={}", outcome == NoteAddOutcome::Added);

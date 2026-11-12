@@ -139,6 +139,7 @@ pub struct LoadedCommit {
 /// ref filter. The CLI builds this from clap args + config (`build_decoration_filter`);
 /// the library only applies it.
 #[derive(Default, Clone)]
+#[non_exhaustive]
 pub struct DecorationFilter {
     /// Ref patterns from `--decorate-refs` (must match to decorate).
     pub include: Vec<String>,
@@ -179,6 +180,27 @@ impl DecorationFilter {
             }
         }
         true
+    }
+
+    /// Sets [`include`](Self::include).
+    #[must_use]
+    pub fn with_include(mut self, include: Vec<String>) -> Self {
+        self.include = include;
+        self
+    }
+
+    /// Sets [`exclude`](Self::exclude).
+    #[must_use]
+    pub fn with_exclude(mut self, exclude: Vec<String>) -> Self {
+        self.exclude = exclude;
+        self
+    }
+
+    /// Sets [`exclude_config`](Self::exclude_config).
+    #[must_use]
+    pub fn with_exclude_config(mut self, exclude_config: Vec<String>) -> Self {
+        self.exclude_config = exclude_config;
+        self
     }
 }
 

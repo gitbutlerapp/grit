@@ -45,23 +45,13 @@ fn seed_repo(main: &Path) -> Repository {
 }
 
 fn add_opts(path: PathBuf, branch: Option<WorktreeBranch>) -> AddLinkedWorktreeOptions {
-    AddLinkedWorktreeOptions {
-        path,
-        branch,
-        start_point: None,
-        force: false,
-        lock: None,
-        no_checkout: false,
-        track: false,
-    }
+    AddLinkedWorktreeOptions::new(path).with_branch(branch)
 }
 
 fn lock(repo: &Repository, path: &Path, reason: Option<&str>) -> grit_lib::error::Result<()> {
     repo.worktrees().lock(
         path,
-        &LockWorktreeOptions {
-            reason: reason.map(str::to_owned),
-        },
+        &LockWorktreeOptions::default().with_reason(reason.map(str::to_owned)),
     )
 }
 

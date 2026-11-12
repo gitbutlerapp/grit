@@ -61,12 +61,10 @@ fn all_commits(repo: &Repository) -> Vec<ObjectId> {
 
 fn reachability_positions(repo: &Repository, index: &BitmapIndex, tip: &ObjectId) -> HashSet<u32> {
     let hex = tip.to_hex();
-    let opts = RevListOptions {
-        objects: true,
-        no_object_names: true,
-        quiet: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_no_object_names(true)
+        .with_quiet(true);
     let result = repo
         .revwalk()
         .rev_list(&[hex], &[], &opts, &mut NullProgress, &CancelToken::never())

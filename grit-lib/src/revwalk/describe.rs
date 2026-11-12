@@ -27,6 +27,7 @@ use super::RevWalk;
 
 /// Options for [`RevWalk::describe`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DescribeOptions {
     /// When true, lightweight tags are candidates; when false, only annotated tags.
     pub tags: bool,
@@ -36,6 +37,36 @@ pub struct DescribeOptions {
     pub first_parent: bool,
     /// Minimum abbreviated oid length; `None` uses `core.abbrev` (auto from object count).
     pub abbrev: Option<usize>,
+}
+
+impl DescribeOptions {
+    /// Sets [`tags`](Self::tags).
+    #[must_use]
+    pub const fn with_tags(mut self, tags: bool) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Sets [`match_glob`](Self::match_glob).
+    #[must_use]
+    pub fn with_match_glob(mut self, match_glob: Option<String>) -> Self {
+        self.match_glob = match_glob;
+        self
+    }
+
+    /// Sets [`first_parent`](Self::first_parent).
+    #[must_use]
+    pub const fn with_first_parent(mut self, first_parent: bool) -> Self {
+        self.first_parent = first_parent;
+        self
+    }
+
+    /// Sets [`abbrev`](Self::abbrev).
+    #[must_use]
+    pub const fn with_abbrev(mut self, abbrev: Option<usize>) -> Self {
+        self.abbrev = abbrev;
+        self
+    }
 }
 
 /// Result of a successful describe: nearest tag by exact range count.

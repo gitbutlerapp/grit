@@ -310,10 +310,7 @@ fn verify_v1_pack_names_out_of_order() {
     let pack_dir = objects.join("pack");
     grit_lib::objects::midx::write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default().with_version(Some(1)),
     )
     .expect("rewrite v1");
     grit_lib::objects::midx::evict_midx_read_cache_for_pack_dir(&pack_dir);
@@ -556,12 +553,9 @@ fn load_reuse_tables_rejects_bad_ridx_entry() {
     let pack_dir = objects.join("pack");
     grit_lib::objects::midx::write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            write_bitmap: true,
-            write_rev_sidecar: false,
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_write_bitmap(true)
+            .with_version(Some(1)),
     )
     .expect("write with embedded ridx");
     patch_midx_file(&pack_dir, |data| {

@@ -565,10 +565,7 @@ fn fixup_hunks_preserves_change_id() {
     let files = grit.index().unstaged_file_diffs(&[]).expect("diff");
     let (file, peer) = &files[0];
     let ids = hunk_ids(DiffSide::Unstaged, &file.path, &file.hunks, peer);
-    let selection = HunkSelection {
-        ids: vec![ids[0].clone()],
-        ranges: Vec::new(),
-    };
+    let selection = HunkSelection::default().with_ids(vec![ids[0].clone()]);
     let plan = grit
         .history()
         .fixup(

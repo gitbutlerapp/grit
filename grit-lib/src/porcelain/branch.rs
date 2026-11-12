@@ -37,6 +37,7 @@ const HEADS_PREFIX: &str = "refs/heads/";
 
 /// Inputs for [`Branches::create`](crate::repo_handles::Branches::create).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BranchCreateOptions {
     /// Short branch name (without `refs/heads/`).
     pub name: String,
@@ -62,10 +63,46 @@ impl BranchCreateOptions {
             dry_run: false,
         }
     }
+
+    /// Sets [`name`](Self::name).
+    #[must_use]
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
+
+    /// Sets [`start`](Self::start).
+    #[must_use]
+    pub fn with_start(mut self, start: Option<StartPoint>) -> Self {
+        self.start = start;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub const fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`track`](Self::track).
+    #[must_use]
+    pub fn with_track(mut self, track: TrackMode) -> Self {
+        self.track = track;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// Options for [`Branches::rename`](crate::repo_handles::Branches::rename).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BranchRenameOptions {
     /// Current short branch name.
     pub old: String,
@@ -75,6 +112,52 @@ pub struct BranchRenameOptions {
     pub force: bool,
     /// Validate and preview without updating refs, config, or worktree `HEAD`s.
     pub dry_run: bool,
+}
+
+impl BranchRenameOptions {
+    /// Creates a [`BranchRenameOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `old`: current short branch name.
+    /// - `new`: new short branch name.
+    #[must_use]
+    pub fn new(old: impl Into<String>, new: impl Into<String>) -> Self {
+        Self {
+            old: old.into(),
+            new: new.into(),
+            force: false,
+            dry_run: false,
+        }
+    }
+
+    /// Sets [`old`](Self::old).
+    #[must_use]
+    pub fn with_old(mut self, old: String) -> Self {
+        self.old = old;
+        self
+    }
+
+    /// Sets [`new`](Self::new).
+    #[must_use]
+    pub fn with_new(mut self, new: String) -> Self {
+        self.new = new;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub const fn with_force(mut self, force: bool) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// Outcome of [`rename_branch`].
@@ -312,11 +395,28 @@ pub(crate) fn list_branches(repo: &Repository) -> Result<BranchList> {
 
 /// Options for [`Branches::delete`](crate::repo_handles::Branches::delete).
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BranchDeleteOptions {
     /// Safe delete requires the tip to be merged; force skips the check.
     pub mode: BranchDeleteMode,
     /// Validate only; leave refs, reflogs, and config unchanged.
     pub dry_run: bool,
+}
+
+impl BranchDeleteOptions {
+    /// Sets [`mode`](Self::mode).
+    #[must_use]
+    pub const fn with_mode(mut self, mode: BranchDeleteMode) -> Self {
+        self.mode = mode;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// Result of [`Branches::delete`](crate::repo_handles::Branches::delete).

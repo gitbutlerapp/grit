@@ -218,6 +218,7 @@ pub fn fold_peeled_refs(refs: &[RemoteRef]) -> Vec<PeeledRemoteRef> {
 
 /// Options controlling [`Remote::list_refs`] output, aligned with `git ls-remote`.
 #[derive(Debug, Default, Clone)]
+#[non_exhaustive]
 pub struct ListRefsOptions {
     /// If non-empty, only refs matching one of these patterns (same rules as `git ls-remote`).
     pub prefixes: Vec<String>,
@@ -237,6 +238,71 @@ pub struct ListRefsOptions {
     pub limit: Option<usize>,
     /// `versionsort.suffix` values for [`SortKey::Version`] (Git multi-valued config).
     pub versionsort_suffixes: Vec<String>,
+}
+
+impl ListRefsOptions {
+    /// Sets [`prefixes`](Self::prefixes).
+    #[must_use]
+    pub fn with_prefixes(mut self, prefixes: Vec<String>) -> Self {
+        self.prefixes = prefixes;
+        self
+    }
+
+    /// Sets [`heads`](Self::heads).
+    #[must_use]
+    pub const fn with_heads(mut self, heads: bool) -> Self {
+        self.heads = heads;
+        self
+    }
+
+    /// Sets [`tags`](Self::tags).
+    #[must_use]
+    pub const fn with_tags(mut self, tags: bool) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Sets [`symrefs`](Self::symrefs).
+    #[must_use]
+    pub const fn with_symrefs(mut self, symrefs: bool) -> Self {
+        self.symrefs = symrefs;
+        self
+    }
+
+    /// Sets [`peel`](Self::peel).
+    #[must_use]
+    pub const fn with_peel(mut self, peel: bool) -> Self {
+        self.peel = peel;
+        self
+    }
+
+    /// Sets [`protocol_version`](Self::protocol_version).
+    #[must_use]
+    pub fn with_protocol_version(mut self, protocol_version: Option<u8>) -> Self {
+        self.protocol_version = protocol_version;
+        self
+    }
+
+    /// Sets [`sort`](Self::sort).
+    #[must_use]
+    pub fn with_sort(mut self, sort: RefSort) -> Self {
+        self.sort = sort;
+        self
+    }
+
+    /// Sets [`limit`](Self::limit).
+    #[must_use]
+    pub const fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Sets [`versionsort_suffixes`](Self::versionsort_suffixes).
+    #[must_use]
+    pub fn with_versionsort_suffixes(mut self, versionsort_suffixes: Vec<String>) -> Self {
+        self.versionsort_suffixes = versionsort_suffixes;
+        self
+    }
 }
 
 /// Builds HTTP clients for smart-HTTP remotes.

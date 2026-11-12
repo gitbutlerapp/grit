@@ -334,11 +334,7 @@ fn finishing_a_squash_or_merge_names_squash_or_merge() {
     merge(&fx, &repo, &no_commit).expect("no-commit");
     continue_merge(
         &repo,
-        &ContinueOptions {
-            message: None,
-            author: None,
-            committer: None,
-        },
+        &ContinueOptions::default(),
         &mut NullProgress,
         &CancelToken::never(),
     )

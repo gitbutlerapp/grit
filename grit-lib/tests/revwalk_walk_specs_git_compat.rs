@@ -146,10 +146,7 @@ fn walk_symmetric_range_honours_max_count_and_left_right() {
         .revwalk()
         .walk(
             "main...topic",
-            &RevListOptions {
-                max_count: Some(2),
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_max_count(Some(2)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -165,10 +162,7 @@ fn walk_symmetric_range_honours_max_count_and_left_right() {
         .revwalk()
         .walk(
             "main...topic",
-            &RevListOptions {
-                left_right: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_left_right(true),
             &mut NullProgress,
             &CancelToken::never(),
         )

@@ -40,8 +40,10 @@ fn ieot_bench_config() -> ConfigSet {
 fn bench_index_read(c: &mut Criterion) {
     let fx = WorktreeBenchFixtures::global();
     let ieot_cfg = ieot_bench_config();
-    let ctx_serial = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(1)));
-    let ctx_parallel = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(4)));
+    let ctx_serial =
+        IndexParseContext::from_policy(ThreadPolicy::default().with_threads_override(Some(1)));
+    let ctx_parallel =
+        IndexParseContext::from_policy(ThreadPolicy::default().with_threads_override(Some(4)));
     let mut group = c.benchmark_group("index_read");
     for (label, path) in [
         ("v2/10000", &fx.index_v2_10k_path),
@@ -80,8 +82,9 @@ fn bench_index_read(c: &mut Criterion) {
     }
     if let Some(path) = &fx.index_v4_1m_ieot_path {
         for threads in [1_usize, 4] {
-            let ctx =
-                IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(threads)));
+            let ctx = IndexParseContext::from_policy(
+                ThreadPolicy::default().with_threads_override(Some(threads)),
+            );
             let data = std::fs::read(path).expect("read 1m ieot index");
             let label = format!("ieot/v4/1000000/t{threads}");
             group.bench_with_input(BenchmarkId::from_parameter(label), &data, |b, bytes| {

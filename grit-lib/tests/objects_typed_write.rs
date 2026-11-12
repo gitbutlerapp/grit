@@ -277,9 +277,7 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
         .objects()
         .write_tree_with(
             [file(b"future", missing)],
-            grit_lib::objects::WriteTreeOptions {
-                allow_missing: true,
-            },
+            grit_lib::objects::WriteTreeOptions::default().with_allow_missing(true),
         )
         .expect("allow_missing dangling blob");
     assert!(repo.objects().contains(&dangling_blob).unwrap());
@@ -287,9 +285,7 @@ fn write_tree_rejects_missing_wrong_kind_and_dot_symlinks() {
 
     let still_wrong = repo.objects().write_tree_with(
         [TreeEntry::new(b"d", FileMode::TREE, blob)],
-        grit_lib::objects::WriteTreeOptions {
-            allow_missing: true,
-        },
+        grit_lib::objects::WriteTreeOptions::default().with_allow_missing(true),
     );
     assert!(
         matches!(

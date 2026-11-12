@@ -338,13 +338,12 @@ fn t3306_notes_prune_via_remove() {
 }
 
 fn notes_write_options(message: &str) -> NotesWriteOptions {
-    NotesWriteOptions {
-        message: message.into(),
-        committer: "Test <t@example.com> 1700000000 +0000"
+    NotesWriteOptions::new(
+        message,
+        "Test <t@example.com> 1700000000 +0000"
             .parse()
             .expect("signature"),
-        author: None,
-    }
+    )
 }
 
 fn fanout_two_hex_prefix(object: &ObjectId) -> [u8; 2] {

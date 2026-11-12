@@ -34,6 +34,7 @@ use crate::rev_list::ObjectFilter;
 
 /// Options controlling pack-objects output (also used by [`build_pack`]).
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct PackBuildOptions {
     /// Build a thin pack: allow deltas whose base is reachable from the `haves`
     /// but **not** emitted in the pack (`REF_DELTA` against a peer-held base).
@@ -189,10 +190,81 @@ impl PackBuildOptions {
             ..Default::default()
         }
     }
+
+    /// Sets [`thin`](Self::thin).
+    #[must_use]
+    pub const fn with_thin(mut self, thin: bool) -> Self {
+        self.thin = thin;
+        self
+    }
+
+    /// Sets [`delta`](Self::delta).
+    #[must_use]
+    pub const fn with_delta(mut self, delta: bool) -> Self {
+        self.delta = delta;
+        self
+    }
+
+    /// Sets [`window`](Self::window).
+    #[must_use]
+    pub const fn with_window(mut self, window: usize) -> Self {
+        self.window = window;
+        self
+    }
+
+    /// Sets [`max_depth`](Self::max_depth).
+    #[must_use]
+    pub const fn with_max_depth(mut self, max_depth: usize) -> Self {
+        self.max_depth = max_depth;
+        self
+    }
+
+    /// Sets [`use_ofs_delta`](Self::use_ofs_delta).
+    #[must_use]
+    pub const fn with_use_ofs_delta(mut self, use_ofs_delta: bool) -> Self {
+        self.use_ofs_delta = use_ofs_delta;
+        self
+    }
+
+    /// Sets [`respect_islands`](Self::respect_islands).
+    #[must_use]
+    pub const fn with_respect_islands(mut self, respect_islands: bool) -> Self {
+        self.respect_islands = respect_islands;
+        self
+    }
+
+    /// Sets [`reuse_deltas`](Self::reuse_deltas).
+    #[must_use]
+    pub const fn with_reuse_deltas(mut self, reuse_deltas: bool) -> Self {
+        self.reuse_deltas = reuse_deltas;
+        self
+    }
+
+    /// Sets [`reuse_objects`](Self::reuse_objects).
+    #[must_use]
+    pub const fn with_reuse_objects(mut self, reuse_objects: bool) -> Self {
+        self.reuse_objects = reuse_objects;
+        self
+    }
+
+    /// Sets [`use_bitmaps`](Self::use_bitmaps).
+    #[must_use]
+    pub const fn with_use_bitmaps(mut self, use_bitmaps: bool) -> Self {
+        self.use_bitmaps = use_bitmaps;
+        self
+    }
+
+    /// Sets [`window_memory`](Self::window_memory).
+    #[must_use]
+    pub const fn with_window_memory(mut self, window_memory: Option<u64>) -> Self {
+        self.window_memory = window_memory;
+        self
+    }
 }
 
 /// Extended options for [`PackObjects`].
 #[derive(Clone, Copy, Debug, Default)]
+#[non_exhaustive]
 pub struct PackObjectsOptions {
     /// Core pack-objects behaviour flags.
     pub build: PackBuildOptions,
@@ -200,6 +272,29 @@ pub struct PackObjectsOptions {
     pub search_threads: Option<usize>,
     /// Override parallel pack-write workers (`None` = resolve [`crate::parallel::ParallelOp::PackWrite`] / `pack.threads` from the repo config attached to the [`Odb`]).
     pub write_threads: Option<usize>,
+}
+
+impl PackObjectsOptions {
+    /// Sets [`build`](Self::build).
+    #[must_use]
+    pub const fn with_build(mut self, build: PackBuildOptions) -> Self {
+        self.build = build;
+        self
+    }
+
+    /// Sets [`search_threads`](Self::search_threads).
+    #[must_use]
+    pub const fn with_search_threads(mut self, search_threads: Option<usize>) -> Self {
+        self.search_threads = search_threads;
+        self
+    }
+
+    /// Sets [`write_threads`](Self::write_threads).
+    #[must_use]
+    pub const fn with_write_threads(mut self, write_threads: Option<usize>) -> Self {
+        self.write_threads = write_threads;
+        self
+    }
 }
 
 impl From<PackBuildOptions> for PackObjectsOptions {

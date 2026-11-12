@@ -20,6 +20,7 @@ use super::{ProgressPhase, ProgressUnit, ReceivedObjects};
 /// Phases already under way are projected from their own measured pace, so
 /// these only shape the estimate until each phase begins.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[non_exhaustive]
 pub struct PhaseRates {
     /// Objects indexed per second.
     pub indexing: f64,
@@ -38,6 +39,29 @@ impl Default for PhaseRates {
             resolving: 300_000.0,
             checkout: 10_000.0,
         }
+    }
+}
+
+impl PhaseRates {
+    /// Sets [`indexing`](Self::indexing).
+    #[must_use]
+    pub const fn with_indexing(mut self, indexing: f64) -> Self {
+        self.indexing = indexing;
+        self
+    }
+
+    /// Sets [`resolving`](Self::resolving).
+    #[must_use]
+    pub const fn with_resolving(mut self, resolving: f64) -> Self {
+        self.resolving = resolving;
+        self
+    }
+
+    /// Sets [`checkout`](Self::checkout).
+    #[must_use]
+    pub const fn with_checkout(mut self, checkout: f64) -> Self {
+        self.checkout = checkout;
+        self
     }
 }
 

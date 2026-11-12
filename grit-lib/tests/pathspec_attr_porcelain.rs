@@ -114,15 +114,10 @@ fn stash_push_attr_pathspec() {
     let repo = open_repo(root);
     repo.stash()
         .push(
-            &StashPushOptions {
-                message: Some("attr".into()),
-                include_untracked: false,
-                identity: "Test <t@example.com> 1000000000 +0000".parse().unwrap(),
-                selection: None,
-                pathspecs: vec![":(attr:vendored)src".into()],
-                dry_run: false,
-                mode: StashMode::All,
-            },
+            &StashPushOptions::new("Test <t@example.com> 1000000000 +0000".parse().unwrap())
+                .with_message(Some("attr".into()))
+                .with_pathspecs(vec![":(attr:vendored)src".into()])
+                .with_mode(StashMode::All),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -171,15 +166,10 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
     fs::write(root.join("run.sh"), "#!/bin/sh\necho\n").unwrap();
     repo.stash()
         .push(
-            &StashPushOptions {
-                message: Some("mode".into()),
-                include_untracked: false,
-                identity: "Test <t@example.com> 1000000000 +0000".parse().unwrap(),
-                selection: None,
-                pathspecs: vec![spec.into()],
-                dry_run: false,
-                mode: StashMode::All,
-            },
+            &StashPushOptions::new("Test <t@example.com> 1000000000 +0000".parse().unwrap())
+                .with_message(Some("mode".into()))
+                .with_pathspecs(vec![spec.into()])
+                .with_mode(StashMode::All),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
         )
@@ -194,12 +184,10 @@ fn objectmode_attr_pathspec_restore_stash_rm() {
     git(root, &["add", "run.sh"]);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec![spec.into()],
-                pathspec_sources: vec![spec.into()],
-                cached: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec![spec.into()])
+                .with_pathspec_sources(vec![spec.into()])
+                .with_cached(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm --cached executable");
@@ -215,12 +203,10 @@ fn rm_cached_attr_pathspec() {
     let repo = open_repo(root);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec![":(attr:vendored)src".into()],
-                pathspec_sources: vec![":(attr:vendored)src".into()],
-                cached: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec![":(attr:vendored)src".into()])
+                .with_pathspec_sources(vec![":(attr:vendored)src".into()])
+                .with_cached(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm --cached");

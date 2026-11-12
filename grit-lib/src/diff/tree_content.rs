@@ -572,14 +572,14 @@ mod tests {
             odb,
             raw.clone(),
             &config,
-            &ThreadPolicy::with_threads_override(Some(1)),
+            &ThreadPolicy::default().with_threads_override(Some(1)),
         )
         .expect("serial load");
         let parallel = tree_diff_contents_parallel(
             odb,
             raw,
             &config,
-            &ThreadPolicy::with_threads_override(Some(4)),
+            &ThreadPolicy::default().with_threads_override(Some(4)),
         )
         .expect("parallel load");
         assert_eq!(serial, parallel);
@@ -638,7 +638,7 @@ mod tests {
     #[test]
     fn small_entry_counts_run_serially_without_consulting_the_policy() {
         let config = ConfigSet::new();
-        let policy = ThreadPolicy::with_threads_override(Some(4));
+        let policy = ThreadPolicy::default().with_threads_override(Some(4));
         for count in [0, 1, 2, PER_ENTRY_POOL_MIN_ITEMS - 1] {
             let opts = per_entry_parallel_options(&policy, &config, count);
             assert_eq!(opts.threads, NonZeroUsize::MIN, "{count} entries");
@@ -657,10 +657,13 @@ mod tests {
     #[test]
     fn min_items_override_moves_the_pool_threshold() {
         let config = ConfigSet::new();
-        let threads = ThreadPolicy::with_threads_override(Some(4))
+        let threads = ThreadPolicy::default()
+            .with_threads_override(Some(4))
             .resolve(ParallelOp::DiffContent, &config)
             .threads;
-        let forced = ThreadPolicy::with_threads_override(Some(4)).min_items_override(Some(0));
+        let forced = ThreadPolicy::default()
+            .with_threads_override(Some(4))
+            .with_min_items_override(Some(0));
         assert_eq!(
             per_entry_parallel_options(&forced, &config, 1).threads,
             NonZeroUsize::MIN
@@ -669,7 +672,9 @@ mod tests {
             per_entry_parallel_options(&forced, &config, 2).threads,
             threads
         );
-        let raised = ThreadPolicy::with_threads_override(Some(4)).min_items_override(Some(100));
+        let raised = ThreadPolicy::default()
+            .with_threads_override(Some(4))
+            .with_min_items_override(Some(100));
         assert_eq!(
             per_entry_parallel_options(&raised, &config, 99).threads,
             NonZeroUsize::MIN
@@ -710,7 +715,7 @@ mod tests {
                     odb,
                     entries.clone(),
                     &config,
-                    &ThreadPolicy::with_threads_override(Some(threads)),
+                    &ThreadPolicy::default().with_threads_override(Some(threads)),
                     DiffOptions::default(),
                 )
                 .expect("structured diff")
@@ -941,7 +946,7 @@ mod tests {
                 odb,
                 entries.clone(),
                 &config,
-                &ThreadPolicy::with_threads_override(Some(threads)),
+                &ThreadPolicy::default().with_threads_override(Some(threads)),
                 DiffOptions::default(),
             )
             .expect("structured diff")

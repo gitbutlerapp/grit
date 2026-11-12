@@ -94,10 +94,7 @@ fn remove_paths_succeeds_with_system_inherited_autocrlf_only() {
     let outcome = repo
         .checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["f.txt".into()],
-                ..Default::default()
-            },
+            &RemoveOptions::default().with_pathspecs(vec!["f.txt".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("remove must not treat CRLF smudge as local changes");

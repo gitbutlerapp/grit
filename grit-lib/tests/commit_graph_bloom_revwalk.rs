@@ -42,13 +42,10 @@ fn rev_list_uses_bloom_filters_with_pathspec() {
     );
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     let stats = Arc::new(Mutex::new(BloomWalkStats::default()));
-    let opts = RevListOptions {
-        paths: vec!["keep.txt".to_owned()],
-        use_commit_graph: true,
-        use_commit_graph_bloom: true,
-        bloom_stats: Some(stats.clone()),
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_paths(vec!["keep.txt".to_owned()])
+        .with_use_commit_graph_bloom(true)
+        .with_bloom_stats(Some(stats.clone()));
     let out = repo
         .revwalk()
         .rev_list(

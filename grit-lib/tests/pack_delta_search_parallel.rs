@@ -113,10 +113,7 @@ fn build_delta_fixture() -> (tempfile::TempDir, ObjectId) {
 fn delta_search_threads_identical_bases_and_pack_bytes() {
     let (dir, tip) = build_delta_fixture();
     let odb = open_odb(dir.path());
-    let opts = PackBuildOptions {
-        delta: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     assert_identical_search_and_pack(&odb, tip, &opts, "delta fixture");
 }
 
@@ -125,12 +122,7 @@ fn delta_search_near_git_pack_objects_size_on_fixture() {
     let (dir, tip) = build_delta_fixture();
     let repo = dir.path();
     let odb = open_odb(repo);
-    let opts = PackBuildOptions {
-        delta: true,
-        window: 10,
-        max_depth: 50,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let ours = build_pack_with_parallel_threads(&odb, &[tip], &[], &opts, Some(4), Some(1))
         .expect("grit pack");
     git_validate_pack(&ours);

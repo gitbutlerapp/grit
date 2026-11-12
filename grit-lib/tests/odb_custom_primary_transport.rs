@@ -583,10 +583,9 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
                     mode: StageMode::Update,
                     ..StageOptions::default()
                 },
-                IndexStagingThresholds {
-                    large_index_restage: 0,
-                    parallel_tracked_restage: 0,
-                },
+                IndexStagingThresholds::default()
+                    .with_large_index_restage(0)
+                    .with_parallel_tracked_restage(0),
             ),
             &mut NullProgress,
             &CancelToken::never(),

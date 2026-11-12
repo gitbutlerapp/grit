@@ -250,12 +250,10 @@ pub(crate) fn resolve_integrated(
             };
             here.repo
                 .branches()
-                .rename(&grit_lib::porcelain::branch::BranchRenameOptions {
-                    old: branch.to_owned(),
-                    new: new.to_owned(),
-                    force: false,
-                    dry_run: false,
-                })
+                .rename(&grit_lib::porcelain::branch::BranchRenameOptions::new(
+                    branch.to_owned(),
+                    new.to_owned(),
+                ))
                 .with_context(|| format!("renaming {branch} to {new}"))?;
             let specs = vec![
                 format!("refs/heads/{new}:refs/heads/{new}"),

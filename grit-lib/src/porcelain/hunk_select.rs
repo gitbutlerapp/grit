@@ -94,11 +94,28 @@ impl LineRange {
 
 /// Selected hunks by stable id and/or new-side line ranges.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HunkSelection {
     /// Stable hunk ids from `grit diff --json` (`hunks[].id`).
     pub ids: Vec<HunkId>,
     /// Partial selections by new-side line number (`diff --json` `lines[].new`).
     pub ranges: Vec<LineRange>,
+}
+
+impl HunkSelection {
+    /// Sets [`ids`](Self::ids).
+    #[must_use]
+    pub fn with_ids(mut self, ids: Vec<HunkId>) -> Self {
+        self.ids = ids;
+        self
+    }
+
+    /// Sets [`ranges`](Self::ranges).
+    #[must_use]
+    pub fn with_ranges(mut self, ranges: Vec<LineRange>) -> Self {
+        self.ranges = ranges;
+        self
+    }
 }
 
 /// Failure while resolving or staging hunk ids.

@@ -119,7 +119,7 @@ fn http_clone_honors_thread_policy_over_pack_config_for_ingest() {
 
     let url = format!("http://127.0.0.1:{port}/repo.git");
     let dest = tmp.path().join("clone");
-    let policy = ThreadPolicy::with_threads_override(Some(1));
+    let policy = ThreadPolicy::default().with_threads_override(Some(1));
     let environment = Environment::from_vars(
         [
             (OsString::from("GIT_CONFIG_COUNT"), OsString::from("1")),

@@ -5,7 +5,7 @@
 use anyhow::Result;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::stash::{StashMode, StashPushOptions};
+use grit_lib::stash::StashPushOptions;
 use std::path::{Path, PathBuf};
 
 const IDENT: &str = "Library Guide <guide@grit-scm.com> 1735689600 +0000";
@@ -37,15 +37,7 @@ fn main() -> Result<()> {
     let repo = open_repo(&root)?;
 
     let pushed = repo.stash().push(
-        &StashPushOptions {
-            message: Some("library guide stash".into()),
-            include_untracked: false,
-            identity: IDENT.parse()?,
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: StashMode::default(),
-        },
+        &StashPushOptions::new(IDENT.parse()?).with_message(Some("library guide stash".into())),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )?;

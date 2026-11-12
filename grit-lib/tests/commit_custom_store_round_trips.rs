@@ -380,15 +380,8 @@ fn layered_stash_push_round_trips_do_not_grow_with_directory_count() {
         fs::write(root.join(path), "edited\n").expect("modify");
     }
     let calls = layered.remote_calls(|repo| {
-        let options = StashPushOptions {
-            message: Some("wip".to_owned()),
-            include_untracked: false,
-            identity: IDENT.parse().expect("signature"),
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: StashMode::default(),
-        };
+        let options = StashPushOptions::new(IDENT.parse().expect("signature"))
+            .with_message(Some("wip".to_owned()));
         repo.stash()
             .push(
                 &options,

@@ -389,10 +389,9 @@ fn parallel_deferred_restage_keeps_link_mode() {
     let summary = stage_tracked_modifications_with_thresholds(
         &repo,
         &grit,
-        IndexStagingThresholds {
-            large_index_restage: usize::MAX,
-            parallel_tracked_restage: 0,
-        },
+        IndexStagingThresholds::default()
+            .with_large_index_restage(usize::MAX)
+            .with_parallel_tracked_restage(0),
     )
     .expect("stage tracked");
     assert!(summary.modified.contains(&b"link".to_vec()), "{summary:?}");

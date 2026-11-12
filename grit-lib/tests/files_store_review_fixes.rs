@@ -36,11 +36,10 @@ fn bare_git_dir() -> (tempfile::TempDir, std::path::PathBuf) {
 }
 
 fn open_namespaced(git_dir: &std::path::Path) -> FilesRefStore {
-    FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.to_path_buf(),
-        common_dir: git_dir.to_path_buf(),
-        namespace_prefix: Some("refs/namespaces/acme/".to_owned()),
-    })
+    FilesRefStore::open(
+        FilesRefStoreConfig::new(git_dir.to_path_buf(), git_dir.to_path_buf())
+            .with_namespace_prefix(Some("refs/namespaces/acme/".to_owned())),
+    )
 }
 
 #[test]

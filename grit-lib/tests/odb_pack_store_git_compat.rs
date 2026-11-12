@@ -390,13 +390,7 @@ fn promisor_marker_excluded_from_contains_filtered() {
     );
     assert!(
         !store
-            .contains_filtered(
-                &oid,
-                PackFilter {
-                    include_promisor: false,
-                    include_cruft: true,
-                },
-            )
+            .contains_filtered(&oid, PackFilter::default(),)
             .expect("contains_filtered"),
         "promisor-only visibility must be excluded when include_promisor=false"
     );

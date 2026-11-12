@@ -360,6 +360,7 @@ fn resolve_directory_renames(
 /// Fast-forward toggle for pull-style integration via [`Merge::integrate_into_branch`](crate::merge::Merge::integrate_into_branch)
 /// (convert with [`From<IntegrateBranchOptions>`] into [`MergeOptions`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IntegrateBranchOptions {
     /// When `false`, a fast-forward is not performed even when `other_oid` is a
     /// descendant of `into_oid`; a merge commit is recorded instead.
@@ -374,8 +375,18 @@ impl Default for IntegrateBranchOptions {
     }
 }
 
+impl IntegrateBranchOptions {
+    /// Sets [`allow_fast_forward`](Self::allow_fast_forward).
+    #[must_use]
+    pub const fn with_allow_fast_forward(mut self, allow_fast_forward: bool) -> Self {
+        self.allow_fast_forward = allow_fast_forward;
+        self
+    }
+}
+
 /// Options for [`predict_merge`] and [`write_merge_tree`].
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct MergePredictionOptions {
     /// When `false`, a fast-forward is not considered even when `other_oid` is a
     /// descendant of `into_oid`; a three-way merge is simulated instead. Ignored by
@@ -410,6 +421,60 @@ impl Default for MergePredictionOptions {
             theirs_label: "branch".into(),
             directory_renames: None,
         }
+    }
+}
+
+impl MergePredictionOptions {
+    /// Sets [`allow_fast_forward`](Self::allow_fast_forward).
+    #[must_use]
+    pub const fn with_allow_fast_forward(mut self, allow_fast_forward: bool) -> Self {
+        self.allow_fast_forward = allow_fast_forward;
+        self
+    }
+
+    /// Sets [`allow_unrelated_histories`](Self::allow_unrelated_histories).
+    #[must_use]
+    pub const fn with_allow_unrelated_histories(mut self, allow_unrelated_histories: bool) -> Self {
+        self.allow_unrelated_histories = allow_unrelated_histories;
+        self
+    }
+
+    /// Sets [`favor`](Self::favor).
+    #[must_use]
+    pub fn with_favor(mut self, favor: MergeFavor) -> Self {
+        self.favor = favor;
+        self
+    }
+
+    /// Sets [`whitespace`](Self::whitespace).
+    #[must_use]
+    pub fn with_whitespace(mut self, whitespace: WhitespaceMergeOptions) -> Self {
+        self.whitespace = whitespace;
+        self
+    }
+
+    /// Sets [`ours_label`](Self::ours_label).
+    #[must_use]
+    pub fn with_ours_label(mut self, ours_label: String) -> Self {
+        self.ours_label = ours_label;
+        self
+    }
+
+    /// Sets [`theirs_label`](Self::theirs_label).
+    #[must_use]
+    pub fn with_theirs_label(mut self, theirs_label: String) -> Self {
+        self.theirs_label = theirs_label;
+        self
+    }
+
+    /// Sets [`directory_renames`](Self::directory_renames).
+    #[must_use]
+    pub fn with_directory_renames(
+        mut self,
+        directory_renames: Option<DirectoryRenameMode>,
+    ) -> Self {
+        self.directory_renames = directory_renames;
+        self
     }
 }
 
@@ -1574,7 +1639,8 @@ fn stored_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<Optio
 }
 
 /// Options for [`continue_merge`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ContinueOptions {
     /// When set, replaces the message from `MERGE_MSG` (comment lines stripped).
     pub message: Option<String>,
@@ -1583,6 +1649,29 @@ pub struct ContinueOptions {
     pub author: Option<Signature>,
     /// Committer of the merge commit; `None` uses the repository's committer identity.
     pub committer: Option<Signature>,
+}
+
+impl ContinueOptions {
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`author`](Self::author).
+    #[must_use]
+    pub fn with_author(mut self, author: Option<Signature>) -> Self {
+        self.author = author;
+        self
+    }
+
+    /// Sets [`committer`](Self::committer).
+    #[must_use]
+    pub fn with_committer(mut self, committer: Option<Signature>) -> Self {
+        self.committer = committer;
+        self
+    }
 }
 
 /// Result of [`continue_merge`].

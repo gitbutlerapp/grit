@@ -612,13 +612,11 @@ pub fn grit_rev_list_object_set(
     filter: Option<ObjectFilter>,
 ) -> HashSet<ObjectId> {
     let repo = Repository::discover(Some(worktree), &RepositoryOptions::empty()).expect("discover");
-    let opts = RevListOptions {
-        objects: true,
-        no_object_names: true,
-        quiet: true,
-        filter,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_no_object_names(true)
+        .with_quiet(true)
+        .with_filter(filter);
     let result = repo
         .revwalk()
         .rev_list(

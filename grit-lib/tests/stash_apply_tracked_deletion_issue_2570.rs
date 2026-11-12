@@ -25,17 +25,11 @@ fn open_grit(root: &std::path::Path) -> Repository {
 }
 
 fn push_opts() -> StashPushOptions {
-    StashPushOptions {
-        message: None,
-        include_untracked: false,
-        identity: "Test <t@example.com> 1000000000 +0000"
+    StashPushOptions::new(
+        "Test <t@example.com> 1000000000 +0000"
             .parse()
             .expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: grit_lib::stash::StashMode::default(),
-    }
+    )
 }
 
 #[test]

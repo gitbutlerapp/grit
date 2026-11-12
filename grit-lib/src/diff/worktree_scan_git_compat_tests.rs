@@ -121,7 +121,9 @@ mod parallel_symlinks {
                         let index_mtime = force_verification(&mut index, state);
                         let options = DiffIndexToWorktreeOptions {
                             repository_git_dir: Some(repo.git_dir().to_owned()),
-                            thread_policy: Some(ThreadPolicy::with_threads_override(Some(threads))),
+                            thread_policy: Some(
+                                ThreadPolicy::default().with_threads_override(Some(threads)),
+                            ),
                             index_mtime,
                             refresh_index_stat_in_pass: refresh,
                             hash_blobs_without_write: matches!(scan, Scan::Preview),

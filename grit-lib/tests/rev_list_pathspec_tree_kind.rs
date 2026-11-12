@@ -51,10 +51,7 @@ fn pathspec_log_skips_commit_when_tree_header_points_at_blob() {
     );
 
     let open = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
-    let opts = RevListOptions {
-        paths: vec!["tracked.txt".to_owned()],
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_paths(vec!["tracked.txt".to_owned()]);
     let result = open.revwalk().rev_list(
         &["HEAD".to_owned()],
         &[],

@@ -420,21 +420,21 @@ pub fn unsafe_names_rejected_at_prepare(store: Arc<dyn RefStore>) {
 /// Unsafe destination names in reflog and case-only renames fail `prepare`.
 pub fn unsafe_rename_names_rejected_at_prepare(store: Arc<dyn RefStore>) {
     seed_direct(store.as_ref(), "refs/heads/topic", oid(1));
-    let reflog_rename = RefTransaction::new().with_reflog_rename(RefReflogRename {
-        from: RefName::new("refs/heads/topic").expect("valid ref name"),
-        to: grit_lib::test_support::refs::unchecked_ref_name("refs/heads/../escape"),
-        append: sample_log(),
-    });
+    let reflog_rename = RefTransaction::new().with_reflog_rename(RefReflogRename::new(
+        RefName::new("refs/heads/topic").expect("valid ref name"),
+        grit_lib::test_support::refs::unchecked_ref_name("refs/heads/../escape"),
+        sample_log(),
+    ));
     assert_eq!(
         prepare_err(store.as_ref(), reflog_rename),
         RefStoreError::InvalidRefName {
             name: "refs/heads/../escape".to_owned()
         }
     );
-    let case_only = RefTransaction::new().with_case_only_rename(RefCaseOnlyRename {
-        from: RefName::new("refs/heads/topic").expect("valid ref name"),
-        to: grit_lib::test_support::refs::unchecked_ref_name("refs/heads/Topic.lock"),
-    });
+    let case_only = RefTransaction::new().with_case_only_rename(RefCaseOnlyRename::new(
+        RefName::new("refs/heads/topic").expect("valid ref name"),
+        grit_lib::test_support::refs::unchecked_ref_name("refs/heads/Topic.lock"),
+    ));
     assert_eq!(
         prepare_err(store.as_ref(), case_only),
         RefStoreError::InvalidRefName {

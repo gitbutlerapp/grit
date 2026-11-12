@@ -88,11 +88,9 @@ fn push_plan_context(bare: &Path) -> PushPlanContext {
             remote_branch_tips.insert(ObjectId::from_hex(hex).expect("oid"));
         }
     }
-    PushPlanContext {
-        remote_ref_names,
-        remote_branch_tips,
-        remote_tips: None,
-    }
+    PushPlanContext::default()
+        .with_remote_ref_names(remote_ref_names)
+        .with_remote_branch_tips(remote_branch_tips)
 }
 
 struct Fixture {
@@ -168,12 +166,10 @@ fn grit_push(work: &Path, bare: &Path, force: ForceMode, refspecs: &[&str]) -> P
     grit_push_request(
         work,
         bare,
-        PushRequest {
-            remote: Some("origin".into()),
-            refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
-            force,
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_remote(Some("origin".into()))
+            .with_refspecs(refspecs.iter().map(|s| (*s).to_owned()).collect())
+            .with_force(force),
     )
 }
 
@@ -370,12 +366,10 @@ fn file_lease_delete_stale_when_remote_advanced() {
     let grit_out = grit_push_request(
         &fx.grit_client,
         &fx.bare,
-        PushRequest {
-            remote: Some("origin".into()),
-            delete: vec!["main".into()],
-            force: ForceMode::Lease(LeaseExpectation::Tracking),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_remote(Some("origin".into()))
+            .with_delete(vec!["main".into()])
+            .with_force(ForceMode::Lease(LeaseExpectation::Tracking)),
     );
     assert_eq!(grit_out.results[0].status, PushRefStatus::RejectStale);
     assert!(!git_push_lease_delete(&fx.git_client));

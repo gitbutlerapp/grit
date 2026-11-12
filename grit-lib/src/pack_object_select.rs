@@ -77,6 +77,7 @@ pub enum HaveBoundary {
 
 /// Parameters for [`enumerate_pack_objects`].
 #[derive(Clone, Copy, Debug)]
+#[non_exhaustive]
 pub struct PackEnumerateOptions<'a> {
     /// Partial-clone filter applied to the want side (when supported).
     pub filter: Option<&'a ObjectFilter>,
@@ -97,6 +98,81 @@ pub struct PackEnumerateOptions<'a> {
     pub peer_odb: Option<&'a Odb>,
     /// Whether `haves` are expanded to a full commit closure before the want walk.
     pub have_boundary: HaveBoundary,
+}
+
+impl<'a> PackEnumerateOptions<'a> {
+    /// Creates a [`PackEnumerateOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `shallow_grafts`: shallow graft boundaries on the want side: do not walk past these commits when enumerating objects to send.
+    #[must_use]
+    pub fn new(shallow_grafts: &'a HashSet<ObjectId>) -> Self {
+        Self {
+            shallow_grafts,
+            filter: None,
+            have_shallow_grafts: None,
+            use_bitmaps: false,
+            exclude_objects: None,
+            peer_odb: None,
+            have_boundary: Default::default(),
+        }
+    }
+
+    /// Sets [`filter`](Self::filter).
+    #[must_use]
+    pub const fn with_filter(mut self, filter: Option<&'a ObjectFilter>) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Sets [`shallow_grafts`](Self::shallow_grafts).
+    #[must_use]
+    pub const fn with_shallow_grafts(mut self, shallow_grafts: &'a HashSet<ObjectId>) -> Self {
+        self.shallow_grafts = shallow_grafts;
+        self
+    }
+
+    /// Sets [`have_shallow_grafts`](Self::have_shallow_grafts).
+    #[must_use]
+    pub const fn with_have_shallow_grafts(
+        mut self,
+        have_shallow_grafts: Option<&'a HashSet<ObjectId>>,
+    ) -> Self {
+        self.have_shallow_grafts = have_shallow_grafts;
+        self
+    }
+
+    /// Sets [`use_bitmaps`](Self::use_bitmaps).
+    #[must_use]
+    pub const fn with_use_bitmaps(mut self, use_bitmaps: bool) -> Self {
+        self.use_bitmaps = use_bitmaps;
+        self
+    }
+
+    /// Sets [`exclude_objects`](Self::exclude_objects).
+    #[must_use]
+    pub const fn with_exclude_objects(
+        mut self,
+        exclude_objects: Option<&'a HashSet<ObjectId>>,
+    ) -> Self {
+        self.exclude_objects = exclude_objects;
+        self
+    }
+
+    /// Sets [`peer_odb`](Self::peer_odb).
+    #[must_use]
+    pub const fn with_peer_odb(mut self, peer_odb: Option<&'a Odb>) -> Self {
+        self.peer_odb = peer_odb;
+        self
+    }
+
+    /// Sets [`have_boundary`](Self::have_boundary).
+    #[must_use]
+    pub fn with_have_boundary(mut self, have_boundary: HaveBoundary) -> Self {
+        self.have_boundary = have_boundary;
+        self
+    }
 }
 
 impl PackEnumerateOptions<'_> {

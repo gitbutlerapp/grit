@@ -83,12 +83,10 @@ fn grit_write_bitmap(repo: &Repository, fixture: &RepoFixture, options: PackBitm
 
 fn reachability_positions(repo: &Repository, index: &BitmapIndex, tip: &ObjectId) -> HashSet<u32> {
     let hex = tip.to_hex();
-    let opts = RevListOptions {
-        objects: true,
-        no_object_names: true,
-        quiet: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_no_object_names(true)
+        .with_quiet(true);
     let result = repo
         .revwalk()
         .rev_list(&[hex], &[], &opts, &mut NullProgress, &CancelToken::never())
@@ -242,14 +240,9 @@ fn lookup_table_and_hash_cache_variants() {
         grit_write_bitmap(
             &repo,
             &fixture,
-            PackBitmapWriteOptions {
-                full_dag: true,
-                hash_cache,
-                lookup_table: lookup,
-                prefer_bitmap_tips: Vec::new(),
-                verify_reachability_closure: true,
-                reachability_roots: None,
-            },
+            PackBitmapWriteOptions::default()
+                .with_hash_cache(hash_cache)
+                .with_lookup_table(lookup),
         );
         let out = Command::new("git")
             .current_dir(fixture.path())
@@ -309,14 +302,7 @@ fn hash_cache_entries_match_path_name_hashes() {
     }
     git_ok(&fixture, &["repack", "-ad"]);
     let repo = open_repo(fixture.path());
-    grit_write_bitmap(
-        &repo,
-        &fixture,
-        PackBitmapWriteOptions {
-            hash_cache: true,
-            ..Default::default()
-        },
-    );
+    grit_write_bitmap(&repo, &fixture, PackBitmapWriteOptions::default());
     let index = BitmapIndex::open(&repo).expect("open").expect("bitmap");
     for i in 0..32 {
         let name = format!("path-{i:02}.txt");

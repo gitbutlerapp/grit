@@ -418,11 +418,7 @@ fn notes_add_flushes_before_ref_update() {
     let tip = seed_commit(&repo);
     store.clear_events();
 
-    let opts = NotesWriteOptions {
-        message: "note\n".into(),
-        committer: ident(),
-        author: None,
-    };
+    let opts = NotesWriteOptions::new("note\n", ident());
     repo.notes()
         .add(&NotesRef::commits(), &tip, b"note\n", &opts, false)
         .expect("add note");

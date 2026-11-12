@@ -248,6 +248,7 @@ impl HttpMethod {
 
 /// A request for [`HttpClient::send`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct HttpRequest<'a> {
     /// Request method.
     pub method: HttpMethod,
@@ -282,17 +283,38 @@ impl<'a> HttpRequest<'a> {
         self
     }
 
-    /// Set the body.
+    /// Sets [`method`](Self::method).
     #[must_use]
-    pub fn body(mut self, body: &'a [u8]) -> Self {
+    pub fn with_method(mut self, method: HttpMethod) -> Self {
+        self.method = method;
+        self
+    }
+
+    /// Sets [`url`](Self::url).
+    #[must_use]
+    pub const fn with_url(mut self, url: &'a str) -> Self {
+        self.url = url;
+        self
+    }
+
+    /// Sets [`headers`](Self::headers).
+    #[must_use]
+    pub fn with_headers(mut self, headers: Vec<(&'static str, String)>) -> Self {
+        self.headers = headers;
+        self
+    }
+
+    /// Sets [`body`](Self::body).
+    #[must_use]
+    pub const fn with_body(mut self, body: &'a [u8]) -> Self {
         self.body = body;
         self
     }
 
-    /// Mark the request as a long transfer (see [`Self::long_running`]).
+    /// Sets [`long_running`](Self::long_running).
     #[must_use]
-    pub fn long_running(mut self) -> Self {
-        self.long_running = true;
+    pub const fn with_long_running(mut self, long_running: bool) -> Self {
+        self.long_running = long_running;
         self
     }
 }

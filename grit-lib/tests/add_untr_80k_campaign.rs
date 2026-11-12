@@ -98,10 +98,9 @@ fn bulk_untr_replay_when_index_drops_below_threshold_after_removals() {
 
     let grit = open_grit(&grit_root);
     let wt = grit.work_tree().expect("work tree");
-    let campaign_thresholds = IndexStagingThresholds {
-        large_index_restage: LARGE_THRESHOLD,
-        parallel_tracked_restage: LARGE_THRESHOLD,
-    };
+    let campaign_thresholds = IndexStagingThresholds::default()
+        .with_large_index_restage(LARGE_THRESHOLD)
+        .with_parallel_tracked_restage(LARGE_THRESHOLD);
     let summary = stage_tracked_modifications_with_thresholds(&grit, wt, campaign_thresholds)
         .expect("stage tracked");
     assert_eq!(summary.removed.len(), REMOVE);

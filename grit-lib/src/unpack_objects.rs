@@ -32,6 +32,7 @@ use flate2::{Decompress, FlushDecompress, Status};
 
 /// Options controlling `unpack-objects` behaviour.
 #[derive(Debug, Default)]
+#[non_exhaustive]
 pub struct UnpackOptions {
     /// Validate and decompress objects but do not write them to the ODB.
     pub dry_run: bool,
@@ -54,6 +55,60 @@ pub struct UnpackOptions {
     /// Mirrors `unpack-objects --shallow-file <file>` in upstream `receive-pack`, where the shallow
     /// file lists the commits whose parent objects were deliberately not transferred.
     pub shallow_boundaries: HashSet<ObjectId>,
+}
+
+impl UnpackOptions {
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets [`quiet`](Self::quiet).
+    #[must_use]
+    pub const fn with_quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
+        self
+    }
+
+    /// Sets [`strict`](Self::strict).
+    #[must_use]
+    pub const fn with_strict(mut self, strict: bool) -> Self {
+        self.strict = strict;
+        self
+    }
+
+    /// Sets [`allowed_missing`](Self::allowed_missing).
+    #[must_use]
+    pub fn with_allowed_missing(mut self, allowed_missing: HashSet<ObjectId>) -> Self {
+        self.allowed_missing = allowed_missing;
+        self
+    }
+
+    /// Sets [`allow_promisor_missing_references`](Self::allow_promisor_missing_references).
+    #[must_use]
+    pub const fn with_allow_promisor_missing_references(
+        mut self,
+        allow_promisor_missing_references: bool,
+    ) -> Self {
+        self.allow_promisor_missing_references = allow_promisor_missing_references;
+        self
+    }
+
+    /// Sets [`max_input_bytes`](Self::max_input_bytes).
+    #[must_use]
+    pub fn with_max_input_bytes(mut self, max_input_bytes: Option<u64>) -> Self {
+        self.max_input_bytes = max_input_bytes;
+        self
+    }
+
+    /// Sets [`shallow_boundaries`](Self::shallow_boundaries).
+    #[must_use]
+    pub fn with_shallow_boundaries(mut self, shallow_boundaries: HashSet<ObjectId>) -> Self {
+        self.shallow_boundaries = shallow_boundaries;
+        self
+    }
 }
 
 /// A delta that could not yet be resolved because its base was not yet known.

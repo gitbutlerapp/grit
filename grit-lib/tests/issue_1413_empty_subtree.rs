@@ -98,14 +98,13 @@ fn replay_revert_emptied_subdirectory_fsck_clean() {
     let grit = open_grit_repo(wt);
     let outcome = replay_commit(
         &grit,
-        &ReplayRequest {
-            commit: c2,
-            direction: ReplayDirection::Revert,
-            committer: "Tester <t@grit.test> 1700000060 +0000"
+        &ReplayRequest::new(
+            c2,
+            ReplayDirection::Revert,
+            "Tester <t@grit.test> 1700000060 +0000"
                 .parse()
                 .expect("committer"),
-            message_override: None,
-        },
+        ),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )
@@ -130,14 +129,13 @@ fn replay_pick_dir_delete_fsck_clean() {
     let grit = open_grit_repo(wt);
     let outcome = replay_commit(
         &grit,
-        &ReplayRequest {
-            commit: delete_commit,
-            direction: ReplayDirection::Pick,
-            committer: "Tester <t@grit.test> 1700000120 +0000"
+        &ReplayRequest::new(
+            delete_commit,
+            ReplayDirection::Pick,
+            "Tester <t@grit.test> 1700000120 +0000"
                 .parse()
                 .expect("committer"),
-            message_override: None,
-        },
+        ),
         &mut grit_lib::progress::NullProgress,
         &CancelToken::never(),
     )

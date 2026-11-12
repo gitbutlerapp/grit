@@ -433,7 +433,7 @@ fn download_attempt(
     mut on_start: impl FnMut(&mut dyn Progress, &AttemptStart),
 ) -> Result<AttemptOutcome> {
     let have = std::fs::metadata(part).map(|m| m.len()).unwrap_or(0);
-    let mut request = HttpRequest::new(HttpMethod::Get, url).long_running();
+    let mut request = HttpRequest::new(HttpMethod::Get, url).with_long_running(true);
     if have > 0 {
         request = request.header("Range", format!("bytes={have}-"));
         if let Some(validator) = &state.validator {
@@ -686,8 +686,8 @@ impl TusUpload {
                 .header("Tus-Resumable", TUS_VERSION)
                 .header("Upload-Offset", offset.to_string())
                 .header("Content-Type", TUS_PATCH_CONTENT_TYPE)
-                .body(&buf[..n])
-                .long_running();
+                .with_body(&buf[..n])
+                .with_long_running(true);
             let failure = match client.send(&request) {
                 Ok(r) if r.status == 204 || r.status == 200 => {
                     offset = upload_offset(&r, &self.url)?;

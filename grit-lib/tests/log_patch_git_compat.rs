@@ -61,10 +61,7 @@ fn init_corpus_repo(_git: &std::path::Path, dir: &std::path::Path) {
 }
 
 fn grit_log_patch(repo: &Repository, limit: usize, diff: DiffOptions) -> Vec<u8> {
-    let opts = RevListOptions {
-        max_count: Some(limit),
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_max_count(Some(limit));
     let result = repo
         .revwalk()
         .rev_list(
@@ -127,10 +124,7 @@ fn log_patch_full_header_separates_commits_like_git() {
         .rev_list(
             &["HEAD".to_owned()],
             &[],
-            &RevListOptions {
-                max_count: Some(15),
-                ..Default::default()
-            },
+            &RevListOptions::default().with_max_count(Some(15)),
             &mut NullProgress,
             &CancelToken::never(),
         )

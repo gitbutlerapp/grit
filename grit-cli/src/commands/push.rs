@@ -114,19 +114,17 @@ pub fn run(
 
     let follow = follow_tags || push_follow_tags_config(&config);
 
-    let push_request = PushRequest {
-        remote: invocation.remote,
-        refspecs: invocation.refspecs,
-        tags,
-        delete_refs,
-        delete: Vec::new(),
-        force: force_mode,
-        follow_tags: follow,
-        set_upstream,
-        all,
-        mirror,
-        prune,
-    };
+    let push_request = PushRequest::default()
+        .with_remote(invocation.remote)
+        .with_refspecs(invocation.refspecs)
+        .with_tags(tags)
+        .with_delete_refs(delete_refs)
+        .with_force(force_mode)
+        .with_follow_tags(follow)
+        .with_set_upstream(set_upstream)
+        .with_all(all)
+        .with_mirror(mirror)
+        .with_prune(prune);
 
     let mut plan = repo
         .remotes()

@@ -47,7 +47,7 @@ fn index_pack_threads_respects_cli_policy_not_config_alone() {
         index_pack_threads_for_ingest(ThreadPolicy::default(), &cfg, None).expect("ingest"),
         None
     );
-    let policy = ThreadPolicy::with_threads_override(Some(5));
+    let policy = ThreadPolicy::default().with_threads_override(Some(5));
     assert_eq!(
         index_pack_threads_for_ingest(policy, &cfg, None).expect("ingest"),
         Some(

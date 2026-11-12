@@ -18,7 +18,7 @@ static THREAD_POLICY: OnceLock<ThreadPolicy> = OnceLock::new();
 
 /// Apply the global `--threads` flag for subsequent repository opens in this process.
 pub fn set_thread_policy(threads: Option<usize>) {
-    let _ = THREAD_POLICY.set(ThreadPolicy::with_threads_override(threads));
+    let _ = THREAD_POLICY.set(ThreadPolicy::default().with_threads_override(threads));
 }
 
 /// Thread policy for [`grit_lib::config::environment::RepositoryOptions`] (global `--threads` when set).

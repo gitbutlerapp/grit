@@ -394,6 +394,7 @@ pub(crate) fn log_record_is_deletion(record: &LogRecord) -> bool {
 
 /// Write options for reftable creation.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct WriteOptions {
     /// Block size in bytes. 0 means use the default.
     pub block_size: u32,
@@ -457,6 +458,64 @@ impl Default for WriteOptions {
             auto_compaction_factor: 2,
             autocompaction_enabled: true,
         }
+    }
+}
+
+impl WriteOptions {
+    /// Sets [`block_size`](Self::block_size).
+    #[must_use]
+    pub const fn with_block_size(mut self, block_size: u32) -> Self {
+        self.block_size = block_size;
+        self
+    }
+
+    /// Sets [`restart_interval`](Self::restart_interval).
+    #[must_use]
+    pub const fn with_restart_interval(mut self, restart_interval: usize) -> Self {
+        self.restart_interval = restart_interval;
+        self
+    }
+
+    /// Sets [`write_log`](Self::write_log).
+    #[must_use]
+    pub const fn with_write_log(mut self, write_log: bool) -> Self {
+        self.write_log = write_log;
+        self
+    }
+
+    /// Sets [`skip_index_objects`](Self::skip_index_objects).
+    #[must_use]
+    pub const fn with_skip_index_objects(mut self, skip_index_objects: bool) -> Self {
+        self.skip_index_objects = skip_index_objects;
+        self
+    }
+
+    /// Sets [`unpadded`](Self::unpadded).
+    #[must_use]
+    pub const fn with_unpadded(mut self, unpadded: bool) -> Self {
+        self.unpadded = unpadded;
+        self
+    }
+
+    /// Sets [`hash_size`](Self::hash_size).
+    #[must_use]
+    pub const fn with_hash_size(mut self, hash_size: usize) -> Self {
+        self.hash_size = hash_size;
+        self
+    }
+
+    /// Sets [`auto_compaction_factor`](Self::auto_compaction_factor).
+    #[must_use]
+    pub const fn with_auto_compaction_factor(mut self, auto_compaction_factor: u8) -> Self {
+        self.auto_compaction_factor = auto_compaction_factor;
+        self
+    }
+
+    /// Sets [`autocompaction_enabled`](Self::autocompaction_enabled).
+    #[must_use]
+    pub const fn with_autocompaction_enabled(mut self, autocompaction_enabled: bool) -> Self {
+        self.autocompaction_enabled = autocompaction_enabled;
+        self
     }
 }
 

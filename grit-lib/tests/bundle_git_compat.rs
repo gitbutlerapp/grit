@@ -723,16 +723,8 @@ fn unbundle_promisor_marks_installed_pack_not_preexisting() {
     );
     let src_repo = grit_repo(src);
     let bare = grit_repo(consumer.path());
-    let seed_pack = build_pack(
-        src_repo.odb(),
-        &[tip],
-        &[],
-        &PackBuildOptions {
-            delta: false,
-            ..Default::default()
-        },
-    )
-    .expect("seed pack");
+    let seed_pack =
+        build_pack(src_repo.odb(), &[tip], &[], &PackBuildOptions::default()).expect("seed pack");
     let seeded = install_pack_bytes(seed_pack, bare.odb(), &IngestPackOptions::default())
         .expect("install seed");
     let old_pack = seeded.pack_path.expect("installed seed pack");

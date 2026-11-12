@@ -27,10 +27,7 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
     group.throughput(Throughput::Elements(fx.commit_count as u64));
     group.bench_function("walk_f00000", |b| {
         b.iter(|| {
-            let opts = RevListOptions {
-                paths: vec![String::from("f00000.txt")],
-                ..Default::default()
-            };
+            let opts = RevListOptions::default().with_paths(vec![String::from("f00000.txt")]);
             let result = fx
                 .repo
                 .revwalk()
@@ -47,13 +44,10 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
     });
     group.bench_function("count_f00000", |b| {
         b.iter(|| {
-            let opts = RevListOptions {
-                paths: vec![String::from("f00000.txt")],
-                count: true,
-                use_commit_graph: true,
-                use_commit_graph_bloom: true,
-                ..Default::default()
-            };
+            let opts = RevListOptions::default()
+                .with_paths(vec![String::from("f00000.txt")])
+                .with_count(true)
+                .with_use_commit_graph_bloom(true);
             let result = fx
                 .repo
                 .revwalk()
@@ -70,13 +64,10 @@ fn bench_revwalk_path_limited(c: &mut Criterion) {
     });
     group.bench_function("limit50_f00000", |b| {
         b.iter(|| {
-            let opts = RevListOptions {
-                paths: vec![String::from("f00000.txt")],
-                max_count: Some(50),
-                use_commit_graph: true,
-                use_commit_graph_bloom: true,
-                ..Default::default()
-            };
+            let opts = RevListOptions::default()
+                .with_paths(vec![String::from("f00000.txt")])
+                .with_max_count(Some(50))
+                .with_use_commit_graph_bloom(true);
             let result = fx
                 .repo
                 .revwalk()
@@ -113,12 +104,9 @@ fn revwalk_group(c: &mut Criterion, ordering: OrderingMode, label: &str) {
                         fx.remove_commit_graph();
                     }
                     b.iter(|| {
-                        let opts = RevListOptions {
-                            ordering,
-                            max_count: None,
-                            use_commit_graph: *with_graph,
-                            ..Default::default()
-                        };
+                        let opts = RevListOptions::default()
+                            .with_ordering(ordering)
+                            .with_use_commit_graph(*with_graph);
                         let result = fx
                             .repo
                             .revwalk()
@@ -187,7 +175,7 @@ fn bench_log_group_by_author(c: &mut Criterion) {
                             &["HEAD"],
                             &walk,
                             mailmap.as_ref(),
-                            GroupByAuthorOptions { count_only: true },
+                            GroupByAuthorOptions::default().with_count_only(true),
                         )
                         .expect("group"),
                 )
@@ -210,11 +198,7 @@ fn bench_revwalk_filter(c: &mut Criterion) {
     fx.ensure_commit_graph();
     group.bench_function("author_over_10k", |b| {
         b.iter(|| {
-            let opts = RevListOptions {
-                commit_filter: Some(filter.clone()),
-                use_commit_graph: true,
-                ..Default::default()
-            };
+            let opts = RevListOptions::default().with_commit_filter(Some(filter.clone()));
             let result = fx
                 .repo
                 .revwalk()
@@ -239,13 +223,11 @@ fn bench_revwalk_filter(c: &mut Criterion) {
             };
             group.bench_function(format!("author_limit_50_{storage}_{graph}"), |b| {
                 b.iter(|| {
-                    let opts = RevListOptions {
-                        max_count: Some(50),
-                        commit_filter: Some(Arc::clone(&filter)),
-                        use_commit_graph,
-                        retain_commit_data: true,
-                        ..Default::default()
-                    };
+                    let opts = RevListOptions::default()
+                        .with_max_count(Some(50))
+                        .with_commit_filter(Some(Arc::clone(&filter)))
+                        .with_use_commit_graph(use_commit_graph)
+                        .with_retain_commit_data(true);
                     let mut result = fixture
                         .repo
                         .revwalk()
@@ -305,15 +287,12 @@ fn bench_revwalk_limit_near_full_history(c: &mut Criterion) {
             &max_count,
             |b, &max_count| {
                 b.iter(|| {
-                    let opts = RevListOptions {
-                        max_count: if max_count == usize::MAX {
+                    let opts =
+                        RevListOptions::default().with_max_count(if max_count == usize::MAX {
                             None
                         } else {
                             Some(max_count)
-                        },
-                        use_commit_graph: true,
-                        ..Default::default()
-                    };
+                        });
                     let result = fx
                         .repo
                         .revwalk()
@@ -348,13 +327,9 @@ fn bench_revwalk_log_limit(c: &mut Criterion) {
         group.throughput(Throughput::Elements(max_count as u64));
         group.bench_function(BenchmarkId::from_parameter(label), |b| {
             b.iter(|| {
-                let opts = RevListOptions {
-                    max_count: Some(max_count),
-                    path_graph_reorder: false,
-                    use_commit_graph: true,
-                    retain_commit_data,
-                    ..Default::default()
-                };
+                let opts = RevListOptions::default()
+                    .with_max_count(Some(max_count))
+                    .with_retain_commit_data(retain_commit_data);
                 let result = fx
                     .repo
                     .revwalk()
@@ -377,10 +352,7 @@ fn bench_describe_many_tags(c: &mut Criterion) {
     static TAGGED: OnceLock<()> = OnceLock::new();
     TAGGED.get_or_init(|| {
         let fx = HistoryBenchFixtures::global();
-        let opts = RevListOptions {
-            use_commit_graph: false,
-            ..Default::default()
-        };
+        let opts = RevListOptions::default().with_use_commit_graph(false);
         let commits = fx
             .repo
             .revwalk()
@@ -417,10 +389,7 @@ fn bench_describe_many_tags(c: &mut Criterion) {
                             .revwalk()
                             .describe(
                                 "HEAD",
-                                &DescribeOptions {
-                                    tags: true,
-                                    ..Default::default()
-                                },
+                                &DescribeOptions::default().with_tags(true),
                                 &mut NullProgress,
                                 &CancelToken::never(),
                             )
@@ -448,11 +417,9 @@ fn bench_log_first_1000_gitgit_like(c: &mut Criterion) {
                     fx.remove_commit_graph();
                 }
                 b.iter(|| {
-                    let opts = RevListOptions {
-                        max_count: Some(1000),
-                        use_commit_graph: *with_graph,
-                        ..Default::default()
-                    };
+                    let opts = RevListOptions::default()
+                        .with_max_count(Some(1000))
+                        .with_use_commit_graph(*with_graph);
                     let result = fx
                         .repo
                         .revwalk()

@@ -158,10 +158,7 @@ fn rev_walk_resolve_and_list_match_git() {
     let git_head = git(wt, &["rev-parse", "HEAD"]).trim().to_owned();
     assert_eq!(head.to_hex(), git_head);
 
-    let opts = RevListOptions {
-        reverse: false,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default();
     let result = repo
         .revwalk()
         .walk("HEAD", &opts, &mut NullProgress, &CancelToken::never())
@@ -338,15 +335,11 @@ fn config_handle_set_local_linked_worktree_matches_git() {
     let linked = linked_holder.path().to_path_buf();
     open_grit_repo(main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("linked".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("linked".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add linked worktree");
 
     let linked_repo = open_grit_repo(&linked);

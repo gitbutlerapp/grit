@@ -363,10 +363,7 @@ fn assert_stash_reset_cancelled(
 #[test]
 fn stash_push_pathspec_reset_stops_when_the_sink_asks() {
     let (tmp, repo, _) = repo_with_modified_files();
-    let opts = StashPushOptions {
-        pathspecs: vec!["d".to_owned()],
-        ..stash_opts()
-    };
+    let opts = stash_opts().with_pathspecs(vec!["d".to_owned()]);
     assert_stash_reset_cancelled(&tmp, &repo, &opts);
 }
 
@@ -381,10 +378,7 @@ fn stash_push_staged_only_reset_stops_when_the_sink_asks() {
         )
         .expect("stage");
     let before = index_bytes(&repo);
-    let opts = StashPushOptions {
-        mode: StashMode::StagedOnly,
-        ..stash_opts()
-    };
+    let opts = stash_opts().with_mode(StashMode::StagedOnly);
     assert_stash_reset_cancelled(&tmp, &repo, &opts);
     assert_index_untouched(&repo, &before);
 }
@@ -395,26 +389,14 @@ fn stash_push_partial_reset_stops_when_the_sink_asks() {
     let ranges = (0..FILES)
         .map(|i| grit_lib::porcelain::hunk_select::LineRange::new(format!("d/f{i:04}.txt"), 1, 1))
         .collect();
-    let opts = StashPushOptions {
-        selection: Some(grit_lib::porcelain::hunk_select::HunkSelection {
-            ids: Vec::new(),
-            ranges,
-        }),
-        ..stash_opts()
-    };
+    let opts = stash_opts().with_selection(Some(
+        grit_lib::porcelain::hunk_select::HunkSelection::default().with_ranges(ranges),
+    ));
     assert_stash_reset_cancelled(&tmp, &repo, &opts);
 }
 
 fn stash_opts() -> StashPushOptions {
-    StashPushOptions {
-        message: Some("wip".into()),
-        include_untracked: false,
-        identity: IDENT.parse().expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: StashMode::default(),
-    }
+    StashPushOptions::new(IDENT.parse().expect("signature")).with_message(Some("wip".into()))
 }
 
 #[test]
@@ -854,12 +836,11 @@ fn rebase_cancelled_during_checkout_rolls_back() {
 #[test]
 fn pick_stops_before_moving_the_branch() {
     let (tmp, repo, side, topic) = repo_for_rebase();
-    let req = ReplayRequest {
-        commit: side,
-        direction: ReplayDirection::Pick,
-        committer: IDENT.parse().expect("signature"),
-        message_override: None,
-    };
+    let req = ReplayRequest::new(
+        side,
+        ReplayDirection::Pick,
+        IDENT.parse().expect("signature"),
+    );
     assert_cancelled(replay_commit(
         &repo,
         &req,

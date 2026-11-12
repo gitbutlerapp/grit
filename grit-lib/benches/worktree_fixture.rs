@@ -72,7 +72,7 @@ fn ieot_write_repo(base: &Path) -> Repository {
         &grit_lib::config::environment::RepositoryOptions::empty(),
     )
     .expect("open ieot config repo")
-    .with_thread_policy(ThreadPolicy::with_threads_override(Some(4)))
+    .with_thread_policy(ThreadPolicy::default().with_threads_override(Some(4)))
 }
 
 fn write_index_file_ieot(index: &Index, path: &Path, repo: &Repository) {

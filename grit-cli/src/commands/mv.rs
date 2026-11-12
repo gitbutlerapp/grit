@@ -25,12 +25,9 @@ pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> 
     let lib_outcome = repo
         .checkout()
         .move_paths(
-            &MoveOptions {
-                sources: resolved_srcs,
-                destination: resolved_dst,
-                force,
-                dry_run,
-            },
+            &MoveOptions::new(resolved_srcs, resolved_dst)
+                .with_force(force)
+                .with_dry_run(dry_run),
             &cancel,
         )
         .map_err(crate::json_error::map_lib_error)?;

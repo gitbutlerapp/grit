@@ -87,7 +87,7 @@ fn stash_diff_stat_matches_git_numstat() {
             .stash()
             .diff_stat(
                 0,
-                &StashDiffOptions { include_untracked },
+                &StashDiffOptions::default().with_include_untracked(include_untracked),
                 DiffOptions::default(),
             )
             .expect("diff_stat");
@@ -145,12 +145,7 @@ fn stash_diff_is_in_path_order_with_untracked_entries() {
 
     let entries = repo
         .stash()
-        .diff(
-            0,
-            &StashDiffOptions {
-                include_untracked: true,
-            },
-        )
+        .diff(0, &StashDiffOptions::default().with_include_untracked(true))
         .expect("diff");
     let paths: Vec<&str> = entries.iter().map(|e| e.path()).collect();
     let mut sorted = paths.clone();

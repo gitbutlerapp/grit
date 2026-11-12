@@ -93,13 +93,7 @@ fn files_repo_reflog_edits_stay_readable_by_git() {
 
     let page = repo
         .reflogs()
-        .query(
-            &head,
-            &ReflogQuery {
-                limit: Some(1),
-                ..ReflogQuery::default()
-            },
-        )
+        .query(&head, &ReflogQuery::default().with_limit(Some(1)))
         .expect("query");
     assert_eq!(page.entries.len(), 1);
     assert!(page.truncated);

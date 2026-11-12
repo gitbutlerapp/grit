@@ -1689,12 +1689,8 @@ fn main() -> Result<()> {
             use grit_lib::porcelain::branch::BranchRenameOptions;
             use grit_lib::repo::Repository;
             let repo = Repository::discover(Some(repo.as_path()), &RepositoryOptions::empty())?;
-            repo.branches().rename(&BranchRenameOptions {
-                old: old.clone(),
-                new: new.clone(),
-                force: false,
-                dry_run: false,
-            })?;
+            repo.branches()
+                .rename(&BranchRenameOptions::new(old.clone(), new.clone()))?;
             return Ok(());
         }
         Cmd::PrepareParallelCheckout { git, url, dest } => {

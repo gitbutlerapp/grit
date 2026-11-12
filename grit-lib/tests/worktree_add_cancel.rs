@@ -57,15 +57,9 @@ fn cancel_during_worktree_add_leaves_no_registration_or_branch() {
     let err = repo
         .worktrees()
         .add_with_cancel(
-            &AddLinkedWorktreeOptions {
-                path: wt_path.clone(),
-                branch: Some(WorktreeBranch::Create("wtb".into())),
-                start_point: Some("HEAD".into()),
-                force: false,
-                lock: None,
-                no_checkout: false,
-                track: false,
-            },
+            &AddLinkedWorktreeOptions::new(wt_path.clone())
+                .with_branch(Some(WorktreeBranch::Create("wtb".into())))
+                .with_start_point(Some("HEAD".into())),
             &cancel,
         )
         .expect_err("cancelled add");

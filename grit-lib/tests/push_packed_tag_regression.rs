@@ -45,11 +45,9 @@ fn ctx_from_bare(bare: &Path) -> PushPlanContext {
             remote_branch_tips.insert(ObjectId::from_hex(hex).expect("oid"));
         }
     }
-    PushPlanContext {
-        remote_ref_names,
-        remote_branch_tips,
-        remote_tips: None,
-    }
+    PushPlanContext::default()
+        .with_remote_ref_names(remote_ref_names)
+        .with_remote_branch_tips(remote_branch_tips)
 }
 
 #[test]
@@ -93,11 +91,9 @@ fn packed_annotated_tags_push_is_up_to_date_and_preserves_remote_tag() {
     let specs = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                tags: true,
-                remote: Some("origin".into()),
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_tags(true)
+                .with_remote(Some("origin".into())),
             &ctx,
         )
         .expect("plan")

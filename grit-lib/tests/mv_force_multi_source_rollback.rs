@@ -40,12 +40,8 @@ fn multi_source_missing_later_source_rolls_back_earlier_forced_move() {
     let err = repo
         .checkout()
         .move_paths(
-            &MoveOptions {
-                sources: vec!["src/f0000".into(), "src/f0001".into()],
-                destination: "dest".into(),
-                force: true,
-                dry_run: false,
-            },
+            &MoveOptions::new(vec!["src/f0000".into(), "src/f0001".into()], "dest")
+                .with_force(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("missing later source");

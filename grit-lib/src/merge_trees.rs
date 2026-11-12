@@ -208,6 +208,7 @@ pub struct RenameRenameConflict {
 
 #[derive(Clone, Copy, Debug, Default)]
 /// `WhitespaceMergeOptions` struct.
+#[non_exhaustive]
 pub struct WhitespaceMergeOptions {
     /// `ignore_all_space` field.
     pub ignore_all_space: bool,
@@ -217,6 +218,36 @@ pub struct WhitespaceMergeOptions {
     pub ignore_space_at_eol: bool,
     /// `ignore_cr_at_eol` field.
     pub ignore_cr_at_eol: bool,
+}
+
+impl WhitespaceMergeOptions {
+    /// Sets [`ignore_all_space`](Self::ignore_all_space).
+    #[must_use]
+    pub const fn with_ignore_all_space(mut self, ignore_all_space: bool) -> Self {
+        self.ignore_all_space = ignore_all_space;
+        self
+    }
+
+    /// Sets [`ignore_space_change`](Self::ignore_space_change).
+    #[must_use]
+    pub const fn with_ignore_space_change(mut self, ignore_space_change: bool) -> Self {
+        self.ignore_space_change = ignore_space_change;
+        self
+    }
+
+    /// Sets [`ignore_space_at_eol`](Self::ignore_space_at_eol).
+    #[must_use]
+    pub const fn with_ignore_space_at_eol(mut self, ignore_space_at_eol: bool) -> Self {
+        self.ignore_space_at_eol = ignore_space_at_eol;
+        self
+    }
+
+    /// Sets [`ignore_cr_at_eol`](Self::ignore_cr_at_eol).
+    #[must_use]
+    pub const fn with_ignore_cr_at_eol(mut self, ignore_cr_at_eol: bool) -> Self {
+        self.ignore_cr_at_eol = ignore_cr_at_eol;
+        self
+    }
 }
 
 /// How to label the "theirs" side in textual conflict markers.

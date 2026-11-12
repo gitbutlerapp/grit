@@ -72,6 +72,7 @@ pub struct LeftRightCounts {
 /// For token lists, ref selections, path limits, or symmetric diff markers, use
 /// [`RevWalkListOptions`] with [`RevWalk::commits`] or [`RevWalk::rev_list_result`].
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct RevWalkCommitIterOptions {
     /// Skip this many matching commits before yielding.
     pub skip: usize,
@@ -83,6 +84,43 @@ pub struct RevWalkCommitIterOptions {
     pub until: Option<i64>,
     /// Follow only the first parent at merges when walking history.
     pub first_parent: bool,
+}
+
+impl RevWalkCommitIterOptions {
+    /// Sets [`skip`](Self::skip).
+    #[must_use]
+    pub const fn with_skip(mut self, skip: usize) -> Self {
+        self.skip = skip;
+        self
+    }
+
+    /// Sets [`limit`](Self::limit).
+    #[must_use]
+    pub const fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Sets [`since`](Self::since).
+    #[must_use]
+    pub const fn with_since(mut self, since: Option<i64>) -> Self {
+        self.since = since;
+        self
+    }
+
+    /// Sets [`until`](Self::until).
+    #[must_use]
+    pub const fn with_until(mut self, until: Option<i64>) -> Self {
+        self.until = until;
+        self
+    }
+
+    /// Sets [`first_parent`](Self::first_parent).
+    #[must_use]
+    pub const fn with_first_parent(mut self, first_parent: bool) -> Self {
+        self.first_parent = first_parent;
+        self
+    }
 }
 
 /// Options for listing or counting commits through [`RevWalk`].

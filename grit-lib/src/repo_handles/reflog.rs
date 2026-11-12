@@ -121,6 +121,7 @@ pub struct IndexedReflogEntry {
 
 /// Filters for [`RepositoryReflogs::query`].
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct ReflogQuery {
     /// Maximum matching entries to return (newest first).
     pub limit: Option<usize>,
@@ -132,6 +133,43 @@ pub struct ReflogQuery {
     pub grep: Option<MessageMatcher>,
     /// Wall-clock anchor passed by the caller (not read from the system clock here).
     pub now: i64,
+}
+
+impl ReflogQuery {
+    /// Sets [`limit`](Self::limit).
+    #[must_use]
+    pub const fn with_limit(mut self, limit: Option<usize>) -> Self {
+        self.limit = limit;
+        self
+    }
+
+    /// Sets [`since`](Self::since).
+    #[must_use]
+    pub const fn with_since(mut self, since: Option<i64>) -> Self {
+        self.since = since;
+        self
+    }
+
+    /// Sets [`until`](Self::until).
+    #[must_use]
+    pub const fn with_until(mut self, until: Option<i64>) -> Self {
+        self.until = until;
+        self
+    }
+
+    /// Sets [`grep`](Self::grep).
+    #[must_use]
+    pub fn with_grep(mut self, grep: Option<MessageMatcher>) -> Self {
+        self.grep = grep;
+        self
+    }
+
+    /// Sets [`now`](Self::now).
+    #[must_use]
+    pub const fn with_now(mut self, now: i64) -> Self {
+        self.now = now;
+        self
+    }
 }
 
 /// One page of reflog query results.

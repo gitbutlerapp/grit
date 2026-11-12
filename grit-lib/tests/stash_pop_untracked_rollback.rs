@@ -3,21 +3,15 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
-use grit_lib::stash::{flatten_tree_full, StashApplyOptions, StashMode, StashPushOptions};
+use grit_lib::stash::{flatten_tree_full, StashApplyOptions, StashPushOptions};
 use grit_test_support::{git, git_cmd};
 use std::fs;
 use tempfile::tempdir;
 
 fn stash_push_untracked() -> StashPushOptions {
-    StashPushOptions {
-        message: Some("wip".to_owned()),
-        include_untracked: true,
-        identity: "T <t@e.com> 1000000000 +0000".parse().expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: StashMode::default(),
-    }
+    StashPushOptions::new("T <t@e.com> 1000000000 +0000".parse().expect("signature"))
+        .with_message(Some("wip".to_owned()))
+        .with_include_untracked(true)
 }
 
 #[test]

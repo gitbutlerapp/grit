@@ -215,14 +215,7 @@ fn fold_peeled_refs_matches_git_ls_remote() {
     let config = open(tmp.path()).config().snapshot().expect("config");
     let remote = resolve_remote_argument(&config, tmp.path().to_str().unwrap()).expect("remote");
     let raw = remote
-        .list_refs(
-            None,
-            &ListRefsOptions {
-                peel: true,
-                ..Default::default()
-            },
-            None,
-        )
+        .list_refs(None, &ListRefsOptions::default().with_peel(true), None)
         .expect("list refs");
     let folded = fold_peeled_refs(&raw);
 
@@ -276,14 +269,7 @@ fn local_ls_remote_peels_nested_tags_like_git() {
     let config = open(tmp.path()).config().snapshot().expect("config");
     let remote = resolve_remote_argument(&config, tmp.path().to_str().unwrap()).expect("remote");
     let mut grit_lines: Vec<(String, String)> = remote
-        .list_refs(
-            None,
-            &ListRefsOptions {
-                peel: true,
-                ..Default::default()
-            },
-            None,
-        )
+        .list_refs(None, &ListRefsOptions::default().with_peel(true), None)
         .expect("list refs")
         .into_iter()
         .map(|r| (r.oid.to_hex(), r.name))

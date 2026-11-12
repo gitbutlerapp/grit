@@ -80,11 +80,10 @@ fn store_rejects_casefold_create_against_packed_ref() {
     let tip = oid(0xab);
     seed_packed_foo(git_dir, tip);
 
-    let store = FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.to_path_buf(),
-        common_dir: git_dir.to_path_buf(),
-        namespace_prefix: None,
-    });
+    let store = FilesRefStore::open(FilesRefStoreConfig::new(
+        git_dir.to_path_buf(),
+        git_dir.to_path_buf(),
+    ));
     let update = RefUpdate::new("refs/heads/foo".to_owned(), Some(RawRef::Direct(oid(0xcd))))
         .with_expected(Expected::Missing);
     let txn = RefTransaction::new().update(update).expect("valid update");
@@ -160,11 +159,10 @@ fn initial_transaction_rejects_same_batch_casefold_pair() {
     let git_dir = dir.path();
     git(git_dir, &["init", "-q", "--bare", "."]);
     git(git_dir, &["config", "core.ignorecase", "true"]);
-    let store = FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.to_path_buf(),
-        common_dir: git_dir.to_path_buf(),
-        namespace_prefix: None,
-    });
+    let store = FilesRefStore::open(FilesRefStoreConfig::new(
+        git_dir.to_path_buf(),
+        git_dir.to_path_buf(),
+    ));
     let foo = RefUpdate::new("refs/heads/Foo".to_owned(), Some(RawRef::Direct(oid(1))))
         .with_expected(Expected::Missing);
     let bar = RefUpdate::new("refs/heads/foo".to_owned(), Some(RawRef::Direct(oid(2))))
@@ -189,11 +187,10 @@ fn case_sensitive_config_allows_distinct_case_ref_names() {
     git(git_dir, &["config", "core.ignorecase", "false"]);
     seed_packed_foo(git_dir, oid(1));
 
-    let store = FilesRefStore::open(FilesRefStoreConfig {
-        git_dir: git_dir.to_path_buf(),
-        common_dir: git_dir.to_path_buf(),
-        namespace_prefix: None,
-    });
+    let store = FilesRefStore::open(FilesRefStoreConfig::new(
+        git_dir.to_path_buf(),
+        git_dir.to_path_buf(),
+    ));
     let update = RefUpdate::new("refs/heads/foo".to_owned(), Some(RawRef::Direct(oid(2))))
         .with_expected(Expected::Missing);
     let txn = RefTransaction::new()

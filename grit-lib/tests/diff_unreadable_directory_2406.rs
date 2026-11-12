@@ -151,17 +151,11 @@ mod unix {
         }
 
         let fx = open_repo(root);
-        let opts = StashPushOptions {
-            message: None,
-            include_untracked: false,
-            identity: "Test <t@example.com> 1000000000 +0000"
+        let opts = StashPushOptions::new(
+            "Test <t@example.com> 1000000000 +0000"
                 .parse()
                 .expect("signature"),
-            selection: None,
-            pathspecs: Vec::new(),
-            dry_run: false,
-            mode: grit_lib::stash::StashMode::default(),
-        };
+        );
         fx.repo
             .stash()
             .push(&opts, &mut NullProgress, &CancelToken::never())

@@ -53,11 +53,7 @@ fn seed_commit(root: &std::path::Path, path: &str, content: &str, msg: &str) -> 
 }
 
 fn write_opts(message: &str) -> NotesWriteOptions {
-    NotesWriteOptions {
-        message: message.into(),
-        committer: IDENT.parse().expect("signature"),
-        author: None,
-    }
+    NotesWriteOptions::new(message, IDENT.parse().expect("signature"))
 }
 
 #[test]

@@ -207,10 +207,7 @@ fn git_made_tag_with_header_verifies() {
         .status()
         .expect("git verify-tag status");
 
-    let opts = TagVerifyOptions {
-        check_signature: true,
-        gpg: gpg_config(&repo),
-    };
+    let opts = TagVerifyOptions::new(gpg_config(&repo));
     let report = repo.verify_tag(tag_oid, &opts).expect("verify");
     assert!(report.is_ok(), "{report:?}");
     assert!(matches!(report.signature, SignatureVerdict::Good { .. }));
@@ -249,10 +246,7 @@ fn reference_tool_tag_fixture_verifies() {
         .odb()
         .write(ObjectKind::Tag, &tag_bytes)
         .expect("install tag");
-    let opts = TagVerifyOptions {
-        check_signature: true,
-        gpg: gpg_config(&repo),
-    };
+    let opts = TagVerifyOptions::new(gpg_config(&repo));
     let report = repo.verify_tag(tag_oid, &opts).expect("verify fixture");
     assert!(report.is_ok(), "{report:?}");
 }
@@ -286,13 +280,7 @@ fn edited_header_fails_signature() {
     }
     let tag_oid = repo.odb().write(ObjectKind::Tag, &tampered).expect("write");
     let report = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify");
     assert!(!report.is_ok());
     assert!(matches!(report.signature, SignatureVerdict::Bad));
@@ -319,13 +307,7 @@ fn wrong_claim_fails_digest() {
     let signed = sign_payload_ssh(&key, body.as_bytes());
     let tag_oid = repo.odb().write(ObjectKind::Tag, &signed).expect("write");
     let report = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify");
     assert!(matches!(report.signature, SignatureVerdict::Good { .. }));
     assert!(!report.is_ok());
@@ -355,13 +337,7 @@ fn bogus_excluded_path_fails() {
     let signed = sign_payload_ssh(&key, body.as_bytes());
     let tag_oid = repo.odb().write(ObjectKind::Tag, &signed).expect("write");
     let report = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify");
     assert!(!report.is_ok());
     assert_eq!(
@@ -409,10 +385,7 @@ fn changed_blob_detected() {
     let report = repo
         .verify_tag(
             tag_oid,
-            &TagVerifyOptions {
-                check_signature: false,
-                gpg: gpg_config(&repo),
-            },
+            &TagVerifyOptions::new(gpg_config(&repo)).with_check_signature(false),
         )
         .expect("verify");
     assert!(!report.is_ok());
@@ -447,13 +420,7 @@ fn unsigned_tag_with_header_reports_missing_signature() {
     let bytes = serialize_tag(&tag);
     let tag_oid = repo.odb().write(ObjectKind::Tag, &bytes).expect("write");
     let report = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify");
     assert!(matches!(report.signature, SignatureVerdict::Missing));
     assert!(!report.is_ok());
@@ -477,13 +444,7 @@ fn signed_tag_without_header_verifies_signature_only() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     let tag_oid = repo.odb().write(ObjectKind::Tag, &signed).expect("write");
     let report = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify");
     assert!(report.is_ok());
     assert!(report.tree_sha256.is_none());
@@ -503,10 +464,7 @@ fn non_tag_object_rejected() {
     let err = repo
         .verify_tag(
             commit,
-            &TagVerifyOptions {
-                check_signature: false,
-                gpg: gpg_config(&repo),
-            },
+            &TagVerifyOptions::new(gpg_config(&repo)).with_check_signature(false),
         )
         .unwrap_err();
     assert!(matches!(err, Error::Tag(TagError::VerifyNotTag { .. })));
@@ -527,10 +485,7 @@ fn verify_tag_by_name_reads_git_written_loose_and_packed_tags() {
         .parse()
         .unwrap();
     let repo = Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("open");
-    let options = TagVerifyOptions {
-        check_signature: false,
-        gpg: gpg_config(&repo),
-    };
+    let options = TagVerifyOptions::new(gpg_config(&repo)).with_check_signature(false);
 
     for name in ["v-loose", "v-packed"] {
         let tag_oid: grit_lib::objects::ObjectId =
@@ -613,16 +568,7 @@ fn signature_and_hash_run_concurrently() {
 
     let handle = std::thread::spawn({
         let gpg = gpg.clone();
-        move || {
-            verify_tag(
-                &repo,
-                tag_oid,
-                &TagVerifyOptions {
-                    check_signature: true,
-                    gpg,
-                },
-            )
-        }
+        move || verify_tag(&repo, tag_oid, &TagVerifyOptions::new(gpg))
     });
     for _ in 0..30 {
         assert!(
@@ -756,13 +702,7 @@ fn verify_tag_nested_exclusion_path_from_root() {
         .write(ObjectKind::Tag, &signed)
         .expect("write tag");
     let report = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify nested exclusion");
     assert!(report.is_ok(), "{report:?}");
     assert_eq!(
@@ -920,13 +860,7 @@ fn verify_tag_deep_nested_exclusion_path_from_root() {
         .write(ObjectKind::Tag, &signed)
         .expect("write tag");
     let report = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify deep nested exclusion");
     assert!(report.is_ok(), "{report:?}");
     assert_eq!(
@@ -1100,13 +1034,7 @@ fn verify_tag_deep_nested_missing_submodule_path_from_root() {
     // A missing submodule is reported in the verification result, not as an error, so the
     // signature verdict is still available to the caller.
     let verification = repo
-        .verify_tag(
-            tag_oid,
-            &TagVerifyOptions {
-                check_signature: true,
-                gpg: gpg_config(&repo),
-            },
-        )
+        .verify_tag(tag_oid, &TagVerifyOptions::new(gpg_config(&repo)))
         .expect("verify tag with missing nested submodule");
     assert!(
         matches!(verification.signature, SignatureVerdict::Good { .. }),

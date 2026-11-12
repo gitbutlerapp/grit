@@ -2480,7 +2480,7 @@ mod tests {
                 &RepositoryOptions::empty().with_work_tree(root),
             )
             .unwrap()
-            .with_thread_policy(ThreadPolicy::with_threads_override(Some(threads)));
+            .with_thread_policy(ThreadPolicy::default().with_threads_override(Some(threads)));
             let err = commit_worktree(
                 &repo,
                 &dry_run_req("clean"),
@@ -2513,7 +2513,7 @@ mod tests {
                 &RepositoryOptions::empty().with_work_tree(root),
             )
             .unwrap()
-            .with_thread_policy(ThreadPolicy::with_threads_override(Some(threads)));
+            .with_thread_policy(ThreadPolicy::default().with_threads_override(Some(threads)));
             let preview = commit_worktree(
                 &repo,
                 &dry_run_req("retarget"),

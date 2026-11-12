@@ -340,11 +340,9 @@ fn list_refs_file_url_matches_git_ls_remote() {
     let (_tmp, bare) = bare_fixture();
     let url = format!("file://{}", bare.display());
     let remote = Remote::from_url(&url).unwrap();
-    let opts = ListRefsOptions {
-        symrefs: true,
-        peel: true,
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_symrefs(true)
+        .with_peel(true);
     let refs = remote.list_refs(None, &opts, None).unwrap();
     assert_refs_match_git(&url, &refs, &opts, &[]);
 }
@@ -375,20 +373,14 @@ fn list_refs_custom_namespaces_match_git_ls_remote() {
     let url = file_url.as_str();
     for pattern in ["refs/pull/1/head", "refs/custom/x", "refs/pull/*", "HEAD"] {
         let remote = Remote::from_url(url).unwrap();
-        let opts = ListRefsOptions {
-            prefixes: vec![pattern.to_owned()],
-            ..Default::default()
-        };
+        let opts = ListRefsOptions::default().with_prefixes(vec![pattern.to_owned()]);
         let refs = remote.list_refs(None, &opts, None).unwrap();
         let git_map = git_ls_remote(url, &[], &[pattern], &[], None);
         assert_eq!(grit_refs_map(&refs), git_map, "pattern {pattern}");
     }
 
     let remote = Remote::from_url(url).unwrap();
-    let opts = ListRefsOptions {
-        heads: true,
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default().with_heads(true);
     let refs = remote.list_refs(None, &opts, None).unwrap();
     let git_map = git_ls_remote(url, &["--heads"], &[], &[], None);
     assert_eq!(grit_refs_map(&refs), git_map);
@@ -403,10 +395,7 @@ fn list_refs_heads_only_matches_git() {
     let (_tmp, bare) = bare_fixture();
     let url = format!("file://{}", bare.display());
     let remote = Remote::from_url(&url).unwrap();
-    let opts = ListRefsOptions {
-        heads: true,
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default().with_heads(true);
     let refs = remote.list_refs(None, &opts, None).unwrap();
     assert!(!refs.iter().any(|r| r.name == "HEAD"));
 
@@ -507,12 +496,9 @@ fn list_refs_git_daemon_v0_matches_git() {
     };
     let url = &fixture.url;
     let remote = Remote::from_url(url).unwrap();
-    let opts = ListRefsOptions {
-        symrefs: true,
-        peel: false,
-        protocol_version: Some(0),
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_symrefs(true)
+        .with_protocol_version(Some(0));
     let refs = remote.list_refs(None, &opts, None).unwrap();
     assert!(!refs.is_empty(), "v0 daemon list_refs must return refs");
     assert_refs_match_git(url, &refs, &opts, &[]);
@@ -525,11 +511,9 @@ fn list_refs_git_daemon_v2_pattern_main_matches_git() {
     };
     let url = &fixture.url;
     let remote = Remote::from_url(url).unwrap();
-    let opts = ListRefsOptions {
-        prefixes: vec!["main".to_owned()],
-        protocol_version: Some(2),
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_prefixes(vec!["main".to_owned()])
+        .with_protocol_version(Some(2));
     let refs = remote.list_refs(None, &opts, None).unwrap();
     assert_eq!(refs.len(), 1);
     assert_eq!(refs[0].name, "refs/heads/main");
@@ -551,12 +535,9 @@ fn list_refs_git_daemon_v2_matches_git() {
     };
     let url = &fixture.url;
     let remote = Remote::from_url(url).unwrap();
-    let opts = ListRefsOptions {
-        symrefs: true,
-        peel: false,
-        protocol_version: Some(2),
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_symrefs(true)
+        .with_protocol_version(Some(2));
     let refs = remote.list_refs(None, &opts, None).unwrap();
     assert!(!refs.is_empty(), "v2 daemon list_refs must return refs");
     assert_refs_match_git(url, &refs, &opts, &[]);
@@ -612,11 +593,9 @@ fn list_refs_ssh_matches_git_ls_remote() {
     let remote = Remote::from_url(&url).unwrap();
     let options = RepositoryOptions::with_environment(Environment::capture_process());
     let ctx = Repository::open(&bare, &options).expect("open bare");
-    let opts = ListRefsOptions {
-        symrefs: true,
-        peel: true,
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_symrefs(true)
+        .with_peel(true);
     let refs = remote
         .list_refs(Some(&ctx), &opts, None)
         .expect("ssh list_refs");
@@ -632,11 +611,9 @@ fn list_refs_ssh_without_repo_uses_git_ssh_command() {
     let _env = EnvRestore::set("GIT_SSH_COMMAND", ssh_cmd);
     let url = format!("git@localhost:{}", bare.display());
     let remote = Remote::from_url(&url).unwrap();
-    let opts = ListRefsOptions {
-        symrefs: true,
-        peel: true,
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_symrefs(true)
+        .with_peel(true);
     let refs = remote
         .list_refs(None, &opts, None)
         .expect("ssh list_refs without repository context");
@@ -661,11 +638,9 @@ fn list_refs_smart_http_matches_git_ls_remote() {
     assert!(wait_tcp(port), "smart HTTP server did not become ready");
     let url = format!("http://127.0.0.1:{port}/repo.git");
     let remote = Remote::from_url(&url).unwrap();
-    let opts = ListRefsOptions {
-        symrefs: true,
-        peel: true,
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_symrefs(true)
+        .with_peel(true);
     let refs = remote
         .list_refs(None, &opts, Some(&DefaultHttpClientFactory::new()))
         .unwrap();
@@ -689,12 +664,9 @@ fn list_refs_smart_http_v0_matches_git_ls_remote() {
     assert!(wait_tcp(port), "smart HTTP server did not become ready");
     let url = format!("http://127.0.0.1:{port}/repo.git");
     let remote = Remote::from_url(&url).unwrap();
-    let opts = ListRefsOptions {
-        symrefs: true,
-        peel: false,
-        protocol_version: Some(0),
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_symrefs(true)
+        .with_protocol_version(Some(0));
     let refs = remote
         .list_refs(None, &opts, Some(&DefaultHttpClientFactory::new()))
         .unwrap();

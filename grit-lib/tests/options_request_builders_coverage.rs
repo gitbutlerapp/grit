@@ -2,7 +2,8 @@
 //! request structs: rev walks, ref updates and queries, tag creation, reflog expiry, history
 //! rewrites, push, clone, pull, serve, switch, restore, merge, status and ownership checks, plus
 //! apply, blame, bundle, hooks, config loading, diff and patch output, index, pack ingest, branch
-//! comparison, history edits and CRLF conversion.
+//! comparison, history edits and CRLF conversion, and the options, request and input structs of
+//! the merge, pack, porcelain, refs, remote, revwalk, stash and worktree modules.
 
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::commits::HookPolicy;
@@ -1214,7 +1215,7 @@ fn index_and_object_options_setters_set_each_field() {
     use grit_lib::objects::index_pack::IngestPackOptions;
     use grit_lib::objects::HashAlgo;
 
-    let policy = ThreadPolicy::with_threads_override(Some(2));
+    let policy = ThreadPolicy::default().with_threads_override(Some(2));
     assert_eq!(
         IndexParseContext::default()
             .with_thread_policy(policy)
@@ -1475,4 +1476,1121 @@ fn crlf_conversion_options_setters_set_each_field() {
     assert_eq!(attrs.working_tree_encoding.as_deref(), Some("UTF-16"));
     assert_eq!(attrs.crlf_legacy, CrlfLegacyAttr::Input);
     assert_eq!(attrs.whitespace.as_deref(), Some("trailing-space"));
+}
+
+// Step 6d part B: options and request structs under grit-lib/src/[m-z].
+
+#[test]
+fn gpg_config_constructor_and_setters() {
+    let d = grit_lib::commit::signing::GpgConfig::from_config(&grit_lib::config::ConfigSet::new())
+        .expect("gpg");
+    let opts =
+        grit_lib::commit::signing::GpgConfig::from_config(&grit_lib::config::ConfigSet::new())
+            .expect("gpg")
+            .with_format(d.format)
+            .with_program("x".to_owned())
+            .with_generic_program(Some("x".to_owned()))
+            .with_openpgp_program(Some("x".to_owned()))
+            .with_x509_program(Some("x".to_owned()))
+            .with_ssh_program(Some("x".to_owned()))
+            .with_signing_key(Some("x".to_owned()))
+            .with_min_trust_level(d.min_trust_level)
+            .with_ssh_allowed_signers(Some("x".to_owned()))
+            .with_ssh_revocation_file(Some("x".to_owned()))
+            .with_command_runner(d.command_runner);
+    assert_eq!(opts.program, "x");
+    assert_eq!(opts.generic_program.as_deref(), Some("x"));
+    assert_eq!(opts.openpgp_program.as_deref(), Some("x"));
+    assert_eq!(opts.x509_program.as_deref(), Some("x"));
+    assert_eq!(opts.ssh_program.as_deref(), Some("x"));
+    assert_eq!(opts.signing_key.as_deref(), Some("x"));
+    assert_eq!(opts.ssh_allowed_signers.as_deref(), Some("x"));
+    assert_eq!(opts.ssh_revocation_file.as_deref(), Some("x"));
+}
+
+#[test]
+fn merge_input_constructor_and_setters() {
+    let fresh = grit_lib::diff::merge_file::MergeInput::new(b"base", b"ours", b"theirs");
+    let d = grit_lib::diff::merge_file::MergeInput::new(b"base", b"ours", b"theirs");
+    let opts = grit_lib::diff::merge_file::MergeInput::new(b"base", b"ours", b"theirs")
+        .with_base(&b"x"[..])
+        .with_ours(&b"x"[..])
+        .with_theirs(&b"x"[..])
+        .with_label_ours("x")
+        .with_label_base("x")
+        .with_label_theirs("x")
+        .with_favor(d.favor)
+        .with_style(d.style)
+        .with_marker_size(3)
+        .with_diff_algorithm(Some("x".to_owned()))
+        .with_ignore_all_space(!fresh.ignore_all_space)
+        .with_ignore_space_change(!fresh.ignore_space_change)
+        .with_ignore_space_at_eol(!fresh.ignore_space_at_eol)
+        .with_ignore_cr_at_eol(!fresh.ignore_cr_at_eol);
+    assert_eq!(opts.base, &b"x"[..]);
+    assert_eq!(opts.ours, &b"x"[..]);
+    assert_eq!(opts.theirs, &b"x"[..]);
+    assert_eq!(opts.label_ours, "x");
+    assert_eq!(opts.label_base, "x");
+    assert_eq!(opts.label_theirs, "x");
+    assert_eq!(opts.marker_size, 3);
+    assert_eq!(opts.diff_algorithm.as_deref(), Some("x"));
+    assert_eq!(opts.ignore_all_space, !fresh.ignore_all_space);
+    assert_eq!(opts.ignore_space_change, !fresh.ignore_space_change);
+    assert_eq!(opts.ignore_space_at_eol, !fresh.ignore_space_at_eol);
+    assert_eq!(opts.ignore_cr_at_eol, !fresh.ignore_cr_at_eol);
+}
+
+#[test]
+fn whitespace_merge_options_constructor_and_setters() {
+    let fresh = grit_lib::diff::merge_trees::WhitespaceMergeOptions::default();
+    let opts = grit_lib::diff::merge_trees::WhitespaceMergeOptions::default()
+        .with_ignore_all_space(!fresh.ignore_all_space)
+        .with_ignore_space_change(!fresh.ignore_space_change)
+        .with_ignore_space_at_eol(!fresh.ignore_space_at_eol)
+        .with_ignore_cr_at_eol(!fresh.ignore_cr_at_eol);
+    assert_eq!(opts.ignore_all_space, !fresh.ignore_all_space);
+    assert_eq!(opts.ignore_space_change, !fresh.ignore_space_change);
+    assert_eq!(opts.ignore_space_at_eol, !fresh.ignore_space_at_eol);
+    assert_eq!(opts.ignore_cr_at_eol, !fresh.ignore_cr_at_eol);
+}
+
+#[test]
+fn write_split_index_request_constructor_and_setters() {
+    let opts =
+        grit_lib::index::split_index::WriteSplitIndexRequest::default().with_explicit(Some(true));
+    assert_eq!(opts.explicit, Some(true));
+}
+
+#[test]
+fn write_tree_flags_constructor_and_setters() {
+    let fresh = grit_lib::index::write_tree::WriteTreeFlags::default();
+    let d = grit_lib::index::write_tree::WriteTreeFlags::default();
+    let opts = grit_lib::index::write_tree::WriteTreeFlags::default()
+        .with_missing_ok(!fresh.missing_ok)
+        .with_ignore_cache_tree(!fresh.ignore_cache_tree)
+        .with_persistence(d.persistence)
+        .with_silent(!fresh.silent);
+    assert_eq!(opts.missing_ok, !fresh.missing_ok);
+    assert_eq!(opts.ignore_cache_tree, !fresh.ignore_cache_tree);
+    assert_eq!(opts.silent, !fresh.silent);
+}
+
+#[test]
+fn branch_integrate_request_constructor_and_setters() {
+    let source =
+        grit_lib::merge::MergeSource::new(oid(1), grit_lib::merge::MergeSourceKind::LocalBranch);
+    let d =
+        grit_lib::merge::BranchIntegrateRequest::new("refs/heads/main", oid(2), &source, "topic");
+    let opts =
+        grit_lib::merge::BranchIntegrateRequest::new("refs/heads/main", oid(2), &source, "topic")
+            .with_into_ref("x")
+            .with_into_oid(oid(7))
+            .with_source(d.source)
+            .with_label("x");
+    assert_eq!(opts.into_ref, "x");
+    assert_eq!(opts.into_oid, oid(7));
+    assert_eq!(opts.label, "x");
+}
+
+#[test]
+fn continue_options_constructor_and_setters() {
+    let d = grit_lib::merge::ContinueOptions::default();
+    let opts = grit_lib::merge::ContinueOptions::default()
+        .with_message(Some("x".to_owned()))
+        .with_author(d.author)
+        .with_committer(d.committer);
+    assert_eq!(opts.message.as_deref(), Some("x"));
+}
+
+#[test]
+fn integrate_branch_options_constructor_and_setters() {
+    let fresh = grit_lib::merge::IntegrateBranchOptions::default();
+    let opts = grit_lib::merge::IntegrateBranchOptions::default()
+        .with_allow_fast_forward(!fresh.allow_fast_forward);
+    assert_eq!(opts.allow_fast_forward, !fresh.allow_fast_forward);
+}
+
+#[test]
+fn merge_prediction_options_constructor_and_setters() {
+    let fresh = grit_lib::merge::MergePredictionOptions::default();
+    let d = grit_lib::merge::MergePredictionOptions::default();
+    let opts = grit_lib::merge::MergePredictionOptions::default()
+        .with_allow_fast_forward(!fresh.allow_fast_forward)
+        .with_allow_unrelated_histories(!fresh.allow_unrelated_histories)
+        .with_favor(d.favor)
+        .with_whitespace(d.whitespace)
+        .with_ours_label("x".to_owned())
+        .with_theirs_label("x".to_owned())
+        .with_directory_renames(d.directory_renames);
+    assert_eq!(opts.allow_fast_forward, !fresh.allow_fast_forward);
+    assert_eq!(
+        opts.allow_unrelated_histories,
+        !fresh.allow_unrelated_histories
+    );
+    assert_eq!(opts.ours_label, "x");
+    assert_eq!(opts.theirs_label, "x");
+}
+
+#[test]
+fn replay_options_constructor_and_setters() {
+    let fresh = grit_lib::merge::ReplayOptions::default();
+    let d = grit_lib::merge::ReplayOptions::default();
+    let opts = grit_lib::merge::ReplayOptions::default()
+        .with_mainline(d.mainline)
+        .with_record_origin(!fresh.record_origin)
+        .with_no_commit(!fresh.no_commit)
+        .with_empty(d.empty)
+        .with_message_override(Some("x".to_owned()))
+        .with_favor(d.favor)
+        .with_conflict_style(d.conflict_style);
+    assert_eq!(opts.record_origin, !fresh.record_origin);
+    assert_eq!(opts.no_commit, !fresh.no_commit);
+    assert_eq!(opts.message_override.as_deref(), Some("x"));
+}
+
+#[test]
+fn replay_sequence_request_constructor_and_setters() {
+    let d = grit_lib::merge::ReplaySequenceRequest::new(
+        vec![oid(1)],
+        grit_lib::merge::ReplayDirection::Pick,
+        signature(),
+    );
+    let opts = grit_lib::merge::ReplaySequenceRequest::new(
+        vec![oid(1)],
+        grit_lib::merge::ReplayDirection::Pick,
+        signature(),
+    )
+    .with_commits(vec![oid(7)])
+    .with_direction(d.direction)
+    .with_committer(d.committer)
+    .with_options(d.options);
+    assert_eq!(opts.commits, vec![oid(7)]);
+}
+
+#[test]
+fn replay_request_constructor_and_setters() {
+    let d = grit_lib::merge::ReplayRequest::new(
+        oid(1),
+        grit_lib::merge::ReplayDirection::Pick,
+        signature(),
+    );
+    let opts = grit_lib::merge::ReplayRequest::new(
+        oid(1),
+        grit_lib::merge::ReplayDirection::Pick,
+        signature(),
+    )
+    .with_commit(oid(7))
+    .with_direction(d.direction)
+    .with_committer(d.committer)
+    .with_message_override(Some("x".to_owned()));
+    assert_eq!(opts.commit, oid(7));
+    assert_eq!(opts.message_override.as_deref(), Some("x"));
+}
+
+#[test]
+fn write_tree_options_constructor_and_setters() {
+    let fresh = grit_lib::objects::WriteTreeOptions::default();
+    let opts =
+        grit_lib::objects::WriteTreeOptions::default().with_allow_missing(!fresh.allow_missing);
+    assert_eq!(opts.allow_missing, !fresh.allow_missing);
+}
+
+#[test]
+fn pack_bitmap_write_options_constructor_and_setters() {
+    let fresh = grit_lib::objects::bitmap::PackBitmapWriteOptions::default();
+    let d = grit_lib::objects::bitmap::PackBitmapWriteOptions::default();
+    let opts = grit_lib::objects::bitmap::PackBitmapWriteOptions::default()
+        .with_full_dag(!fresh.full_dag)
+        .with_hash_cache(!fresh.hash_cache)
+        .with_lookup_table(!fresh.lookup_table)
+        .with_prefer_bitmap_tips(vec!["x".to_owned()])
+        .with_verify_reachability_closure(!fresh.verify_reachability_closure)
+        .with_reachability_roots(d.reachability_roots);
+    assert_eq!(opts.full_dag, !fresh.full_dag);
+    assert_eq!(opts.hash_cache, !fresh.hash_cache);
+    assert_eq!(opts.lookup_table, !fresh.lookup_table);
+    assert_eq!(opts.prefer_bitmap_tips, vec!["x".to_owned()]);
+    assert_eq!(
+        opts.verify_reachability_closure,
+        !fresh.verify_reachability_closure
+    );
+}
+
+#[test]
+fn write_multi_pack_index_options_constructor_and_setters() {
+    let fresh = grit_lib::objects::midx::WriteMultiPackIndexOptions::default();
+    let d = grit_lib::objects::midx::WriteMultiPackIndexOptions::default();
+    let opts = grit_lib::objects::midx::WriteMultiPackIndexOptions::default()
+        .with_preferred_pack_idx(Some(3))
+        .with_preferred_pack_name(Some("x".to_owned()))
+        .with_pack_names_subset_ordered(d.pack_names_subset_ordered)
+        .with_write_bitmap(!fresh.write_bitmap)
+        .with_incremental(!fresh.incremental)
+        .with_write_rev_sidecar(!fresh.write_rev_sidecar)
+        .with_version(Some(3))
+        .with_diagnostics(d.diagnostics);
+    assert_eq!(opts.preferred_pack_idx, Some(3));
+    assert_eq!(opts.preferred_pack_name.as_deref(), Some("x"));
+    assert_eq!(opts.write_bitmap, !fresh.write_bitmap);
+    assert_eq!(opts.incremental, !fresh.incremental);
+    assert_eq!(opts.write_rev_sidecar, !fresh.write_rev_sidecar);
+    assert_eq!(opts.version, Some(3));
+}
+
+#[test]
+fn pack_filter_constructor_and_setters() {
+    let fresh = grit_lib::objects::odb::store::PackFilter::default();
+    let opts = grit_lib::objects::odb::store::PackFilter::default()
+        .with_include_promisor(!fresh.include_promisor)
+        .with_include_cruft(!fresh.include_cruft);
+    assert_eq!(opts.include_promisor, !fresh.include_promisor);
+    assert_eq!(opts.include_cruft, !fresh.include_cruft);
+}
+
+#[test]
+fn pack_enumerate_options_constructor_and_setters() {
+    let grafts = std::collections::HashSet::new();
+    let fresh = grit_lib::objects::pack_object_select::PackEnumerateOptions::new(&grafts);
+    let d = grit_lib::objects::pack_object_select::PackEnumerateOptions::new(&grafts);
+    let opts = grit_lib::objects::pack_object_select::PackEnumerateOptions::new(&grafts)
+        .with_filter(d.filter)
+        .with_shallow_grafts(d.shallow_grafts)
+        .with_have_shallow_grafts(d.have_shallow_grafts)
+        .with_use_bitmaps(!fresh.use_bitmaps)
+        .with_exclude_objects(d.exclude_objects)
+        .with_peer_odb(d.peer_odb)
+        .with_have_boundary(d.have_boundary);
+    assert_eq!(opts.use_bitmaps, !fresh.use_bitmaps);
+}
+
+#[test]
+fn promisor_accept_policy_constructor_and_setters() {
+    let d = grit_lib::objects::promisor_remote::PromisorAcceptPolicy::default();
+    let opts = grit_lib::objects::promisor_remote::PromisorAcceptPolicy::default()
+        .with_accept(d.accept)
+        .with_check_fields(d.check_fields)
+        .with_store_fields(d.store_fields);
+    let _ = opts;
+}
+
+#[test]
+fn unpack_options_constructor_and_setters() {
+    let fresh = grit_lib::objects::unpack_objects::UnpackOptions::default();
+    let d = grit_lib::objects::unpack_objects::UnpackOptions::default();
+    let opts = grit_lib::objects::unpack_objects::UnpackOptions::default()
+        .with_dry_run(!fresh.dry_run)
+        .with_quiet(!fresh.quiet)
+        .with_strict(!fresh.strict)
+        .with_allowed_missing(d.allowed_missing)
+        .with_allow_promisor_missing_references(!fresh.allow_promisor_missing_references)
+        .with_max_input_bytes(Some(3))
+        .with_shallow_boundaries(d.shallow_boundaries);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+    assert_eq!(opts.quiet, !fresh.quiet);
+    assert_eq!(opts.strict, !fresh.strict);
+    assert_eq!(
+        opts.allow_promisor_missing_references,
+        !fresh.allow_promisor_missing_references
+    );
+    assert_eq!(opts.max_input_bytes, Some(3));
+}
+
+#[test]
+fn parallel_options_constructor_and_setters() {
+    let d =
+        grit_lib::parallel::ParallelOptions::new(std::num::NonZeroUsize::new(2).expect("nonzero"));
+    let opts =
+        grit_lib::parallel::ParallelOptions::new(std::num::NonZeroUsize::new(2).expect("nonzero"))
+            .with_threads(d.threads)
+            .with_min_items(3)
+            .with_min_total_bytes(Some(3))
+            .with_signed_entry_threshold(Some(3));
+    assert_eq!(opts.min_items, 3);
+    assert_eq!(opts.min_total_bytes, Some(3));
+    assert_eq!(opts.signed_entry_threshold, Some(3));
+}
+
+#[test]
+fn protect_options_constructor_and_setters() {
+    let fresh = grit_lib::path_validate::ProtectOptions::default();
+    let opts = grit_lib::path_validate::ProtectOptions::default()
+        .with_protect_ntfs(!fresh.protect_ntfs)
+        .with_protect_hfs(!fresh.protect_hfs);
+    assert_eq!(opts.protect_ntfs, !fresh.protect_ntfs);
+    assert_eq!(opts.protect_hfs, !fresh.protect_hfs);
+}
+
+#[test]
+fn branch_create_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::branch::BranchCreateOptions::at_head("topic");
+    let d = grit_lib::porcelain::branch::BranchCreateOptions::at_head("topic");
+    let opts = grit_lib::porcelain::branch::BranchCreateOptions::at_head("topic")
+        .with_name("x".to_owned())
+        .with_start(d.start)
+        .with_force(!fresh.force)
+        .with_track(d.track)
+        .with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.name, "x");
+    assert_eq!(opts.force, !fresh.force);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn branch_delete_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::branch::BranchDeleteOptions::default();
+    let d = grit_lib::porcelain::branch::BranchDeleteOptions::default();
+    let opts = grit_lib::porcelain::branch::BranchDeleteOptions::default()
+        .with_mode(d.mode)
+        .with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn branch_rename_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::branch::BranchRenameOptions::new("old", "new");
+    let opts = grit_lib::porcelain::branch::BranchRenameOptions::new("old", "new")
+        .with_old("x".to_owned())
+        .with_new("x".to_owned())
+        .with_force(!fresh.force)
+        .with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.old, "x");
+    assert_eq!(opts.new, "x");
+    assert_eq!(opts.force, !fresh.force);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn clean_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::clean::CleanOptions::default();
+    let d = grit_lib::porcelain::clean::CleanOptions::default();
+    let opts = grit_lib::porcelain::clean::CleanOptions::default()
+        .with_pathspecs(vec!["x".to_owned()])
+        .with_directories(!fresh.directories)
+        .with_files_only(!fresh.files_only)
+        .with_scope(d.scope)
+        .with_excludes(vec!["x".to_owned()])
+        .with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.pathspecs, vec!["x".to_owned()]);
+    assert_eq!(opts.directories, !fresh.directories);
+    assert_eq!(opts.files_only, !fresh.files_only);
+    assert_eq!(opts.excludes, vec!["x".to_owned()]);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn hunk_selection_constructor_and_setters() {
+    let d = grit_lib::porcelain::hunk_select::HunkSelection::default();
+    let opts = grit_lib::porcelain::hunk_select::HunkSelection::default()
+        .with_ids(d.ids)
+        .with_ranges(d.ranges);
+    let _ = opts;
+}
+
+#[test]
+fn decoration_filter_constructor_and_setters() {
+    let opts = grit_lib::porcelain::log::DecorationFilter::default()
+        .with_include(vec!["x".to_owned()])
+        .with_exclude(vec!["x".to_owned()])
+        .with_exclude_config(vec!["x".to_owned()]);
+    assert_eq!(opts.include, vec!["x".to_owned()]);
+    assert_eq!(opts.exclude, vec!["x".to_owned()]);
+    assert_eq!(opts.exclude_config, vec!["x".to_owned()]);
+}
+
+#[test]
+fn move_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::paths::MoveOptions::new(vec!["a".to_owned()], "dst");
+    let opts = grit_lib::porcelain::paths::MoveOptions::new(vec!["a".to_owned()], "dst")
+        .with_sources(vec!["x".to_owned()])
+        .with_destination("x".to_owned())
+        .with_force(!fresh.force)
+        .with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.sources, vec!["x".to_owned()]);
+    assert_eq!(opts.destination, "x");
+    assert_eq!(opts.force, !fresh.force);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn paths_remove_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::paths::RemoveOptions::default();
+    let opts = grit_lib::porcelain::paths::RemoveOptions::default()
+        .with_pathspecs(vec!["x".to_owned()])
+        .with_pathspec_sources(vec!["x".to_owned()])
+        .with_cached(!fresh.cached)
+        .with_force(!fresh.force)
+        .with_recursive(!fresh.recursive)
+        .with_dry_run(!fresh.dry_run)
+        .with_ignore_unmatch(!fresh.ignore_unmatch);
+    assert_eq!(opts.pathspecs, vec!["x".to_owned()]);
+    assert_eq!(opts.pathspec_sources, vec!["x".to_owned()]);
+    assert_eq!(opts.cached, !fresh.cached);
+    assert_eq!(opts.force, !fresh.force);
+    assert_eq!(opts.recursive, !fresh.recursive);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+    assert_eq!(opts.ignore_unmatch, !fresh.ignore_unmatch);
+}
+
+#[test]
+fn reset_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::reset::ResetOptions::new(
+        oid(1),
+        grit_lib::porcelain::reset::ResetMode::Soft,
+        signature(),
+        "msg",
+    );
+    let d = grit_lib::porcelain::reset::ResetOptions::new(
+        oid(1),
+        grit_lib::porcelain::reset::ResetMode::Soft,
+        signature(),
+        "msg",
+    );
+    let opts = grit_lib::porcelain::reset::ResetOptions::new(
+        oid(1),
+        grit_lib::porcelain::reset::ResetMode::Soft,
+        signature(),
+        "msg",
+    )
+    .with_target(oid(7))
+    .with_mode(d.mode)
+    .with_identity(d.identity)
+    .with_message("x".to_owned())
+    .with_dry_run(!fresh.dry_run)
+    .with_orphan_limit(3);
+    assert_eq!(opts.target, oid(7));
+    assert_eq!(opts.message, "x");
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+    assert_eq!(opts.orphan_limit, 3);
+}
+
+#[test]
+fn index_staging_thresholds_constructor_and_setters() {
+    let opts = grit_lib::porcelain::stage_tracked::IndexStagingThresholds::default()
+        .with_large_index_restage(3)
+        .with_parallel_tracked_restage(3);
+    assert_eq!(opts.large_index_restage, 3);
+    assert_eq!(opts.parallel_tracked_restage, 3);
+}
+
+#[test]
+fn workspace_capture_options_constructor_and_setters() {
+    let fresh = grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::default();
+    let opts = grit_lib::porcelain::workspace_snapshot::WorkspaceCaptureOptions::default()
+        .with_refs(vec!["x".to_owned()])
+        .with_include_untracked(!fresh.include_untracked);
+    assert_eq!(opts.refs, vec!["x".to_owned()]);
+    assert_eq!(opts.include_untracked, !fresh.include_untracked);
+}
+
+#[test]
+fn phase_rates_constructor_and_setters() {
+    let d = grit_lib::progress::PhaseRates::default();
+    let opts = grit_lib::progress::PhaseRates::default()
+        .with_indexing(d.indexing)
+        .with_resolving(d.resolving)
+        .with_checkout(d.checkout);
+    let _ = opts;
+}
+
+#[test]
+fn ref_batch_item_constructor_and_setters() {
+    let opts = grit_lib::refs::RefBatchItem::new("refs/heads/x", Some(oid(1)))
+        .with_name("x".to_owned())
+        .with_new_oid(Some(oid(7)));
+    assert_eq!(opts.name, "x");
+    assert_eq!(opts.new_oid, Some(oid(7)));
+}
+
+#[test]
+fn files_ref_store_config_constructor_and_setters() {
+    let opts =
+        grit_lib::refs::store::FilesRefStoreConfig::new(PathBuf::from("/g"), PathBuf::from("/c"))
+            .with_git_dir(PathBuf::from("/x"))
+            .with_common_dir(PathBuf::from("/x"))
+            .with_namespace_prefix(Some("x".to_owned()));
+    assert_eq!(opts.git_dir, PathBuf::from("/x"));
+    assert_eq!(opts.common_dir, PathBuf::from("/x"));
+    assert_eq!(opts.namespace_prefix.as_deref(), Some("x"));
+}
+
+#[test]
+fn ref_case_only_rename_constructor_and_setters() {
+    let d = grit_lib::refs::store::RefCaseOnlyRename::new(
+        RefName::new("refs/heads/a").expect("ref"),
+        RefName::new("refs/heads/A").expect("ref"),
+    );
+    let opts = grit_lib::refs::store::RefCaseOnlyRename::new(
+        RefName::new("refs/heads/a").expect("ref"),
+        RefName::new("refs/heads/A").expect("ref"),
+    )
+    .with_from(d.from)
+    .with_to(d.to);
+    let _ = opts;
+}
+
+#[test]
+fn ref_reflog_rename_constructor_and_setters() {
+    let d = grit_lib::refs::store::RefReflogRename::new(
+        RefName::new("refs/heads/a").expect("ref"),
+        RefName::new("refs/heads/b").expect("ref"),
+        ReflogUpdate::new(
+            "A <a@example.com>",
+            "rename",
+            time::OffsetDateTime::UNIX_EPOCH,
+        ),
+    );
+    let opts = grit_lib::refs::store::RefReflogRename::new(
+        RefName::new("refs/heads/a").expect("ref"),
+        RefName::new("refs/heads/b").expect("ref"),
+        ReflogUpdate::new(
+            "A <a@example.com>",
+            "rename",
+            time::OffsetDateTime::UNIX_EPOCH,
+        ),
+    )
+    .with_from(d.from)
+    .with_to(d.to)
+    .with_append(d.append);
+    let _ = opts;
+}
+
+#[test]
+fn ref_batch_state_constructor_and_setters() {
+    let d = grit_lib::refs::store::backend::RefBatchState::default();
+    let opts = grit_lib::refs::store::backend::RefBatchState::default()
+        .with_refs(d.refs)
+        .with_reflogs(d.reflogs);
+    let _ = opts;
+}
+
+#[test]
+fn write_options_constructor_and_setters() {
+    let fresh = grit_lib::refs::reftable::WriteOptions::default();
+    let opts = grit_lib::refs::reftable::WriteOptions::default()
+        .with_block_size(3)
+        .with_restart_interval(3)
+        .with_write_log(!fresh.write_log)
+        .with_skip_index_objects(!fresh.skip_index_objects)
+        .with_unpadded(!fresh.unpadded)
+        .with_hash_size(3)
+        .with_auto_compaction_factor(3)
+        .with_autocompaction_enabled(!fresh.autocompaction_enabled);
+    assert_eq!(opts.block_size, 3);
+    assert_eq!(opts.restart_interval, 3);
+    assert_eq!(opts.write_log, !fresh.write_log);
+    assert_eq!(opts.skip_index_objects, !fresh.skip_index_objects);
+    assert_eq!(opts.unpadded, !fresh.unpadded);
+    assert_eq!(opts.hash_size, 3);
+    assert_eq!(opts.auto_compaction_factor, 3);
+    assert_eq!(opts.autocompaction_enabled, !fresh.autocompaction_enabled);
+}
+
+#[test]
+fn inspect_options_constructor_and_setters() {
+    let fresh = grit_lib::remote::InspectOptions::default();
+    let opts = grit_lib::remote::InspectOptions::default()
+        .with_query(!fresh.query)
+        .with_limit(Some(3));
+    assert_eq!(opts.query, !fresh.query);
+    assert_eq!(opts.limit, Some(3));
+}
+
+#[test]
+fn list_refs_options_constructor_and_setters() {
+    let fresh = grit_lib::remote::ListRefsOptions::default();
+    let d = grit_lib::remote::ListRefsOptions::default();
+    let opts = grit_lib::remote::ListRefsOptions::default()
+        .with_prefixes(vec!["x".to_owned()])
+        .with_heads(!fresh.heads)
+        .with_tags(!fresh.tags)
+        .with_symrefs(!fresh.symrefs)
+        .with_peel(!fresh.peel)
+        .with_protocol_version(Some(3))
+        .with_sort(d.sort)
+        .with_limit(Some(3))
+        .with_versionsort_suffixes(vec!["x".to_owned()]);
+    assert_eq!(opts.prefixes, vec!["x".to_owned()]);
+    assert_eq!(opts.heads, !fresh.heads);
+    assert_eq!(opts.tags, !fresh.tags);
+    assert_eq!(opts.symrefs, !fresh.symrefs);
+    assert_eq!(opts.peel, !fresh.peel);
+    assert_eq!(opts.protocol_version, Some(3));
+    assert_eq!(opts.limit, Some(3));
+    assert_eq!(opts.versionsort_suffixes, vec!["x".to_owned()]);
+}
+
+#[test]
+fn push_invocation_constructor_and_setters() {
+    let opts = grit_lib::remote::push_plan::PushInvocation::default()
+        .with_remote(Some("x".to_owned()))
+        .with_refspecs(vec!["x".to_owned()]);
+    assert_eq!(opts.remote.as_deref(), Some("x"));
+    assert_eq!(opts.refspecs, vec!["x".to_owned()]);
+}
+
+#[test]
+fn push_plan_context_constructor_and_setters() {
+    let d = grit_lib::remote::push_plan::PushPlanContext::default();
+    let opts = grit_lib::remote::push_plan::PushPlanContext::default()
+        .with_remote_ref_names(d.remote_ref_names)
+        .with_remote_branch_tips(d.remote_branch_tips)
+        .with_remote_tips(d.remote_tips);
+    let _ = opts;
+}
+
+#[test]
+fn push_request_constructor_and_setters() {
+    let fresh = grit_lib::remote::push_plan::PushRequest::default();
+    let d = grit_lib::remote::push_plan::PushRequest::default();
+    let opts = grit_lib::remote::push_plan::PushRequest::default()
+        .with_remote(Some("x".to_owned()))
+        .with_refspecs(vec!["x".to_owned()])
+        .with_tags(!fresh.tags)
+        .with_delete_refs(!fresh.delete_refs)
+        .with_delete(vec!["x".to_owned()])
+        .with_force(d.force)
+        .with_follow_tags(!fresh.follow_tags)
+        .with_set_upstream(!fresh.set_upstream)
+        .with_all(!fresh.all)
+        .with_mirror(!fresh.mirror)
+        .with_prune(!fresh.prune);
+    assert_eq!(opts.remote.as_deref(), Some("x"));
+    assert_eq!(opts.refspecs, vec!["x".to_owned()]);
+    assert_eq!(opts.tags, !fresh.tags);
+    assert_eq!(opts.delete_refs, !fresh.delete_refs);
+    assert_eq!(opts.delete, vec!["x".to_owned()]);
+    assert_eq!(opts.follow_tags, !fresh.follow_tags);
+    assert_eq!(opts.set_upstream, !fresh.set_upstream);
+    assert_eq!(opts.all, !fresh.all);
+    assert_eq!(opts.mirror, !fresh.mirror);
+    assert_eq!(opts.prune, !fresh.prune);
+}
+
+#[test]
+fn receive_hook_context_constructor_and_setters() {
+    let d = grit_lib::remote::serve::ReceiveHookContext::default();
+    let opts =
+        grit_lib::remote::serve::ReceiveHookContext::default().with_push_options(d.push_options);
+    let _ = opts;
+}
+
+#[test]
+fn pack_build_options_constructor_and_setters() {
+    let fresh = grit_lib::remote::transfer::PackBuildOptions::default();
+    let opts = grit_lib::remote::transfer::PackBuildOptions::default()
+        .with_thin(!fresh.thin)
+        .with_delta(!fresh.delta)
+        .with_window(3)
+        .with_max_depth(3)
+        .with_use_ofs_delta(!fresh.use_ofs_delta)
+        .with_respect_islands(!fresh.respect_islands)
+        .with_reuse_deltas(!fresh.reuse_deltas)
+        .with_reuse_objects(!fresh.reuse_objects)
+        .with_use_bitmaps(!fresh.use_bitmaps)
+        .with_window_memory(Some(3));
+    assert_eq!(opts.thin, !fresh.thin);
+    assert_eq!(opts.delta, !fresh.delta);
+    assert_eq!(opts.window, 3);
+    assert_eq!(opts.max_depth, 3);
+    assert_eq!(opts.use_ofs_delta, !fresh.use_ofs_delta);
+    assert_eq!(opts.respect_islands, !fresh.respect_islands);
+    assert_eq!(opts.reuse_deltas, !fresh.reuse_deltas);
+    assert_eq!(opts.reuse_objects, !fresh.reuse_objects);
+    assert_eq!(opts.use_bitmaps, !fresh.use_bitmaps);
+    assert_eq!(opts.window_memory, Some(3));
+}
+
+#[test]
+fn pack_objects_options_constructor_and_setters() {
+    let d = grit_lib::remote::transfer::PackObjectsOptions::default();
+    let opts = grit_lib::remote::transfer::PackObjectsOptions::default()
+        .with_build(d.build)
+        .with_search_threads(Some(3))
+        .with_write_threads(Some(3));
+    assert_eq!(opts.search_threads, Some(3));
+    assert_eq!(opts.write_threads, Some(3));
+}
+
+#[test]
+fn notes_write_options_constructor_and_setters() {
+    let d = grit_lib::repo_handles::NotesWriteOptions::new("msg", signature());
+    let opts = grit_lib::repo_handles::NotesWriteOptions::new("msg", signature())
+        .with_message("x".to_owned())
+        .with_committer(d.committer)
+        .with_author(d.author);
+    assert_eq!(opts.message, "x");
+}
+
+#[test]
+fn reflog_query_constructor_and_setters() {
+    let d = grit_lib::repo_handles::ReflogQuery::default();
+    let opts = grit_lib::repo_handles::ReflogQuery::default()
+        .with_limit(Some(3))
+        .with_since(Some(3))
+        .with_until(Some(3))
+        .with_grep(d.grep)
+        .with_now(3);
+    assert_eq!(opts.limit, Some(3));
+    assert_eq!(opts.since, Some(3));
+    assert_eq!(opts.until, Some(3));
+    assert_eq!(opts.now, 3);
+}
+
+#[test]
+fn remote_remove_options_constructor_and_setters() {
+    let fresh = grit_lib::repo_handles::RemoveOptions::default();
+    let opts = grit_lib::repo_handles::RemoveOptions::default().with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn describe_options_constructor_and_setters() {
+    let fresh = grit_lib::revwalk::DescribeOptions::default();
+    let opts = grit_lib::revwalk::DescribeOptions::default()
+        .with_tags(!fresh.tags)
+        .with_match_glob(Some("x".to_owned()))
+        .with_first_parent(!fresh.first_parent)
+        .with_abbrev(Some(3));
+    assert_eq!(opts.tags, !fresh.tags);
+    assert_eq!(opts.match_glob.as_deref(), Some("x"));
+    assert_eq!(opts.first_parent, !fresh.first_parent);
+    assert_eq!(opts.abbrev, Some(3));
+}
+
+#[test]
+fn group_by_author_options_constructor_and_setters() {
+    let fresh = grit_lib::revwalk::GroupByAuthorOptions::default();
+    let opts =
+        grit_lib::revwalk::GroupByAuthorOptions::default().with_count_only(!fresh.count_only);
+    assert_eq!(opts.count_only, !fresh.count_only);
+}
+
+#[test]
+fn rev_walk_commit_iter_options_constructor_and_setters() {
+    let fresh = grit_lib::revwalk::RevWalkCommitIterOptions::default();
+    let opts = grit_lib::revwalk::RevWalkCommitIterOptions::default()
+        .with_skip(3)
+        .with_limit(Some(3))
+        .with_since(Some(3))
+        .with_until(Some(3))
+        .with_first_parent(!fresh.first_parent);
+    assert_eq!(opts.skip, 3);
+    assert_eq!(opts.limit, Some(3));
+    assert_eq!(opts.since, Some(3));
+    assert_eq!(opts.until, Some(3));
+    assert_eq!(opts.first_parent, !fresh.first_parent);
+}
+
+#[test]
+fn reachable_count_filter_constructor_and_setters() {
+    let fresh = grit_lib::revwalk::merge_base::ReachableCountFilter::default();
+    let opts = grit_lib::revwalk::merge_base::ReachableCountFilter::default()
+        .with_min_parents(Some(3))
+        .with_max_parents(Some(3))
+        .with_first_parent_only(!fresh.first_parent_only)
+        .with_since(Some(3))
+        .with_until(Some(3));
+    assert_eq!(opts.min_parents, Some(3));
+    assert_eq!(opts.max_parents, Some(3));
+    assert_eq!(opts.first_parent_only, !fresh.first_parent_only);
+    assert_eq!(opts.since, Some(3));
+    assert_eq!(opts.until, Some(3));
+}
+
+#[test]
+fn graph_commit_input_constructor_and_setters() {
+    let opts = grit_lib::revwalk::GraphCommitInput::new(oid(1), vec![oid(2)])
+        .with_id(oid(7))
+        .with_parents(vec![oid(7)]);
+    assert_eq!(opts.id, oid(7));
+    assert_eq!(opts.parents, vec![oid(7)]);
+}
+
+#[test]
+fn rev_list_options_constructor_and_setters() {
+    let fresh = grit_lib::revwalk::rev_list::RevListOptions::default();
+    let d = grit_lib::revwalk::rev_list::RevListOptions::default();
+    let opts = grit_lib::revwalk::rev_list::RevListOptions::default()
+        .with_all_refs(!fresh.all_refs)
+        .with_first_parent(!fresh.first_parent)
+        .with_ancestry_path(!fresh.ancestry_path)
+        .with_ancestry_path_bottoms(vec![oid(7)])
+        .with_simplify_by_decoration(!fresh.simplify_by_decoration)
+        .with_simplify_by_decoration_oids(d.simplify_by_decoration_oids)
+        .with_quiet(!fresh.quiet)
+        .with_count(!fresh.count)
+        .with_skip(3)
+        .with_max_count(Some(3))
+        .with_ordering(d.ordering)
+        .with_reverse(!fresh.reverse)
+        .with_maximal_only(!fresh.maximal_only)
+        .with_objects(!fresh.objects)
+        .with_no_object_names(!fresh.no_object_names)
+        .with_boundary(!fresh.boundary)
+        .with_left_right(!fresh.left_right)
+        .with_left_right_explicit(!fresh.left_right_explicit)
+        .with_left_only(!fresh.left_only)
+        .with_right_only(!fresh.right_only)
+        .with_cherry_mark(!fresh.cherry_mark)
+        .with_cherry_pick(!fresh.cherry_pick)
+        .with_min_parents(Some(3))
+        .with_max_parents(Some(3))
+        .with_symmetric_left(Some(oid(7)))
+        .with_symmetric_right(Some(oid(7)))
+        .with_paths(vec!["x".to_owned()])
+        .with_full_history(!fresh.full_history)
+        .with_parent_rewrite(!fresh.parent_rewrite)
+        .with_sparse(!fresh.sparse)
+        .with_simplify_merges(!fresh.simplify_merges)
+        .with_preserve_simplify_merges_graph_merges(!fresh.preserve_simplify_merges_graph_merges)
+        .with_show_pulls(!fresh.show_pulls)
+        .with_exclude_first_parent_only(!fresh.exclude_first_parent_only)
+        .with_filter(d.filter)
+        .with_filter_raw_specs(vec!["x".to_owned()])
+        .with_filter_provided_objects(!fresh.filter_provided_objects)
+        .with_filter_print_omitted(!fresh.filter_print_omitted)
+        .with_in_commit_order(!fresh.in_commit_order)
+        .with_no_kept_objects(!fresh.no_kept_objects)
+        .with_missing_action(d.missing_action)
+        .with_exclude_promisor_objects(!fresh.exclude_promisor_objects)
+        .with_ignore_missing(!fresh.ignore_missing)
+        .with_use_bitmap_index(!fresh.use_bitmap_index)
+        .with_unpacked_only(!fresh.unpacked_only)
+        .with_bitmap_oid_only_objects(!fresh.bitmap_oid_only_objects)
+        .with_path_graph_reorder(!fresh.path_graph_reorder)
+        .with_until_cutoff(Some(3))
+        .with_since_cutoff(Some(3))
+        .with_include_reflog_entries(!fresh.include_reflog_entries)
+        .with_include_indexed_objects(!fresh.include_indexed_objects)
+        .with_exclude_indexed_objects(!fresh.exclude_indexed_objects)
+        .with_use_commit_graph(!fresh.use_commit_graph)
+        .with_use_commit_graph_bloom(!fresh.use_commit_graph_bloom)
+        .with_commit_graph_read_changed_paths(!fresh.commit_graph_read_changed_paths)
+        .with_commit_graph_changed_paths_version(3)
+        .with_bloom_stats(d.bloom_stats)
+        .with_paths_resolved_from_argv(!fresh.paths_resolved_from_argv)
+        .with_commit_filter(d.commit_filter)
+        .with_pickaxe(d.pickaxe)
+        .with_retain_commit_data(!fresh.retain_commit_data)
+        .with_follow(!fresh.follow);
+    assert_eq!(opts.all_refs, !fresh.all_refs);
+    assert_eq!(opts.first_parent, !fresh.first_parent);
+    assert_eq!(opts.ancestry_path, !fresh.ancestry_path);
+    assert_eq!(opts.ancestry_path_bottoms, vec![oid(7)]);
+    assert_eq!(opts.simplify_by_decoration, !fresh.simplify_by_decoration);
+    assert_eq!(opts.quiet, !fresh.quiet);
+    assert_eq!(opts.count, !fresh.count);
+    assert_eq!(opts.skip, 3);
+    assert_eq!(opts.max_count, Some(3));
+    assert_eq!(opts.reverse, !fresh.reverse);
+    assert_eq!(opts.maximal_only, !fresh.maximal_only);
+    assert_eq!(opts.objects, !fresh.objects);
+    assert_eq!(opts.no_object_names, !fresh.no_object_names);
+    assert_eq!(opts.boundary, !fresh.boundary);
+    assert_eq!(opts.left_right, !fresh.left_right);
+    assert_eq!(opts.left_right_explicit, !fresh.left_right_explicit);
+    assert_eq!(opts.left_only, !fresh.left_only);
+    assert_eq!(opts.right_only, !fresh.right_only);
+    assert_eq!(opts.cherry_mark, !fresh.cherry_mark);
+    assert_eq!(opts.cherry_pick, !fresh.cherry_pick);
+    assert_eq!(opts.min_parents, Some(3));
+    assert_eq!(opts.max_parents, Some(3));
+    assert_eq!(opts.symmetric_left, Some(oid(7)));
+    assert_eq!(opts.symmetric_right, Some(oid(7)));
+    assert_eq!(opts.paths, vec!["x".to_owned()]);
+    assert_eq!(opts.full_history, !fresh.full_history);
+    assert_eq!(opts.parent_rewrite, !fresh.parent_rewrite);
+    assert_eq!(opts.sparse, !fresh.sparse);
+    assert_eq!(opts.simplify_merges, !fresh.simplify_merges);
+    assert_eq!(
+        opts.preserve_simplify_merges_graph_merges,
+        !fresh.preserve_simplify_merges_graph_merges
+    );
+    assert_eq!(opts.show_pulls, !fresh.show_pulls);
+    assert_eq!(
+        opts.exclude_first_parent_only,
+        !fresh.exclude_first_parent_only
+    );
+    assert_eq!(opts.filter_raw_specs, vec!["x".to_owned()]);
+    assert_eq!(opts.filter_provided_objects, !fresh.filter_provided_objects);
+    assert_eq!(opts.filter_print_omitted, !fresh.filter_print_omitted);
+    assert_eq!(opts.in_commit_order, !fresh.in_commit_order);
+    assert_eq!(opts.no_kept_objects, !fresh.no_kept_objects);
+    assert_eq!(
+        opts.exclude_promisor_objects,
+        !fresh.exclude_promisor_objects
+    );
+    assert_eq!(opts.ignore_missing, !fresh.ignore_missing);
+    assert_eq!(opts.use_bitmap_index, !fresh.use_bitmap_index);
+    assert_eq!(opts.unpacked_only, !fresh.unpacked_only);
+    assert_eq!(opts.bitmap_oid_only_objects, !fresh.bitmap_oid_only_objects);
+    assert_eq!(opts.path_graph_reorder, !fresh.path_graph_reorder);
+    assert_eq!(opts.until_cutoff, Some(3));
+    assert_eq!(opts.since_cutoff, Some(3));
+    assert_eq!(opts.include_reflog_entries, !fresh.include_reflog_entries);
+    assert_eq!(opts.include_indexed_objects, !fresh.include_indexed_objects);
+    assert_eq!(opts.exclude_indexed_objects, !fresh.exclude_indexed_objects);
+    assert_eq!(opts.use_commit_graph, !fresh.use_commit_graph);
+    assert_eq!(opts.use_commit_graph_bloom, !fresh.use_commit_graph_bloom);
+    assert_eq!(
+        opts.commit_graph_read_changed_paths,
+        !fresh.commit_graph_read_changed_paths
+    );
+    assert_eq!(opts.commit_graph_changed_paths_version, 3);
+    assert_eq!(
+        opts.paths_resolved_from_argv,
+        !fresh.paths_resolved_from_argv
+    );
+    assert_eq!(opts.retain_commit_data, !fresh.retain_commit_data);
+    assert_eq!(opts.follow, !fresh.follow);
+}
+
+#[test]
+fn stash_apply_options_constructor_and_setters() {
+    let fresh = grit_lib::stash::StashApplyOptions::default();
+    let opts = grit_lib::stash::StashApplyOptions::default()
+        .with_restore_index(!fresh.restore_index)
+        .with_overwrite_identical_untracked(!fresh.overwrite_identical_untracked);
+    assert_eq!(opts.restore_index, !fresh.restore_index);
+    assert_eq!(
+        opts.overwrite_identical_untracked,
+        !fresh.overwrite_identical_untracked
+    );
+}
+
+#[test]
+fn stash_diff_options_constructor_and_setters() {
+    let fresh = grit_lib::stash::StashDiffOptions::default();
+    let opts = grit_lib::stash::StashDiffOptions::default()
+        .with_include_untracked(!fresh.include_untracked);
+    assert_eq!(opts.include_untracked, !fresh.include_untracked);
+}
+
+#[test]
+fn stash_push_options_constructor_and_setters() {
+    let fresh = grit_lib::stash::StashPushOptions::new(signature());
+    let d = grit_lib::stash::StashPushOptions::new(signature());
+    let opts = grit_lib::stash::StashPushOptions::new(signature())
+        .with_message(Some("x".to_owned()))
+        .with_include_untracked(!fresh.include_untracked)
+        .with_identity(d.identity)
+        .with_selection(d.selection)
+        .with_pathspecs(vec!["x".to_owned()])
+        .with_dry_run(!fresh.dry_run)
+        .with_mode(d.mode);
+    assert_eq!(opts.message.as_deref(), Some("x"));
+    assert_eq!(opts.include_untracked, !fresh.include_untracked);
+    assert_eq!(opts.pathspecs, vec!["x".to_owned()]);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn tag_verify_options_constructor_and_setters() {
+    let fresh = grit_lib::tree_sha256::TagVerifyOptions::new(
+        grit_lib::commit::signing::GpgConfig::from_config(&grit_lib::config::ConfigSet::new())
+            .expect("gpg"),
+    );
+    let d = grit_lib::tree_sha256::TagVerifyOptions::new(
+        grit_lib::commit::signing::GpgConfig::from_config(&grit_lib::config::ConfigSet::new())
+            .expect("gpg"),
+    );
+    let opts = grit_lib::tree_sha256::TagVerifyOptions::new(
+        grit_lib::commit::signing::GpgConfig::from_config(&grit_lib::config::ConfigSet::new())
+            .expect("gpg"),
+    )
+    .with_check_signature(!fresh.check_signature)
+    .with_gpg(d.gpg);
+    assert_eq!(opts.check_signature, !fresh.check_signature);
+}
+
+#[test]
+fn add_linked_worktree_options_constructor_and_setters() {
+    let fresh = grit_lib::worktree::AddLinkedWorktreeOptions::new(PathBuf::from("/wt"));
+    let d = grit_lib::worktree::AddLinkedWorktreeOptions::new(PathBuf::from("/wt"));
+    let opts = grit_lib::worktree::AddLinkedWorktreeOptions::new(PathBuf::from("/wt"))
+        .with_path(PathBuf::from("/x"))
+        .with_branch(d.branch)
+        .with_start_point(Some("x".to_owned()))
+        .with_force(!fresh.force)
+        .with_lock(d.lock)
+        .with_no_checkout(!fresh.no_checkout)
+        .with_track(!fresh.track);
+    assert_eq!(opts.path, PathBuf::from("/x"));
+    assert_eq!(opts.start_point.as_deref(), Some("x"));
+    assert_eq!(opts.force, !fresh.force);
+    assert_eq!(opts.no_checkout, !fresh.no_checkout);
+    assert_eq!(opts.track, !fresh.track);
+}
+
+#[test]
+fn lock_worktree_options_constructor_and_setters() {
+    let opts = grit_lib::worktree::LockWorktreeOptions::default().with_reason(Some("x".to_owned()));
+    assert_eq!(opts.reason.as_deref(), Some("x"));
+}
+
+#[test]
+fn prune_worktrees_options_constructor_and_setters() {
+    let fresh = grit_lib::worktree::PruneWorktreesOptions::default();
+    let opts = grit_lib::worktree::PruneWorktreesOptions::default().with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn move_worktree_options_constructor_and_setters() {
+    let fresh = grit_lib::worktree::MoveWorktreeOptions::default();
+    let opts = grit_lib::worktree::MoveWorktreeOptions::default()
+        .with_force(!fresh.force)
+        .with_dry_run(!fresh.dry_run);
+    assert_eq!(opts.force, !fresh.force);
+    assert_eq!(opts.dry_run, !fresh.dry_run);
+}
+
+#[test]
+fn http_request_constructor_and_setters() {
+    let fresh = grit_lib::remote::transport::http::HttpRequest::new(
+        grit_lib::remote::transport::http::HttpMethod::Get,
+        "https://example.com/",
+    );
+    let d = grit_lib::remote::transport::http::HttpRequest::new(
+        grit_lib::remote::transport::http::HttpMethod::Get,
+        "https://example.com/",
+    );
+    let opts = grit_lib::remote::transport::http::HttpRequest::new(
+        grit_lib::remote::transport::http::HttpMethod::Get,
+        "https://example.com/",
+    )
+    .with_method(d.method)
+    .with_url("x")
+    .with_headers(d.headers)
+    .with_body(&b"x"[..])
+    .with_long_running(!fresh.long_running);
+    assert_eq!(opts.url, "x");
+    assert_eq!(opts.body, &b"x"[..]);
+    assert_eq!(opts.long_running, !fresh.long_running);
+}
+
+#[test]
+fn pathspec_global_flags_constructor_and_setters() {
+    let fresh = grit_lib::worktree::pathspec::PathspecGlobalFlags::default();
+    let opts = grit_lib::worktree::pathspec::PathspecGlobalFlags::default()
+        .with_literal_pathspecs(!fresh.literal_pathspecs)
+        .with_glob_pathspecs(!fresh.glob_pathspecs)
+        .with_noglob_pathspecs(!fresh.noglob_pathspecs)
+        .with_icase_pathspecs(!fresh.icase_pathspecs);
+    assert_eq!(opts.literal_pathspecs, !fresh.literal_pathspecs);
+    assert_eq!(opts.glob_pathspecs, !fresh.glob_pathspecs);
+    assert_eq!(opts.noglob_pathspecs, !fresh.noglob_pathspecs);
+    assert_eq!(opts.icase_pathspecs, !fresh.icase_pathspecs);
+}
+
+#[test]
+fn thread_policy_constructor_and_setters() {
+    let opts = grit_lib::parallel::ThreadPolicy::default()
+        .with_threads_override(Some(3))
+        .with_min_items_override(Some(3))
+        .with_min_total_bytes_override(Some(3));
+    assert_eq!(opts.threads_override, Some(3));
+    assert_eq!(opts.min_items_override, Some(3));
+    assert_eq!(opts.min_total_bytes_override, Some(3));
 }

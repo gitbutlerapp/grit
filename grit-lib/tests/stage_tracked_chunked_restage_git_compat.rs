@@ -79,10 +79,11 @@ fn mutate(repo: &Path) {
 }
 
 fn assert_matches_git_add_u(large_index_restage: usize) {
-    assert_matches_git_add_u_with(IndexStagingThresholds {
-        large_index_restage,
-        parallel_tracked_restage: 64,
-    });
+    assert_matches_git_add_u_with(
+        IndexStagingThresholds::default()
+            .with_large_index_restage(large_index_restage)
+            .with_parallel_tracked_restage(64),
+    );
 }
 
 fn assert_matches_git_add_u_with(thresholds: IndexStagingThresholds) {
@@ -144,8 +145,9 @@ fn chunked_parallel_restage_matches_git_without_untracked_deferral() {
 
 #[test]
 fn serial_restage_matches_git() {
-    assert_matches_git_add_u_with(IndexStagingThresholds {
-        large_index_restage: usize::MAX,
-        parallel_tracked_restage: usize::MAX,
-    });
+    assert_matches_git_add_u_with(
+        IndexStagingThresholds::default()
+            .with_large_index_restage(usize::MAX)
+            .with_parallel_tracked_restage(usize::MAX),
+    );
 }

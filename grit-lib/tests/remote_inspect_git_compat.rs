@@ -366,14 +366,7 @@ fn inspect_no_query_uses_local_refs() {
     let repo = open_repo(&clone);
     let summary = repo
         .remotes()
-        .inspect(
-            "origin",
-            &InspectOptions {
-                query: false,
-                limit: None,
-            },
-            None,
-        )
+        .inspect("origin", &InspectOptions::default().with_query(false), None)
         .expect("inspect");
 
     assert!(
@@ -429,14 +422,7 @@ fn inspect_pull_config() {
     let repo = open_repo(dir.path());
     let summary = repo
         .remotes()
-        .inspect(
-            "origin",
-            &InspectOptions {
-                query: false,
-                limit: None,
-            },
-            None,
-        )
+        .inspect("origin", &InspectOptions::default().with_query(false), None)
         .expect("inspect");
     assert_eq!(summary.pull.len(), 1);
     assert_eq!(summary.pull[0].local, "main");

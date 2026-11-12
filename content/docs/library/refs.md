@@ -214,10 +214,9 @@ use grit_lib::porcelain::branch::{BranchDeleteMode, BranchDeleteOptions, BranchE
 let dry_run = false;
 match repo.branches().delete(
     "topic",
-    &BranchDeleteOptions {
-        mode: BranchDeleteMode::Safe,
-        dry_run,
-    },
+    &BranchDeleteOptions::default()
+        .with_mode(BranchDeleteMode::Safe)
+        .with_dry_run(dry_run),
 ) {
     Ok(deleted) => println!("deleted topic (was {})", deleted.oid),
     Err(Error::Branch(BranchError::CurrentlyCheckedOut { name })) => {

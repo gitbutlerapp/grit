@@ -94,15 +94,8 @@ fn demo_conflict_sequence(root: &Path) -> Result<()> {
     git(root, &["commit", "-qam", "main"])?;
 
     let repo = open_repo(root)?;
-    let req = ReplaySequenceRequest {
-        commits: vec![pick],
-        direction: ReplayDirection::Pick,
-        committer: replay_identity(),
-        options: ReplayOptions {
-            empty: ReplayEmptyPolicy::Stop,
-            ..ReplayOptions::default()
-        },
-    };
+    let req = ReplaySequenceRequest::new(vec![pick], ReplayDirection::Pick, replay_identity())
+        .with_options(ReplayOptions::default().with_empty(ReplayEmptyPolicy::Stop));
 
     match repo.merge().start_sequence(
         &req,

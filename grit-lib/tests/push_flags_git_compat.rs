@@ -58,11 +58,9 @@ fn ctx_from_bare(bare: &Path) -> PushPlanContext {
             remote_branch_tips.insert(ObjectId::from_hex(hex).expect("oid"));
         }
     }
-    PushPlanContext {
-        remote_ref_names,
-        remote_branch_tips,
-        remote_tips: None,
-    }
+    PushPlanContext::default()
+        .with_remote_ref_names(remote_ref_names)
+        .with_remote_branch_tips(remote_branch_tips)
 }
 
 #[test]
@@ -94,14 +92,10 @@ fn push_set_upstream_writes_same_config_as_git() {
     let plan = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                set_upstream: true,
-                ..PushRequest {
-                    remote: Some("origin".into()),
-                    refspecs: vec!["main".into()],
-                    ..Default::default()
-                }
-            },
+            &PushRequest::default()
+                .with_remote(Some("origin".into()))
+                .with_refspecs(vec!["main".into()])
+                .with_set_upstream(true),
             &ctx,
         )
         .expect("plan");
@@ -239,11 +233,9 @@ fn follow_tags_matches_git_push_follow_tags() {
     let branch_specs = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                remote: Some("origin".into()),
-                refspecs: vec!["main".into()],
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_remote(Some("origin".into()))
+                .with_refspecs(vec!["main".into()]),
             &ctx,
         )
         .expect("plan")
@@ -325,12 +317,10 @@ fn follow_tags_custom_dst_matches_git() {
     let branch_specs = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                remote: Some("grit".into()),
-                refspecs: vec!["main:refs/custom/main".into()],
-                follow_tags: true,
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_remote(Some("grit".into()))
+                .with_refspecs(vec!["main:refs/custom/main".into()])
+                .with_follow_tags(true),
             &ctx,
         )
         .expect("plan")
@@ -378,11 +368,9 @@ fn follow_tags_on_up_to_date_branch_includes_older_annotated_tag() {
     let branch_specs = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                remote: Some("origin".into()),
-                refspecs: vec!["main".into()],
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_remote(Some("origin".into()))
+                .with_refspecs(vec!["main".into()]),
             &ctx,
         )
         .expect("plan")

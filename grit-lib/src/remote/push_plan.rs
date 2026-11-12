@@ -56,6 +56,7 @@ pub enum LeaseExpectation {
 
 /// What the caller wants to push (remote override, refspecs, tags, deletions).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PushRequest {
     /// Explicit remote name from `--remote` or the first positional argument.
     pub remote: Option<String>,
@@ -89,6 +90,85 @@ pub struct PushRequest {
     pub prune: bool,
 }
 
+impl PushRequest {
+    /// Sets [`remote`](Self::remote).
+    #[must_use]
+    pub fn with_remote(mut self, remote: Option<String>) -> Self {
+        self.remote = remote;
+        self
+    }
+
+    /// Sets [`refspecs`](Self::refspecs).
+    #[must_use]
+    pub fn with_refspecs(mut self, refspecs: Vec<String>) -> Self {
+        self.refspecs = refspecs;
+        self
+    }
+
+    /// Sets [`tags`](Self::tags).
+    #[must_use]
+    pub const fn with_tags(mut self, tags: bool) -> Self {
+        self.tags = tags;
+        self
+    }
+
+    /// Sets [`delete_refs`](Self::delete_refs).
+    #[must_use]
+    pub const fn with_delete_refs(mut self, delete_refs: bool) -> Self {
+        self.delete_refs = delete_refs;
+        self
+    }
+
+    /// Sets [`delete`](Self::delete).
+    #[must_use]
+    pub fn with_delete(mut self, delete: Vec<String>) -> Self {
+        self.delete = delete;
+        self
+    }
+
+    /// Sets [`force`](Self::force).
+    #[must_use]
+    pub fn with_force(mut self, force: ForceMode) -> Self {
+        self.force = force;
+        self
+    }
+
+    /// Sets [`follow_tags`](Self::follow_tags).
+    #[must_use]
+    pub const fn with_follow_tags(mut self, follow_tags: bool) -> Self {
+        self.follow_tags = follow_tags;
+        self
+    }
+
+    /// Sets [`set_upstream`](Self::set_upstream).
+    #[must_use]
+    pub const fn with_set_upstream(mut self, set_upstream: bool) -> Self {
+        self.set_upstream = set_upstream;
+        self
+    }
+
+    /// Sets [`all`](Self::all).
+    #[must_use]
+    pub const fn with_all(mut self, all: bool) -> Self {
+        self.all = all;
+        self
+    }
+
+    /// Sets [`mirror`](Self::mirror).
+    #[must_use]
+    pub const fn with_mirror(mut self, mirror: bool) -> Self {
+        self.mirror = mirror;
+        self
+    }
+
+    /// Sets [`prune`](Self::prune).
+    #[must_use]
+    pub const fn with_prune(mut self, prune: bool) -> Self {
+        self.prune = prune;
+        self
+    }
+}
+
 /// A fully resolved push target.
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -119,6 +199,7 @@ pub enum PushPlanKind {
 
 /// Extra inputs needed to DWIM delete targets and short push destinations.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct PushPlanContext {
     /// Advertised ref names on the remote (for delete mapping and dst guessing).
     pub remote_ref_names: HashSet<String>,
@@ -928,11 +1009,28 @@ pub(crate) fn configured_remote_for_push(
 
 /// Remote and refspec strings after classifying `grit push [<remote>] [<refspec>...]`.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PushInvocation {
     /// Remote name, URL or path; `None` selects the remote with [`configured_remote_for_push`].
     pub remote: Option<String>,
     /// Refspec strings for [`PushRequest::refspecs`].
     pub refspecs: Vec<String>,
+}
+
+impl PushInvocation {
+    /// Sets [`remote`](Self::remote).
+    #[must_use]
+    pub fn with_remote(mut self, remote: Option<String>) -> Self {
+        self.remote = remote;
+        self
+    }
+
+    /// Sets [`refspecs`](Self::refspecs).
+    #[must_use]
+    pub fn with_refspecs(mut self, refspecs: Vec<String>) -> Self {
+        self.refspecs = refspecs;
+        self
+    }
 }
 
 /// Classify push positionals into a remote and refspecs.
@@ -1043,6 +1141,27 @@ impl PushPlanContext {
         }
         ctx.remote_tips = Some(tips);
         ctx
+    }
+
+    /// Sets [`remote_ref_names`](Self::remote_ref_names).
+    #[must_use]
+    pub fn with_remote_ref_names(mut self, remote_ref_names: HashSet<String>) -> Self {
+        self.remote_ref_names = remote_ref_names;
+        self
+    }
+
+    /// Sets [`remote_branch_tips`](Self::remote_branch_tips).
+    #[must_use]
+    pub fn with_remote_branch_tips(mut self, remote_branch_tips: HashSet<ObjectId>) -> Self {
+        self.remote_branch_tips = remote_branch_tips;
+        self
+    }
+
+    /// Sets [`remote_tips`](Self::remote_tips).
+    #[must_use]
+    pub fn with_remote_tips(mut self, remote_tips: Option<Vec<ObjectId>>) -> Self {
+        self.remote_tips = remote_tips;
+        self
     }
 }
 

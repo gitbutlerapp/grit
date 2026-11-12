@@ -36,10 +36,7 @@ fn main() -> Result<()> {
         }
     }
     let filter = Arc::new(builder.build()?);
-    let opts = RevListOptions {
-        commit_filter: Some(filter),
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_commit_filter(Some(filter));
     let result =
         repo.revwalk()
             .rev_list(&tips, &[], &opts, &mut NullProgress, &CancelToken::never())?;

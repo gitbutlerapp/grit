@@ -23,12 +23,12 @@ pub fn integrate_branch(
     cancel: &CancelToken,
 ) -> grit_lib::error::Result<IntegrateBranchOutcome> {
     repo.merge().integrate_into_branch(
-        &BranchIntegrateRequest {
+        &BranchIntegrateRequest::new(
             into_ref,
             into_oid,
-            source: &MergeSource::new(other_oid, MergeSourceKind::Commit),
+            &MergeSource::new(other_oid, MergeSourceKind::Commit),
             label,
-        },
+        ),
         &MergeOptions::default(),
         progress,
         cancel,
@@ -48,12 +48,12 @@ pub fn integrate_branch_with(
     cancel: &CancelToken,
 ) -> grit_lib::error::Result<IntegrateBranchOutcome> {
     repo.merge().integrate_into_branch(
-        &BranchIntegrateRequest {
+        &BranchIntegrateRequest::new(
             into_ref,
             into_oid,
-            source: &MergeSource::new(other_oid, MergeSourceKind::Commit),
+            &MergeSource::new(other_oid, MergeSourceKind::Commit),
             label,
-        },
+        ),
         options,
         progress,
         cancel,

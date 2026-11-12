@@ -24,13 +24,7 @@ fn open(dir: &Path) -> Repository {
 fn create(dir: &Path, name: &str) -> grit_lib::error::Result<()> {
     create_branch(
         &open(dir),
-        &BranchCreateOptions {
-            name: name.into(),
-            start: None,
-            force: false,
-            track: TrackMode::Never,
-            dry_run: false,
-        },
+        &BranchCreateOptions::at_head(name).with_track(TrackMode::Never),
     )
     .map(|_| ())
 }

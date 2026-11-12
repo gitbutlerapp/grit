@@ -48,10 +48,7 @@ pub fn fixture_available() -> bool {
 }
 
 pub fn run_rev_list_objects_v1(repo: &Repository) -> usize {
-    let opts = RevListOptions {
-        objects: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_objects(true);
     let result = repo
         .revwalk()
         .rev_list(

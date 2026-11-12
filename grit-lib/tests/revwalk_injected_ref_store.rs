@@ -174,15 +174,11 @@ fn battery(repo: &Repository, wt: &Path, linked: &Path) -> Observed {
 
     let added: WorktreeEntry = repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.to_path_buf(),
-            branch: Some(WorktreeBranch::Create("linked".into())),
-            start_point: Some("side".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.to_path_buf())
+                .with_branch(Some(WorktreeBranch::Create("linked".into())))
+                .with_start_point(Some("side".into())),
+        )
         .expect("worktrees().add");
     assert_eq!(
         fs::read_to_string(linked.join("f")).expect("checked out f"),

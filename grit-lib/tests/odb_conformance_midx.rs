@@ -347,10 +347,7 @@ fn grit_two_layer_incremental_fixture(
     let pack_dir = objects.join("pack");
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default().with_version(Some(1)),
     )
     .ok()?;
     let old_only = *base_oids.first()?;
@@ -363,11 +360,9 @@ fn grit_two_layer_incremental_fixture(
     }
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_version(Some(1)),
     )
     .ok()?;
     let chain = read_chain_hashes(&pack_dir)?;

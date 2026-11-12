@@ -274,7 +274,7 @@ mod tests {
             index_pack_threads_for_ingest(ThreadPolicy::default(), &cfg, Some(3)).expect("ingest"),
             Some(3)
         );
-        let policy = ThreadPolicy::with_threads_override(Some(6));
+        let policy = ThreadPolicy::default().with_threads_override(Some(6));
         assert_eq!(
             index_pack_threads_for_ingest(policy, &cfg, None).expect("ingest"),
             Some(policy.resolve(ParallelOp::IndexPack, &cfg).threads.get())

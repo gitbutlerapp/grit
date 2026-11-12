@@ -117,12 +117,10 @@ fn grit_push(
         .remotes()
         .push_plan_context(Some(remote), None)
         .expect("plan context");
-    let request = PushRequest {
-        remote: Some(remote.to_owned()),
-        refspecs: refspecs.iter().map(|s| (*s).to_owned()).collect(),
-        delete: delete.iter().map(|s| (*s).to_owned()).collect(),
-        ..PushRequest::default()
-    };
+    let request = PushRequest::default()
+        .with_remote(Some(remote.to_owned()))
+        .with_refspecs(refspecs.iter().map(|s| (*s).to_owned()).collect())
+        .with_delete(delete.iter().map(|s| (*s).to_owned()).collect());
     let plan = repo
         .remotes()
         .resolve_push(&request, &ctx)
@@ -392,11 +390,9 @@ fn head_refspec_keeps_resolved_src_ref_and_names_head_for_the_hook() {
         .push_plan_context(Some("origin"), None)
         .expect("context");
     let plan_for = |refspec: &str| {
-        let request = PushRequest {
-            remote: Some("origin".to_owned()),
-            refspecs: vec![refspec.to_owned()],
-            ..PushRequest::default()
-        };
+        let request = PushRequest::default()
+            .with_remote(Some("origin".to_owned()))
+            .with_refspecs(vec![refspec.to_owned()]);
         repo.remotes()
             .resolve_push(&request, &ctx)
             .expect("resolve push")

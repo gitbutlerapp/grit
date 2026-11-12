@@ -73,17 +73,15 @@ pub fn run_add(
     let entry = repo
         .worktrees()
         .add_with_cancel(
-            &AddLinkedWorktreeOptions {
-                path,
-                branch: branch_mode,
-                start_point,
-                force,
-                lock: lock.then(|| LockWorktreeOptions {
-                    reason: lock_reason.clone(),
-                }),
-                no_checkout,
-                track,
-            },
+            &AddLinkedWorktreeOptions::new(path)
+                .with_branch(branch_mode)
+                .with_start_point(start_point)
+                .with_force(force)
+                .with_lock(
+                    lock.then(|| LockWorktreeOptions::default().with_reason(lock_reason.clone())),
+                )
+                .with_no_checkout(no_checkout)
+                .with_track(track),
             &crate::interrupt::process_cancel_token(),
         )
         .map_err(anyhow::Error::new)?;
@@ -112,7 +110,7 @@ pub fn run_prune(dry_run: bool) -> Result<WorktreeOutcome> {
     let repo = context::discover()?;
     let pruned = repo
         .worktrees()
-        .prune(&PruneWorktreesOptions { dry_run })
+        .prune(&PruneWorktreesOptions::default().with_dry_run(dry_run))
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Prune {
         dry_run,
@@ -132,9 +130,7 @@ pub fn run_lock(path: PathBuf, reason: Option<String>) -> Result<WorktreeOutcome
     repo.worktrees()
         .lock(
             &canonical,
-            &LockWorktreeOptions {
-                reason: reason.clone(),
-            },
+            &LockWorktreeOptions::default().with_reason(reason.clone()),
         )
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Lock {
@@ -153,7 +149,9 @@ pub fn run_move(from: PathBuf, to: PathBuf, force: bool, dry_run: bool) -> Resul
         .move_linked(
             &from_canon,
             &to_lexical,
-            &MoveWorktreeOptions { force, dry_run },
+            &MoveWorktreeOptions::default()
+                .with_force(force)
+                .with_dry_run(dry_run),
         )
         .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Move {

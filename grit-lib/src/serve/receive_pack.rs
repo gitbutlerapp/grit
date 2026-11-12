@@ -772,9 +772,19 @@ pub trait ReceiveHook: Send + Sync {
 
 /// Push options and other session context for [`ReceiveHook`].
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct ReceiveHookContext<'a> {
     /// Values the client sent after the command list (`push-options` capability).
     pub push_options: &'a [String],
+}
+
+impl<'a> ReceiveHookContext<'a> {
+    /// Sets [`push_options`](Self::push_options).
+    #[must_use]
+    pub const fn with_push_options(mut self, push_options: &'a [String]) -> Self {
+        self.push_options = push_options;
+        self
+    }
 }
 
 impl ReceiveHook for () {}

@@ -78,12 +78,11 @@ fn open_repo(root: &Path) -> Repository {
 fn pick(repo: &Repository, commit: &str) -> ReplayOutcome {
     replay_commit(
         repo,
-        &ReplayRequest {
-            commit: ObjectId::from_hex(commit).expect("oid"),
-            direction: ReplayDirection::Pick,
-            committer: IDENT.parse().expect("IDENT"),
-            message_override: None,
-        },
+        &ReplayRequest::new(
+            ObjectId::from_hex(commit).expect("oid"),
+            ReplayDirection::Pick,
+            IDENT.parse().expect("IDENT"),
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

@@ -91,6 +91,7 @@ impl HistorySamplePlan {
 
 /// Options controlling pack bitmap generation (caller-supplied; not read from the environment).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PackBitmapWriteOptions {
     /// Write `BITMAP_OPT_FULL_DAG` (required for Git-compatible readers).
     pub full_dag: bool,
@@ -119,6 +120,56 @@ impl Default for PackBitmapWriteOptions {
             verify_reachability_closure: true,
             reachability_roots: None,
         }
+    }
+}
+
+impl PackBitmapWriteOptions {
+    /// Sets [`full_dag`](Self::full_dag).
+    #[must_use]
+    pub const fn with_full_dag(mut self, full_dag: bool) -> Self {
+        self.full_dag = full_dag;
+        self
+    }
+
+    /// Sets [`hash_cache`](Self::hash_cache).
+    #[must_use]
+    pub const fn with_hash_cache(mut self, hash_cache: bool) -> Self {
+        self.hash_cache = hash_cache;
+        self
+    }
+
+    /// Sets [`lookup_table`](Self::lookup_table).
+    #[must_use]
+    pub const fn with_lookup_table(mut self, lookup_table: bool) -> Self {
+        self.lookup_table = lookup_table;
+        self
+    }
+
+    /// Sets [`prefer_bitmap_tips`](Self::prefer_bitmap_tips).
+    #[must_use]
+    pub fn with_prefer_bitmap_tips(mut self, prefer_bitmap_tips: Vec<String>) -> Self {
+        self.prefer_bitmap_tips = prefer_bitmap_tips;
+        self
+    }
+
+    /// Sets [`verify_reachability_closure`](Self::verify_reachability_closure).
+    #[must_use]
+    pub const fn with_verify_reachability_closure(
+        mut self,
+        verify_reachability_closure: bool,
+    ) -> Self {
+        self.verify_reachability_closure = verify_reachability_closure;
+        self
+    }
+
+    /// Sets [`reachability_roots`](Self::reachability_roots).
+    #[must_use]
+    pub fn with_reachability_roots(
+        mut self,
+        reachability_roots: Option<Vec<crate::objects::ObjectId>>,
+    ) -> Self {
+        self.reachability_roots = reachability_roots;
+        self
     }
 }
 

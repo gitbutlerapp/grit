@@ -35,6 +35,7 @@ pub enum CleanScope {
 
 /// Inputs for [`Checkout::clean`](crate::repo_handles::Checkout::clean).
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CleanOptions {
     /// Limit removal to paths matching these pathspecs (empty = entire tree).
     pub pathspecs: Vec<String>,
@@ -48,6 +49,50 @@ pub struct CleanOptions {
     pub excludes: Vec<String>,
     /// When true, report paths that would be removed without deleting anything.
     pub dry_run: bool,
+}
+
+impl CleanOptions {
+    /// Sets [`pathspecs`](Self::pathspecs).
+    #[must_use]
+    pub fn with_pathspecs(mut self, pathspecs: Vec<String>) -> Self {
+        self.pathspecs = pathspecs;
+        self
+    }
+
+    /// Sets [`directories`](Self::directories).
+    #[must_use]
+    pub const fn with_directories(mut self, directories: bool) -> Self {
+        self.directories = directories;
+        self
+    }
+
+    /// Sets [`files_only`](Self::files_only).
+    #[must_use]
+    pub const fn with_files_only(mut self, files_only: bool) -> Self {
+        self.files_only = files_only;
+        self
+    }
+
+    /// Sets [`scope`](Self::scope).
+    #[must_use]
+    pub fn with_scope(mut self, scope: CleanScope) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    /// Sets [`excludes`](Self::excludes).
+    #[must_use]
+    pub fn with_excludes(mut self, excludes: Vec<String>) -> Self {
+        self.excludes = excludes;
+        self
+    }
+
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 fn clean_scope_includes_untracked(scope: CleanScope) -> bool {

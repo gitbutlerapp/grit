@@ -169,10 +169,7 @@ fn build_pack_reuse_objects_disabled_still_valid() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            reuse_objects: false,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_reuse_objects(false),
     )
     .expect("build pack");
     let (_scratch, idx_path) = git_index_pack_dir(&pack);
@@ -201,13 +198,7 @@ fn build_pack_ofs_delta_resolves_reused_base() {
         &odb,
         &[tip],
         &[],
-        &PackBuildOptions {
-            delta: true,
-            window: 10,
-            reuse_deltas: true,
-            use_ofs_delta: true,
-            ..PackBuildOptions::default()
-        },
+        &PackBuildOptions::default().with_delta(true),
     )
     .expect("build pack");
     let (_scratch, idx_path) = git_index_pack_dir(&pack);

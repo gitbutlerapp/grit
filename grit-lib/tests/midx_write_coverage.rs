@@ -48,11 +48,9 @@ fn preferred_pack_name_accepts_pack_suffix_and_relative_path() {
         grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("clear");
         grit_write_midx(
             &pack_dir,
-            &WriteMultiPackIndexOptions {
-                preferred_pack_name: Some(name),
-                version: Some(1),
-                ..Default::default()
-            },
+            &WriteMultiPackIndexOptions::default()
+                .with_preferred_pack_name(Some(name))
+                .with_version(Some(1)),
         );
     }
     let _ = repo;
@@ -68,11 +66,9 @@ fn unknown_preferred_pack_emits_warning_and_still_writes() {
     grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("clear");
     grit_write_midx(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            preferred_pack_name: Some("no-such-pack.idx".into()),
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_preferred_pack_name(Some("no-such-pack.idx".into()))
+            .with_version(Some(1)),
     );
     assert!(resolve_tip_midx_path(&pack_dir).is_some());
     let _ = repo;
@@ -93,11 +89,9 @@ fn pack_names_subset_skips_unknown_entries() {
     grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("clear");
     grit_write_midx(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            pack_names_subset_ordered: Some(vec![idx, "missing-pack.idx".into()]),
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_pack_names_subset_ordered(Some(vec![idx, "missing-pack.idx".into()]))
+            .with_version(Some(1)),
     );
     let _ = repo;
 }
@@ -116,11 +110,9 @@ fn incremental_write_without_new_packs_is_noop() {
         .ok();
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_version(Some(1)),
     )
     .expect("noop incremental");
     assert!(
@@ -201,11 +193,9 @@ fn incremental_write_links_root_midx_into_chain() {
 
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_version(Some(1)),
     )
     .expect("incremental layer");
 
@@ -233,23 +223,19 @@ fn non_incremental_write_clears_incremental_chain() {
     assert!(midx_support::pack_objects_layer(repo.path(), 51));
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_version(Some(1)),
     )
     .expect("incremental");
     assert!(read_chain_hashes(&pack_dir).is_some());
 
     grit_write_midx(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            version: Some(1),
-            write_bitmap: true,
-            write_rev_sidecar: true,
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_version(Some(1))
+            .with_write_bitmap(true)
+            .with_write_rev_sidecar(true),
     );
     assert!(pack_dir.join("multi-pack-index").is_file());
     assert!(!pack_dir
@@ -276,11 +262,9 @@ fn compact_with_bitmaps_and_rev_sidecars() {
         assert!(midx_support::pack_objects_layer(repo.path(), 110 + i));
         write_multi_pack_index(
             &pack_dir,
-            &WriteMultiPackIndexOptions {
-                incremental: true,
-                version: Some(2),
-                ..Default::default()
-            },
+            &WriteMultiPackIndexOptions::default()
+                .with_incremental(true)
+                .with_version(Some(2)),
         )
         .expect("incremental v2");
     }
@@ -318,11 +302,9 @@ fn compact_missing_to_endpoint() {
     assert!(midx_support::pack_objects_layer(repo.path(), 52));
     write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            version: Some(2),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_version(Some(2)),
     )
     .expect("incremental");
     let Some(chain) = read_chain_hashes(&pack_dir) else {
@@ -346,12 +328,10 @@ fn bitmap_sidecars_scrubbed_on_fresh_write() {
     let pack_dir = objects.join("pack");
     grit_write_midx(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            write_bitmap: true,
-            write_rev_sidecar: true,
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_write_bitmap(true)
+            .with_write_rev_sidecar(true)
+            .with_version(Some(1)),
     );
     let first_rev = fs::read_dir(&pack_dir)
         .expect("read pack dir")
@@ -363,10 +343,7 @@ fn bitmap_sidecars_scrubbed_on_fresh_write() {
     grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("clear");
     grit_write_midx(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            version: Some(1),
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default().with_version(Some(1)),
     );
     let stale = fs::read_dir(&pack_dir)
         .expect("read pack dir")
@@ -402,11 +379,9 @@ fn many_lookups_exercise_chain_and_info_paths() {
         assert!(midx_support::pack_objects_layer(repo.path(), 120 + i));
         write_multi_pack_index(
             &pack_dir,
-            &WriteMultiPackIndexOptions {
-                incremental: true,
-                version: Some(1),
-                ..Default::default()
-            },
+            &WriteMultiPackIndexOptions::default()
+                .with_incremental(true)
+                .with_version(Some(1)),
         )
         .expect("incr");
     }
@@ -472,13 +447,11 @@ fn incremental_layer_with_bitmap_and_rev_sidecars_v2() {
     assert!(midx_support::pack_objects_layer(repo.path(), 77));
     let result = write_multi_pack_index(
         &pack_dir,
-        &WriteMultiPackIndexOptions {
-            incremental: true,
-            version: Some(2),
-            write_bitmap: true,
-            write_rev_sidecar: true,
-            ..Default::default()
-        },
+        &WriteMultiPackIndexOptions::default()
+            .with_incremental(true)
+            .with_version(Some(2))
+            .with_write_bitmap(true)
+            .with_write_rev_sidecar(true),
     )
     .expect("incremental bitmap layer");
     assert_eq!(
@@ -520,10 +493,7 @@ fn non_incremental_rewrite_retains_identical_midx_bytes() {
         return;
     };
     let pack_dir = objects.join("pack");
-    let opts = WriteMultiPackIndexOptions {
-        version: Some(1),
-        ..Default::default()
-    };
+    let opts = WriteMultiPackIndexOptions::default().with_version(Some(1));
     grit_write_midx(&pack_dir, &opts);
     let path = pack_dir.join("multi-pack-index");
     let before = fs::read(&path).expect("midx bytes");

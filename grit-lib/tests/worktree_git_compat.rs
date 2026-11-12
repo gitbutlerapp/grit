@@ -45,15 +45,11 @@ fn t2400_worktree_admin_dir_roundtrip_with_git() {
     let grit_linked = tmp.path().join("grit-linked");
     open_grit(&main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: grit_linked.clone(),
-            branch: Some(WorktreeBranch::Create("grit-wt".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(grit_linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("grit-wt".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("grit add");
 
     let git_linked = tmp.path().join("git-linked");
@@ -106,15 +102,11 @@ fn t2404_worktree_config_matches_git() {
     let linked = tmp.path().join("linked");
     open_grit(&main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("cfg-wt".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("cfg-wt".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add");
 
     let admin = open_grit(&main.worktrees().list())
@@ -153,15 +145,11 @@ fn t2402_worktree_list_matches_git_porcelain() {
     let linked = tmp.path().join("linked");
     open_grit(&main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("list-wt".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("list-wt".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add");
 
     let grit_paths: Vec<_> = open_grit(&main.worktrees().list())
@@ -199,15 +187,11 @@ fn per_worktree_refs_resolve_like_git() {
     let linked = tmp.path().join("linked");
     open_grit(&main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("ref-wt".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("ref-wt".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add");
 
     let linked_repo = open_grit(&linked);
@@ -259,15 +243,11 @@ fn t2401_remove_linked_worktree_matches_git() {
     let grit_wt = tmp.path().join("grit-rm");
     open_grit(&main)
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: grit_wt.clone(),
-            branch: Some(WorktreeBranch::Create("rm-wt".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(grit_wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("rm-wt".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .expect("add");
 
     open_grit(&main)

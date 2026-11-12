@@ -89,12 +89,10 @@ fn rm_dry_run_reports_same_paths_and_changes_nothing() {
     let outcome = repo
         .checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["a.txt".into(), "dir/".into()],
-                pathspec_sources: vec!["a.txt".into(), "dir/".into()],
-                dry_run: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["a.txt".into(), "dir/".into()])
+                .with_pathspec_sources(vec!["a.txt".into(), "dir/".into()])
+                .with_dry_run(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("dry rm");
@@ -121,12 +119,10 @@ fn rm_ignore_unmatch_succeeds_on_missing() {
     let outcome = repo
         .checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["missing.txt".into()],
-                pathspec_sources: vec!["missing.txt".into()],
-                ignore_unmatch: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["missing.txt".into()])
+                .with_pathspec_sources(vec!["missing.txt".into()])
+                .with_ignore_unmatch(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("ignore unmatch");
@@ -148,12 +144,7 @@ fn move_paths_multi_source_requires_existing_directory() {
     let err = repo
         .checkout()
         .move_paths(
-            &MoveOptions {
-                sources: vec!["one.txt".into(), "two.txt".into()],
-                destination: "missing-dir".into(),
-                force: false,
-                dry_run: false,
-            },
+            &MoveOptions::new(vec!["one.txt".into(), "two.txt".into()], "missing-dir"),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("multi-source into missing dir");
@@ -177,12 +168,7 @@ fn move_paths_multi_source_into_dir_git_status_agrees() {
     let repo = grit_repo(root);
     repo.checkout()
         .move_paths(
-            &MoveOptions {
-                sources: vec!["one.txt".into(), "two.txt".into()],
-                destination: "dest".into(),
-                force: false,
-                dry_run: false,
-            },
+            &MoveOptions::new(vec!["one.txt".into(), "two.txt".into()], "dest"),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("mv");
@@ -214,12 +200,7 @@ fn move_paths_dry_run_changes_nothing() {
     let outcome = repo
         .checkout()
         .move_paths(
-            &MoveOptions {
-                sources: vec!["src.txt".into()],
-                destination: "dst.txt".into(),
-                force: false,
-                dry_run: true,
-            },
+            &MoveOptions::new(vec!["src.txt".into()], "dst.txt").with_dry_run(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("dry mv");
@@ -246,12 +227,7 @@ fn move_paths_validates_all_before_moving() {
     let err = repo
         .checkout()
         .move_paths(
-            &MoveOptions {
-                sources: vec!["good.txt".into(), "missing.txt".into()],
-                destination: "dest".into(),
-                force: false,
-                dry_run: false,
-            },
+            &MoveOptions::new(vec!["good.txt".into(), "missing.txt".into()], "dest"),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("untracked second source should block the batch");
@@ -281,12 +257,10 @@ fn clean_only_ignored_matches_git_clean_X() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                scope: CleanScope::OnlyIgnored,
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_scope(CleanScope::OnlyIgnored)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("clean -X preview");
@@ -318,12 +292,10 @@ fn clean_nested_exclude_matches_git_clean_e() {
     let preview = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                excludes: vec!["dir/keep.txt".into()],
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_excludes(vec!["dir/keep.txt".into()])
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("clean nested exclude preview");
@@ -341,12 +313,9 @@ fn clean_nested_exclude_matches_git_clean_e() {
 
     repo.checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                excludes: vec!["dir/keep.txt".into()],
-                dry_run: false,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_excludes(vec!["dir/keep.txt".into()]),
             &mut NullProgress,
         )
         .expect("clean nested exclude force");
@@ -369,12 +338,10 @@ fn clean_exclude_pattern_matches_git_clean_e() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                excludes: vec!["drop.txt".into()],
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_excludes(vec!["drop.txt".into()])
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("clean -e preview");
@@ -409,12 +376,7 @@ fn move_paths_rejects_duplicate_destinations_even_with_force() {
     let err = repo
         .checkout()
         .move_paths(
-            &MoveOptions {
-                sources: vec!["dir1/x".into(), "dir2/x".into()],
-                destination: "dest".into(),
-                force: true,
-                dry_run: false,
-            },
+            &MoveOptions::new(vec!["dir1/x".into(), "dir2/x".into()], "dest").with_force(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("duplicate basename targets must fail");
@@ -442,12 +404,10 @@ fn clean_exclude_inside_untracked_dir_matches_git() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                excludes: vec!["*.special".into()],
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_excludes(vec!["*.special".into()])
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("clean -e dir");
@@ -480,11 +440,9 @@ fn clean_nested_untracked_dir_without_d_matches_git() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                files_only: true,
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_files_only(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("files-only preview");
@@ -516,13 +474,11 @@ fn clean_only_ignored_with_exclude_matches_git_clean_Xe() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                scope: CleanScope::OnlyIgnored,
-                excludes: vec!["*.special".into()],
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_scope(CleanScope::OnlyIgnored)
+                .with_excludes(vec!["*.special".into()])
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("clean -Xe preview");
@@ -553,12 +509,10 @@ fn clean_files_only_matches_git_clean_without_d() {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                files_only: true,
-                dry_run: true,
-                ..Default::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_files_only(true)
+                .with_dry_run(true),
             &mut NullProgress,
         )
         .expect("files-only preview");

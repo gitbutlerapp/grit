@@ -31,13 +31,10 @@ fn grit_pickaxe_log(
     paths: Vec<String>,
 ) -> Vec<String> {
     let repo = open_grit_repo(dir);
-    let opts = RevListOptions {
-        max_count,
-        paths,
-        pickaxe: Some(pickaxe),
-        use_commit_graph: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_max_count(max_count)
+        .with_paths(paths)
+        .with_pickaxe(Some(pickaxe));
     repo.revwalk()
         .rev_list(
             &["HEAD".into()],
@@ -593,12 +590,9 @@ fn pickaxe_first_parent_diffs_merges_against_first_parent_matches_git() {
     let git_oids = git_log_pickaxe(worktree, &["--first-parent", "-S", "needle"]);
     assert_eq!(git_oids, vec![merge]);
     let repo = open_grit_repo(worktree);
-    let opts = RevListOptions {
-        first_parent: true,
-        pickaxe: Some(needle_s()),
-        use_commit_graph: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_first_parent(true)
+        .with_pickaxe(Some(needle_s()));
     let grit_oids: Vec<String> = repo
         .revwalk()
         .rev_list(

@@ -221,11 +221,11 @@ fn notes_write_options(
     verb: &str,
     now: OffsetDateTime,
 ) -> Result<NotesWriteOptions> {
-    Ok(NotesWriteOptions {
-        message: format!("Notes {verb} by 'grit notes {verb}'"),
-        committer: context::signature(repo, IdentRole::Committer, now)?,
-        author: Some(context::signature(repo, IdentRole::Author, now)?),
-    })
+    Ok(NotesWriteOptions::new(
+        format!("Notes {verb} by 'grit notes {verb}'"),
+        context::signature(repo, IdentRole::Committer, now)?,
+    )
+    .with_author(Some(context::signature(repo, IdentRole::Author, now)?)))
 }
 
 fn map_notes_error(err: Error) -> anyhow::Error {

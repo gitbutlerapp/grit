@@ -37,6 +37,7 @@ pub enum ParallelOp {
 
 /// Explicit CLI or embedder overrides layered on top of config resolution.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ThreadPolicy {
     /// When set, replaces config-derived thread counts (`0` = auto / all logical CPUs).
     pub threads_override: Option<usize>,
@@ -47,35 +48,27 @@ pub struct ThreadPolicy {
 }
 
 impl ThreadPolicy {
-    /// Override worker count (`None` = use config only; `Some(0)` = auto).
+    /// Sets [`threads_override`](Self::threads_override) (`None` = use config only; `Some(0)` = auto).
     #[must_use]
-    pub fn with_threads_override(threads: Option<usize>) -> Self {
-        Self {
-            threads_override: threads,
-            ..Self::default()
-        }
-    }
-
-    /// Override minimum batch size (`Some(0)` forces the parallel path on tiny inputs).
-    #[must_use]
-    pub fn with_min_items_override(min_items: Option<usize>) -> Self {
-        Self {
-            min_items_override: min_items,
-            ..Self::default()
-        }
-    }
-
-    /// Set minimum batch override on an existing policy.
-    #[must_use]
-    pub fn min_items_override(mut self, min_items: Option<usize>) -> Self {
-        self.min_items_override = min_items;
+    pub const fn with_threads_override(mut self, threads_override: Option<usize>) -> Self {
+        self.threads_override = threads_override;
         self
     }
 
-    /// Override minimum total bytes (`Some(0)` disables the byte threshold).
+    /// Sets [`min_items_override`](Self::min_items_override) (`Some(0)` forces the parallel path on tiny inputs).
     #[must_use]
-    pub fn min_total_bytes_override(mut self, min_bytes: Option<usize>) -> Self {
-        self.min_total_bytes_override = min_bytes;
+    pub const fn with_min_items_override(mut self, min_items_override: Option<usize>) -> Self {
+        self.min_items_override = min_items_override;
+        self
+    }
+
+    /// Sets [`min_total_bytes_override`](Self::min_total_bytes_override) (`Some(0)` disables the byte threshold).
+    #[must_use]
+    pub const fn with_min_total_bytes_override(
+        mut self,
+        min_total_bytes_override: Option<usize>,
+    ) -> Self {
+        self.min_total_bytes_override = min_total_bytes_override;
         self
     }
 
@@ -212,6 +205,7 @@ impl ThreadPolicy {
 
 /// Resolved worker count and serial-fallback thresholds for one parallel map call.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ParallelOptions {
     /// Worker threads (always at least 1).
     pub threads: NonZeroUsize,
@@ -228,6 +222,52 @@ impl ParallelOptions {
     #[must_use]
     pub fn parallelism(self) -> Parallelism {
         Parallelism::new(self.threads)
+    }
+
+    /// Creates a [`ParallelOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `threads`: worker threads (always at least 1).
+    #[must_use]
+    pub const fn new(threads: NonZeroUsize) -> Self {
+        Self {
+            threads,
+            min_items: 0,
+            min_total_bytes: None,
+            signed_entry_threshold: None,
+        }
+    }
+
+    /// Sets [`threads`](Self::threads).
+    #[must_use]
+    pub const fn with_threads(mut self, threads: NonZeroUsize) -> Self {
+        self.threads = threads;
+        self
+    }
+
+    /// Sets [`min_items`](Self::min_items).
+    #[must_use]
+    pub const fn with_min_items(mut self, min_items: usize) -> Self {
+        self.min_items = min_items;
+        self
+    }
+
+    /// Sets [`min_total_bytes`](Self::min_total_bytes).
+    #[must_use]
+    pub const fn with_min_total_bytes(mut self, min_total_bytes: Option<usize>) -> Self {
+        self.min_total_bytes = min_total_bytes;
+        self
+    }
+
+    /// Sets [`signed_entry_threshold`](Self::signed_entry_threshold).
+    #[must_use]
+    pub const fn with_signed_entry_threshold(
+        mut self,
+        signed_entry_threshold: Option<i64>,
+    ) -> Self {
+        self.signed_entry_threshold = signed_entry_threshold;
+        self
     }
 }
 
@@ -460,7 +500,7 @@ mod tests {
     #[test]
     fn thread_override_enables_index_refresh_when_preload_off() {
         let cfg = config_from("[core]\n\tpreloadIndex = false\n[index]\n\tthreads = 2\n");
-        let policy = ThreadPolicy::with_threads_override(Some(6));
+        let policy = ThreadPolicy::default().with_threads_override(Some(6));
         let opts = policy.resolve(ParallelOp::IndexRefresh, &cfg);
         assert_eq!(
             opts.threads.get(),
@@ -475,7 +515,7 @@ mod tests {
     #[test]
     fn thread_override_beats_config() {
         let cfg = config_from("[index]\n\tthreads = 2\n");
-        let policy = ThreadPolicy::with_threads_override(Some(6));
+        let policy = ThreadPolicy::default().with_threads_override(Some(6));
         let opts = policy.resolve(ParallelOp::IndexRefresh, &cfg);
         assert_eq!(
             opts.threads.get(),
@@ -490,7 +530,7 @@ mod tests {
     #[test]
     fn min_items_override_for_tests() {
         let cfg = ConfigSet::new();
-        let policy = ThreadPolicy::with_min_items_override(Some(0));
+        let policy = ThreadPolicy::default().with_min_items_override(Some(0));
         let opts = policy.resolve(ParallelOp::IndexPack, &cfg);
         assert_eq!(opts.min_items, 0);
     }
@@ -529,7 +569,7 @@ mod tests {
     #[cfg(windows)]
     fn checkout_global_threads_override_ignored_without_checkout_workers() {
         let cfg = ConfigSet::new();
-        let policy = ThreadPolicy::with_threads_override(Some(8));
+        let policy = ThreadPolicy::default().with_threads_override(Some(8));
         let opts = policy.resolve(ParallelOp::Checkout, &cfg);
         assert_eq!(opts.threads, NonZeroUsize::MIN);
     }
@@ -566,7 +606,7 @@ mod tests {
     #[cfg(windows)]
     fn checkout_thread_override_beats_workers_config_on_windows() {
         let cfg = config_from("[checkout]\n\tworkers = 2\n");
-        let policy = ThreadPolicy::with_threads_override(Some(4));
+        let policy = ThreadPolicy::default().with_threads_override(Some(4));
         let opts = policy.resolve(ParallelOp::Checkout, &cfg);
         assert_eq!(
             opts.threads.get(),
@@ -625,7 +665,7 @@ mod tests {
     #[test]
     fn checkout_thread_override_beats_workers_config() {
         let cfg = config_from("[checkout]\n\tworkers = 2\n");
-        let policy = ThreadPolicy::with_threads_override(Some(6));
+        let policy = ThreadPolicy::default().with_threads_override(Some(6));
         let opts = policy.resolve(ParallelOp::Checkout, &cfg);
         assert_eq!(
             opts.threads.get(),
@@ -646,7 +686,7 @@ mod tests {
             policy.index_stat_preload_threads(&cfg, 5000, None),
             10_usize.min(20).min(index_cap)
         );
-        let policy = ThreadPolicy::with_threads_override(Some(8));
+        let policy = ThreadPolicy::default().with_threads_override(Some(8));
         let override_cap = resolve_index_threads(&cfg, Some(8)).get();
         assert_eq!(
             policy.index_stat_preload_threads(&cfg, 5000, None),

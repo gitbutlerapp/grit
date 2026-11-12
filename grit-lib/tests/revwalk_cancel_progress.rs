@@ -74,10 +74,7 @@ fn rev_list_objects_cancelled_mid_walk() {
     let dir = tempdir().expect("tempdir");
     let (repo, _) = init_repo(dir.path(), 300);
     let cancel = CancelToken::after_polls(1);
-    let opts = RevListOptions {
-        objects: true,
-        ..Default::default()
-    };
+    let opts = RevListOptions::default().with_objects(true);
     let err = repo
         .revwalk()
         .rev_list(
@@ -177,10 +174,7 @@ fn describe_cancelled_mid_walk() {
         .update(&RefName::try_from("refs/tags/mid").unwrap(), &mid)
         .expect("tag");
     let cancel = CancelToken::after_polls(1);
-    let opts = DescribeOptions {
-        tags: true,
-        ..DescribeOptions::default()
-    };
+    let opts = DescribeOptions::default().with_tags(true);
     let err = repo
         .revwalk()
         .describe("HEAD", &opts, &mut NullProgress, &cancel)
@@ -197,10 +191,7 @@ fn listed_nth(
         .rev_list(
             &[String::from("HEAD")],
             &[],
-            &RevListOptions {
-                max_count: Some(n + 1),
-                ..Default::default()
-            },
+            &RevListOptions::default().with_max_count(Some(n + 1)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -250,10 +241,7 @@ fn describe_reports_describing_phase() {
         .update(&RefName::try_from("refs/tags/mid").unwrap(), &mid)
         .expect("tag");
     let mut recorder = PhaseRecorder::default();
-    let opts = DescribeOptions {
-        tags: true,
-        ..DescribeOptions::default()
-    };
+    let opts = DescribeOptions::default().with_tags(true);
     repo.revwalk()
         .describe("HEAD", &opts, &mut recorder, &CancelToken::never())
         .expect("describe");

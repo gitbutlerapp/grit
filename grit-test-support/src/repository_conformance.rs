@@ -47,7 +47,7 @@ use grit_lib::diff::{hunk_ids, DiffOptions, DiffSide, DiffTarget};
 use grit_lib::maintenance::repository_fsck::FsckOptions;
 use grit_lib::merge::{
     BranchIntegrateRequest, IntegrateBranchOutcome, MergeOptions, MergeSource, MergeSourceKind,
-    ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+    ReplaySequenceRequest, SequenceOutcome,
 };
 use grit_lib::notes::NotesRef;
 use grit_lib::objects::HashAlgo;
@@ -623,12 +623,12 @@ fn run_snapshot_on_repo(
     let merge_out = repo
         .merge()
         .integrate_into_branch(
-            &BranchIntegrateRequest {
-                into_ref: "refs/heads/main",
-                into_oid: main_before_merge,
-                source: &MergeSource::new(feature_tip, MergeSourceKind::LocalBranch),
-                label: "feature",
-            },
+            &BranchIntegrateRequest::new(
+                "refs/heads/main",
+                main_before_merge,
+                &MergeSource::new(feature_tip, MergeSourceKind::LocalBranch),
+                "feature",
+            ),
             &MergeOptions::default(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -660,12 +660,11 @@ fn run_snapshot_on_repo(
     let pick_out = repo
         .merge()
         .start_sequence(
-            &ReplaySequenceRequest {
-                commits: vec![pick_src],
-                direction: ReplayDirection::Pick,
-                committer: signature_at(1_700_000_031).parse().expect("sig"),
-                options: ReplayOptions::default(),
-            },
+            &ReplaySequenceRequest::new(
+                vec![pick_src],
+                ReplayDirection::Pick,
+                signature_at(1_700_000_031).parse().expect("sig"),
+            ),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -689,12 +688,11 @@ fn run_snapshot_on_repo(
     let revert_out = repo
         .merge()
         .start_sequence(
-            &ReplaySequenceRequest {
-                commits: vec![revert_src],
-                direction: ReplayDirection::Revert,
-                committer: signature_at(1_700_000_041).parse().expect("sig"),
-                options: ReplayOptions::default(),
-            },
+            &ReplaySequenceRequest::new(
+                vec![revert_src],
+                ReplayDirection::Revert,
+                signature_at(1_700_000_041).parse().expect("sig"),
+            ),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -742,12 +740,12 @@ fn run_snapshot_on_repo(
     let conflict_out = repo
         .merge()
         .integrate_into_branch(
-            &BranchIntegrateRequest {
-                into_ref: "refs/heads/main",
-                into_oid: main_conflict,
-                source: &MergeSource::new(topic_conflict, MergeSourceKind::LocalBranch),
-                label: "conflict",
-            },
+            &BranchIntegrateRequest::new(
+                "refs/heads/main",
+                main_conflict,
+                &MergeSource::new(topic_conflict, MergeSourceKind::LocalBranch),
+                "conflict",
+            ),
             &MergeOptions::default(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -851,11 +849,10 @@ fn run_snapshot_on_repo(
 
     let note_target = head_oid(repo, "main");
     let notes = repo.notes();
-    let write_opts = NotesWriteOptions {
-        message: "add conformance note".into(),
-        committer: signature_at(1_700_000_050).parse().expect("sig"),
-        author: None,
-    };
+    let write_opts = NotesWriteOptions::new(
+        "add conformance note",
+        signature_at(1_700_000_050).parse().expect("sig"),
+    );
     notes
         .add(
             &NotesRef::commits(),

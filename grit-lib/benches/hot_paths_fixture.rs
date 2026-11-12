@@ -22,7 +22,7 @@ use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
+use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use tempfile::TempDir;
 
 const BENCH_IDENT: &str = "Bench <bench@grit-scm.test> 1700000000 +0000";
@@ -491,15 +491,7 @@ fn write_tree_commit(
 
 pub fn bench_push_stash(fx: &HotPathsFixture) {
     fx.modify_worktree_files(50);
-    let options = StashPushOptions {
-        message: None,
-        include_untracked: false,
-        identity: BENCH_IDENT.parse().expect("signature"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: StashMode::default(),
-    };
+    let options = StashPushOptions::new(BENCH_IDENT.parse().expect("signature"));
     let _ = fx
         .repo
         .stash()

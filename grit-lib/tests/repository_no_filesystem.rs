@@ -356,11 +356,7 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
             &notes_ref,
             &merge_commit,
             b"reviewed\n",
-            &NotesWriteOptions {
-                message: "add note".to_owned(),
-                committer: signature("Ada", 1_700_000_400),
-                author: None,
-            },
+            &NotesWriteOptions::new("add note".to_owned(), signature("Ada", 1_700_000_400)),
             false,
         )
         .expect("add note");

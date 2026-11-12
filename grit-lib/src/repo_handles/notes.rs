@@ -20,6 +20,7 @@ use crate::repo::Repository;
 
 /// Author, committer, and commit message for a notes ref update.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct NotesWriteOptions {
     /// First line and body of the notes commit (trailing newline optional).
     pub message: String,
@@ -38,6 +39,42 @@ impl NotesWriteOptions {
             signature.validate()?;
         }
         Ok((author.header_line(), committer.header_line()))
+    }
+
+    /// Creates a [`NotesWriteOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `message`: first line and body of the notes commit (trailing newline optional).
+    /// - `committer`: committer of the notes commit (for example from [`Repository::identity`]).
+    #[must_use]
+    pub fn new(message: impl Into<String>, committer: Signature) -> Self {
+        Self {
+            message: message.into(),
+            committer,
+            author: None,
+        }
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: String) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`committer`](Self::committer).
+    #[must_use]
+    pub fn with_committer(mut self, committer: Signature) -> Self {
+        self.committer = committer;
+        self
+    }
+
+    /// Sets [`author`](Self::author).
+    #[must_use]
+    pub fn with_author(mut self, author: Option<Signature>) -> Self {
+        self.author = author;
+        self
     }
 }
 
@@ -343,11 +380,8 @@ impl<'repo> RepositoryNotes<'repo> {
     /// # fn demo() -> grit_lib::error::Result<()> {
     /// # let repo = Repository::discover(None, &grit_lib::config::environment::RepositoryOptions::empty())?;
     /// # let object = ObjectId::zero();
-    /// let opts = NotesWriteOptions {
-    ///     message: "add note".into(),
-    ///     committer: "User <u@example.com> 1000000000 +0000".parse()?,
-    ///     author: None,
-    /// };
+    /// let committer = "User <u@example.com> 1000000000 +0000".parse()?;
+    /// let opts = NotesWriteOptions::new("add note", committer);
     /// repo.notes().add(&NotesRef::commits(), &object, b"text\n", &opts, false)?;
     /// # Ok(())
     /// # }

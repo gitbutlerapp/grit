@@ -91,12 +91,9 @@ fn odb_concurrent_reads() {
             repo.odb(),
             &batch_oids,
             &[],
-            &PackBuildOptions {
-                delta: true,
-                max_depth: 32,
-                use_ofs_delta: true,
-                ..PackBuildOptions::default()
-            },
+            &PackBuildOptions::default()
+                .with_delta(true)
+                .with_max_depth(32),
         )
         .expect("build pack");
         install_pack(&primary_objects, &format!("p{batch}"), &pack);
@@ -230,16 +227,8 @@ fn stale_read_after_invalidation() {
         .odb()
         .write(ObjectKind::Blob, b"only-in-pack\n")
         .expect("write blob");
-    let pack = build_pack(
-        repo.odb(),
-        &[oid],
-        &[],
-        &PackBuildOptions {
-            delta: false,
-            ..PackBuildOptions::default()
-        },
-    )
-    .expect("build pack");
+    let pack =
+        build_pack(repo.odb(), &[oid], &[], &PackBuildOptions::default()).expect("build pack");
     install_pack(&objects, "solo", &pack);
     let hex = oid.to_hex();
     let loose_path = objects.join(&hex[..2]).join(&hex[2..]);
@@ -304,26 +293,8 @@ fn pack_thread_local_warm_follows_active_store_on_one_thread() {
     let oid_b = odb_b
         .write(ObjectKind::Blob, b"store-b\n")
         .expect("write b");
-    let pack_a = build_pack(
-        &odb_a,
-        &[oid_a],
-        &[],
-        &PackBuildOptions {
-            delta: false,
-            ..PackBuildOptions::default()
-        },
-    )
-    .expect("pack a");
-    let pack_b = build_pack(
-        &odb_b,
-        &[oid_b],
-        &[],
-        &PackBuildOptions {
-            delta: false,
-            ..PackBuildOptions::default()
-        },
-    )
-    .expect("pack b");
+    let pack_a = build_pack(&odb_a, &[oid_a], &[], &PackBuildOptions::default()).expect("pack a");
+    let pack_b = build_pack(&odb_b, &[oid_b], &[], &PackBuildOptions::default()).expect("pack b");
     install_pack(&objects_a, "a", &pack_a);
     install_pack(&objects_b, "b", &pack_b);
     grit_lib::test_support::objects_pack::read_object_from_packs(&objects_a, &oid_a)

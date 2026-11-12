@@ -29,10 +29,9 @@ fn untr_root_valid(index_bytes: &[u8]) -> bool {
 }
 
 fn small_bulk_thresholds() -> IndexStagingThresholds {
-    IndexStagingThresholds {
-        large_index_restage: 64,
-        parallel_tracked_restage: 64,
-    }
+    IndexStagingThresholds::default()
+        .with_large_index_restage(64)
+        .with_parallel_tracked_restage(64)
 }
 
 fn stage_opts_with_small_bulk() -> StageOptions {

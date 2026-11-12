@@ -137,11 +137,9 @@ fn short_dst_matches_remote_tag() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["main:x".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["main:x".into()])
+            .with_remote(Some("origin".into())),
         &ctx,
     );
     assert_eq!(specs.len(), 1);
@@ -168,11 +166,9 @@ fn literal_path_remote_context_guesses_short_dst_like_git() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["main:x".into()],
-            remote: Some(bare.clone()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["main:x".into()])
+            .with_remote(Some(bare.clone())),
         &ctx,
     );
     assert_eq!(specs.len(), 1);
@@ -271,11 +267,9 @@ fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
     let plan = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                remote: Some(bare.clone()),
-                refspecs: vec!["feature".into()],
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_remote(Some(bare.clone()))
+                .with_refspecs(vec!["feature".into()]),
             &ctx,
         )
         .expect("plan");
@@ -449,11 +443,9 @@ fn feature_branch_shorthand() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["feature".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["feature".into()])
+            .with_remote(Some("origin".into())),
         &PushPlanContext::default(),
     );
     compare_with_git(&fx.local, &["origin", "feature"], &specs, &fx.bare);
@@ -468,11 +460,9 @@ fn head_colon_refs_heads_x() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["HEAD:refs/heads/x".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["HEAD:refs/heads/x".into()])
+            .with_remote(Some("origin".into())),
         &PushPlanContext::default(),
     );
     compare_with_git(
@@ -492,11 +482,9 @@ fn tag_v1_0() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["v1.0".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["v1.0".into()])
+            .with_remote(Some("origin".into())),
         &PushPlanContext::default(),
     );
     compare_with_git(&fx.local, &["origin", "v1.0"], &specs, &fx.bare);
@@ -519,11 +507,9 @@ fn force_main_non_fast_forward() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["+main:main".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["+main:main".into()])
+            .with_remote(Some("origin".into())),
         &PushPlanContext::default(),
     );
     assert!(specs[0].force);
@@ -595,11 +581,9 @@ fn real_push_matches_git_file_remote() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["feature".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["feature".into()])
+            .with_remote(Some("origin".into())),
         &PushPlanContext::default(),
     );
     grit_lib::repo::Repository::open(
@@ -640,11 +624,9 @@ fn dry_run_leaves_bare_refs_unchanged() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["feature".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["feature".into()])
+            .with_remote(Some("origin".into())),
         &PushPlanContext::default(),
     );
     grit_lib::repo::Repository::open(
@@ -700,11 +682,9 @@ fn push_from_positionals_is_readable_by_git() {
     let plan = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                remote: invocation.remote,
-                refspecs: invocation.refspecs,
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_remote(invocation.remote)
+                .with_refspecs(invocation.refspecs),
             &ctx,
         )
         .expect("plan");
@@ -747,11 +727,9 @@ fn push_to_literal_path_remote_is_readable_by_git() {
     let plan = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                remote: invocation.remote,
-                refspecs: invocation.refspecs,
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_remote(invocation.remote)
+                .with_refspecs(invocation.refspecs),
             &PushPlanContext::default(),
         )
         .expect("plan");
@@ -795,11 +773,9 @@ fn push_to_relative_path_remote_is_readable_by_git() {
     let plan = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                remote: invocation.remote,
-                refspecs: invocation.refspecs,
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_remote(invocation.remote)
+                .with_refspecs(invocation.refspecs),
             &PushPlanContext::default(),
         )
         .expect("plan");
@@ -835,11 +811,9 @@ fn cli_wildcard_heads_refspec_matches_configured_push() {
     let cli = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["refs/heads/*:refs/heads/*".into()],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["refs/heads/*:refs/heads/*".into()])
+            .with_remote(Some("origin".into())),
         &ctx,
     );
     assert_eq!(configured.len(), cli.len());
@@ -860,11 +834,9 @@ fn push_all_includes_branches_not_on_empty_remote() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            all: true,
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_all(true)
+            .with_remote(Some("origin".into())),
         &ctx,
     );
     assert!(specs.iter().any(|s| s.dst == "refs/heads/feature"));
@@ -888,11 +860,9 @@ fn mirror_push_plans_delete_for_remote_only_ref() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            mirror: true,
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_mirror(true)
+            .with_remote(Some("origin".into())),
         &ctx,
     );
     assert!(
@@ -913,14 +883,12 @@ fn cli_negative_refspec_excludes_matched_branch() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec![
+        PushRequest::default()
+            .with_refspecs(vec![
                 "refs/heads/*:refs/heads/*".into(),
                 "^refs/heads/feature".into(),
-            ],
-            remote: Some("origin".into()),
-            ..Default::default()
-        },
+            ])
+            .with_remote(Some("origin".into())),
         &ctx,
     );
     assert!(
@@ -938,11 +906,9 @@ fn wildcard_zero_match_errors() {
     let err = repo
         .remotes()
         .resolve_push(
-            &PushRequest {
-                refspecs: vec!["refs/heads/nope/*:refs/heads/nope/*".into()],
-                remote: Some("origin".into()),
-                ..Default::default()
-            },
+            &PushRequest::default()
+                .with_refspecs(vec!["refs/heads/nope/*:refs/heads/nope/*".into()])
+                .with_remote(Some("origin".into())),
             &PushPlanContext::default(),
         )
         .unwrap_err();
@@ -966,11 +932,9 @@ fn remotes_wildcard_to_heads_seeds_new_remote() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["refs/remotes/origin/*:refs/heads/*".into()],
-            remote: Some("dest".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["refs/remotes/origin/*:refs/heads/*".into()])
+            .with_remote(Some("dest".into())),
         &ctx,
     );
     assert!(specs.iter().any(|s| s.dst == "refs/heads/main"));
@@ -995,11 +959,9 @@ fn glob_push_roundtrip_fsck_with_git() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["refs/heads/*:refs/heads/*".into()],
-            remote: Some("nb".into()),
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["refs/heads/*:refs/heads/*".into()])
+            .with_remote(Some("nb".into())),
         &PushPlanContext::default(),
     );
     grit_lib::repo::Repository::open(
@@ -1033,15 +995,13 @@ fn prune_negative_refspec_preserves_excluded_remote_branch() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec![
+        PushRequest::default()
+            .with_refspecs(vec![
                 "refs/heads/*:refs/heads/*".into(),
                 "^refs/heads/feature".into(),
-            ],
-            remote: Some("origin".into()),
-            prune: true,
-            ..Default::default()
-        },
+            ])
+            .with_remote(Some("origin".into()))
+            .with_prune(true),
         &ctx,
     );
     assert!(
@@ -1073,11 +1033,9 @@ fn configured_negative_with_prune_does_not_delete_excluded_remote() {
         let specs = plan_specs(
             &repo,
             &config,
-            PushRequest {
-                remote: Some("origin".into()),
-                prune: true,
-                ..Default::default()
-            },
+            PushRequest::default()
+                .with_remote(Some("origin".into()))
+                .with_prune(true),
             &ctx,
         );
         assert!(
@@ -1102,12 +1060,10 @@ fn prune_single_branch_push_does_not_delete_sibling_remote() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["main".into()],
-            remote: Some("origin".into()),
-            prune: true,
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["main".into()])
+            .with_remote(Some("origin".into()))
+            .with_prune(true),
         &ctx,
     );
     assert!(
@@ -1132,12 +1088,10 @@ fn prune_custom_wildcard_destination_namespace() {
     let specs = plan_specs(
         &repo,
         &config,
-        PushRequest {
-            refspecs: vec!["refs/heads/*:refs/tmp/*".into()],
-            remote: Some("origin".into()),
-            prune: true,
-            ..Default::default()
-        },
+        PushRequest::default()
+            .with_refspecs(vec!["refs/heads/*:refs/tmp/*".into()])
+            .with_remote(Some("origin".into()))
+            .with_prune(true),
         &ctx,
     );
     assert!(
@@ -1183,9 +1137,7 @@ fn push_plan_context(bare: &Path) -> PushPlanContext {
             remote_branch_tips.insert(ObjectId::from_hex(hex).expect("oid"));
         }
     }
-    PushPlanContext {
-        remote_ref_names,
-        remote_branch_tips,
-        remote_tips: None,
-    }
+    PushPlanContext::default()
+        .with_remote_ref_names(remote_ref_names)
+        .with_remote_branch_tips(remote_branch_tips)
 }

@@ -192,10 +192,7 @@ fn tracked_restage_after_gc_matches_mod_branch_blobs_without_loose_writes() {
         }
     }
     let repo = Repository::discover(Some(&root), &RepositoryOptions::empty()).expect("open repo");
-    let thresholds = IndexStagingThresholds {
-        parallel_tracked_restage: 4_096,
-        ..IndexStagingThresholds::default()
-    };
+    let thresholds = IndexStagingThresholds::default().with_parallel_tracked_restage(4_096);
     let summary =
         stage_tracked_modifications_with_thresholds(&repo, &root, thresholds).expect("restage");
     assert_eq!(

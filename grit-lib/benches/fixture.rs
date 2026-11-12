@@ -164,16 +164,8 @@ fn build_grit_loose_repo(blob_body: &[u8]) -> (TempDir, Odb, ObjectId) {
 
 fn build_whole_blob_pack(body: &[u8]) -> (Vec<u8>, ObjectId) {
     let (_dir, odb, oid) = build_grit_loose_repo(body);
-    let pack = build_pack(
-        &odb,
-        &[oid],
-        &[],
-        &PackBuildOptions {
-            delta: false,
-            ..PackBuildOptions::default()
-        },
-    )
-    .expect("whole-object pack");
+    let pack =
+        build_pack(&odb, &[oid], &[], &PackBuildOptions::default()).expect("whole-object pack");
     (pack, oid)
 }
 
@@ -319,16 +311,8 @@ pub fn build_parallel_packed_blob_fixture(count: usize) -> (TempDir, Odb, Vec<Ob
     }
     const CHUNK: usize = 12_500;
     for (chunk_idx, chunk) in oids.chunks(CHUNK).enumerate() {
-        let pack = build_pack(
-            &odb,
-            chunk,
-            &[],
-            &PackBuildOptions {
-                delta: false,
-                ..PackBuildOptions::default()
-            },
-        )
-        .expect("build bench pack");
+        let pack =
+            build_pack(&odb, chunk, &[], &PackBuildOptions::default()).expect("build bench pack");
         install_indexed_pack(&objects, &format!("bench-{chunk_idx}"), &pack);
     }
     for oid in &oids {

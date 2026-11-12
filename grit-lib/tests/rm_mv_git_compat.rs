@@ -118,11 +118,9 @@ fn rm_leaves_worktree_when_index_lock_held() {
     let err = repo
         .checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["a".into()],
-                pathspec_sources: vec!["a".into()],
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["a".into()])
+                .with_pathspec_sources(vec!["a".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("rm with index.lock");
@@ -181,11 +179,9 @@ fn rm_clean_file_staged_deletion() {
     let repo = grit_repo(repo_dir);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["gone.txt".into()],
-                pathspec_sources: vec!["gone.txt".into()],
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["gone.txt".into()])
+                .with_pathspec_sources(vec!["gone.txt".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm");
@@ -212,12 +208,10 @@ fn rm_cached_attr_pathspec_unstages_only_matching() {
     let repo = grit_repo(repo_dir);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec![":(attr:vendored)src".into()],
-                pathspec_sources: vec![":(attr:vendored)src".into()],
-                cached: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec![":(attr:vendored)src".into()])
+                .with_pathspec_sources(vec![":(attr:vendored)src".into()])
+                .with_cached(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm --cached attr");
@@ -239,12 +233,10 @@ fn rm_cached_leaves_untracked_file() {
     let repo = grit_repo(repo_dir);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["stay.txt".into()],
-                pathspec_sources: vec!["stay.txt".into()],
-                cached: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["stay.txt".into()])
+                .with_pathspec_sources(vec!["stay.txt".into()])
+                .with_cached(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm --cached");
@@ -270,11 +262,9 @@ fn rm_modified_refused_without_force() {
     let err = repo
         .checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["dirty.txt".into()],
-                pathspec_sources: vec!["dirty.txt".into()],
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["dirty.txt".into()])
+                .with_pathspec_sources(vec!["dirty.txt".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("rm should refuse");
@@ -297,12 +287,10 @@ fn rm_recursive_directory() {
     let repo = grit_repo(repo_dir);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["tree".into()],
-                pathspec_sources: vec!["tree/".into()],
-                recursive: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["tree".into()])
+                .with_pathspec_sources(vec!["tree/".into()])
+                .with_recursive(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm -r");
@@ -617,12 +605,9 @@ fn rm_directory_pathspec_refused_without_recursive() {
     let err = repo
         .checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["dir".into()],
-                pathspec_sources: vec!["dir".into()],
-                recursive: false,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["dir".into()])
+                .with_pathspec_sources(vec!["dir".into()]),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect_err("rm dir without -r");
@@ -1306,12 +1291,10 @@ fn grit_rm_after_git_staged_rename() {
     let repo = grit_repo(repo_dir);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["renamed.txt".into()],
-                pathspec_sources: vec!["renamed.txt".into()],
-                force: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["renamed.txt".into()])
+                .with_pathspec_sources(vec!["renamed.txt".into()])
+                .with_force(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("grit rm -f after git mv");
@@ -1325,12 +1308,10 @@ fn grit_rm_after_git_staged_rename() {
 }
 
 fn rm_opts(path: &str, cached: bool) -> RemoveOptions {
-    RemoveOptions {
-        pathspecs: vec![path.into()],
-        pathspec_sources: vec![path.into()],
-        cached,
-        ..Default::default()
-    }
+    RemoveOptions::default()
+        .with_pathspecs(vec![path.into()])
+        .with_pathspec_sources(vec![path.into()])
+        .with_cached(cached)
 }
 
 fn blocked_reasons(err: grit_lib::error::Error) -> Vec<(String, RemoveBlockReason)> {

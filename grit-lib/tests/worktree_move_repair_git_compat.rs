@@ -53,15 +53,11 @@ fn seed_repo(main: &Path) -> Repository {
 
 fn add_linked(repo: &Repository, path: PathBuf, branch: &str) {
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path,
-            branch: Some(WorktreeBranch::Create(branch.to_owned())),
-            start_point: Some("HEAD".to_owned()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(path)
+                .with_branch(Some(WorktreeBranch::Create(branch.to_owned())))
+                .with_start_point(Some("HEAD".to_owned())),
+        )
         .expect("add");
 }
 
@@ -102,9 +98,8 @@ fn worktree_move_refuses_main_locked_and_existing_destination() {
     repo.worktrees()
         .lock(
             &linked,
-            &grit_lib::repo_handles::LockWorktreeOptions {
-                reason: Some("hold".into()),
-            },
+            &grit_lib::repo_handles::LockWorktreeOptions::default()
+                .with_reason(Some("hold".into())),
         )
         .unwrap();
     assert!(repo
@@ -120,10 +115,7 @@ fn worktree_move_refuses_main_locked_and_existing_destination() {
         .move_linked(
             &linked,
             &tmp.path().join("m2"),
-            &MoveWorktreeOptions {
-                force: true,
-                dry_run: false,
-            }
+            &MoveWorktreeOptions::default().with_force(true)
         )
         .is_ok());
     repo.worktrees().unlock(&tmp.path().join("m2")).ok();
@@ -286,10 +278,7 @@ fn worktree_move_repair_dry_run_changes_nothing() {
         .move_linked(
             &linked,
             &tmp.path().join("dest"),
-            &MoveWorktreeOptions {
-                dry_run: true,
-                ..Default::default()
-            },
+            &MoveWorktreeOptions::default().with_dry_run(true),
         )
         .expect("dry move");
     assert!(linked.exists());

@@ -505,12 +505,11 @@ fn start_replay_sequence_pick_on_custom_primary() {
         },
     );
 
-    let req = ReplaySequenceRequest {
-        commits: vec![pick],
-        direction: ReplayDirection::Pick,
-        committer: IDENT.parse().expect("committer"),
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(
+        vec![pick],
+        ReplayDirection::Pick,
+        IDENT.parse().expect("committer"),
+    );
     let out =
         start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     let SequenceOutcome::Completed { created, .. } = out else {
@@ -534,12 +533,11 @@ fn start_replay_sequence_revert_on_custom_primary() {
     commit_path(&repo, "a.txt", "second\n", "second");
     let revert_target = head_oid(&repo, "main");
 
-    let req = ReplaySequenceRequest {
-        commits: vec![revert_target],
-        direction: ReplayDirection::Revert,
-        committer: IDENT.parse().expect("committer"),
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(
+        vec![revert_target],
+        ReplayDirection::Revert,
+        IDENT.parse().expect("committer"),
+    );
     let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never())
         .expect("revert");
     let SequenceOutcome::Completed { created, .. } = out else {
@@ -923,12 +921,11 @@ fn start_replay_sequence_pick_on_custom_primary() {
         },
     );
 
-    let req = ReplaySequenceRequest {
-        commits: vec![pick],
-        direction: ReplayDirection::Pick,
-        committer: IDENT.parse().expect("committer"),
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(
+        vec![pick],
+        ReplayDirection::Pick,
+        IDENT.parse().expect("committer"),
+    );
     let out =
         start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     let SequenceOutcome::Completed { created, .. } = out else {
@@ -952,12 +949,11 @@ fn start_replay_sequence_revert_on_custom_primary() {
     commit_path(&repo, "a.txt", "second\n", "second");
     let revert_target = head_oid(&repo, "main");
 
-    let req = ReplaySequenceRequest {
-        commits: vec![revert_target],
-        direction: ReplayDirection::Revert,
-        committer: IDENT.parse().expect("committer"),
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(
+        vec![revert_target],
+        ReplayDirection::Revert,
+        IDENT.parse().expect("committer"),
+    );
     let out = start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never())
         .expect("revert");
     let SequenceOutcome::Completed { created, .. } = out else {

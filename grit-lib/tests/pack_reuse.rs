@@ -163,13 +163,7 @@ fn full_clone_reuses_pack_and_git_index_pack_strict_ok() {
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        use_ofs_delta: true,
-        thin: false,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
     assert!(
@@ -189,13 +183,7 @@ fn partial_reuse_with_gaps_rewrites_ofs_delta() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
     let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        use_ofs_delta: true,
-        thin: false,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let (pack, stats) = stream_clone_pack(&repo, &[tip], &[parent], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, Some(fx.path()));
     git_fsck(&fx);
@@ -216,11 +204,7 @@ fn midx_preferred_pack_reuse() {
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
     assert!(
@@ -239,11 +223,7 @@ fn extended_objects_appended() {
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let (pack, stats) = stream_clone_pack(&repo, &[tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
     assert!(
@@ -275,13 +255,10 @@ fn sha256_reuse() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
     let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        thin: true,
-        use_ofs_delta: false,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default()
+        .with_delta(true)
+        .with_thin(true)
+        .with_use_ofs_delta(false);
     let (pack, stats) = stream_clone_pack(&repo, &[tip], &[parent], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha256, true, Some(fx.path()));
     assert!(
@@ -305,13 +282,7 @@ fn bitmap_pack_with_haves_git_index_pack_strict() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
     let have = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~2"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        use_ofs_delta: true,
-        thin: false,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let (pack, stats) = stream_clone_pack(&repo, &[tip], &[have], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, Some(fx.path()));
     git_fsck(&fx);
@@ -332,11 +303,7 @@ fn reuse_skips_when_have_shallow_grafts_present() {
     let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
     let mut have_shallow = HashSet::new();
     have_shallow.insert(parent);
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let mut buf = Vec::new();
     let mut progress = |_ev: PackProgress| {};
     let out = grit_lib::test_support::objects_pack::try_write_streaming_pack(
@@ -363,13 +330,7 @@ fn thin_pack_bitmap_reuse_index_pack_strict_ok() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
     let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        thin: true,
-        use_ofs_delta: true,
-        use_bitmaps: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true).with_thin(true);
     let mut buf = Vec::new();
     UploadPackStream::new(&[tip], opts)
         .with_haves(&[parent])
@@ -418,13 +379,7 @@ fn multi_sidecar_pack_reuse_binds_bitmap_backing_pack() {
 
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
-    let opts = PackBuildOptions {
-        delta: true,
-        use_bitmaps: true,
-        use_ofs_delta: true,
-        thin: false,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_delta(true);
     let (pack, stats) = stream_clone_pack(&repo, &[bitmapped_tip], &[], &opts);
     git_index_pack_strict(&pack, HashAlgo::Sha1, false, None);
     assert!(
@@ -444,13 +399,10 @@ fn thin_pack_ref_delta_conversion() {
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
     let tip = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD"]).stdout.trim()).unwrap();
     let parent = ObjectId::from_hex(fx.git(&["rev-parse", "HEAD~1"]).stdout.trim()).unwrap();
-    let opts = PackBuildOptions {
-        delta: true,
-        thin: true,
-        use_ofs_delta: false,
-        use_bitmaps: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default()
+        .with_delta(true)
+        .with_thin(true)
+        .with_use_ofs_delta(false);
     let mut buf = Vec::new();
     let mut progress = grit_lib::progress::NullProgress;
     let stats = UploadPackStream::new(&[tip], opts)
@@ -650,12 +602,7 @@ fn full_clone_without_bitmap_streams_verbatim_pack_entries() {
     let fx = RepoFixture::init(HashAlgo::Sha1).expect("init");
     let tip = build_packed_history_without_bitmap(&fx);
     let repo = Repository::open(&fx.path().join(".git"), &RepositoryOptions::empty()).unwrap();
-    let opts = PackBuildOptions {
-        thin: true,
-        delta: true,
-        use_ofs_delta: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default().with_thin(true).with_delta(true);
     let mut writer = RecordingWriter::default();
     let stats = UploadPackStream::new(&[tip], opts)
         .with_haves(&[])
@@ -881,13 +828,10 @@ fn full_clone_of_two_push_repo_round_trips_without_ofs_delta_or_depth_limit() {
     let (tip, ..) = build_opposed_delta_packs(&fx);
     let repo = Repository::open(&fx.path().join(".git"), &RepositoryOptions::empty()).unwrap();
     for (use_ofs_delta, max_depth) in [(false, 50), (true, 0), (false, 0)] {
-        let opts = PackBuildOptions {
-            delta: true,
-            use_ofs_delta,
-            max_depth,
-            thin: false,
-            ..PackBuildOptions::default()
-        };
+        let opts = PackBuildOptions::default()
+            .with_delta(true)
+            .with_use_ofs_delta(use_ofs_delta)
+            .with_max_depth(max_depth);
         let (pack, _) = stream_clone_pack(&repo, &[tip], &[], &opts);
         index_and_fsck_clone(&pack, &tip);
     }
@@ -1008,11 +952,7 @@ fn upload_pack_propagates_verbatim_reuse_io_error_without_fallback() {
         .expect("oid");
     let git_dir = fx.path().join(".git");
     let repo = Repository::open(&git_dir, &RepositoryOptions::empty()).expect("open");
-    let opts = PackBuildOptions {
-        reuse_objects: true,
-        use_bitmaps: true,
-        ..PackBuildOptions::default()
-    };
+    let opts = PackBuildOptions::default();
     let mut writer = BrokenPipeAfter {
         accepted: 0,
         fail_after: 100,

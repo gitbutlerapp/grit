@@ -124,9 +124,7 @@ fn split_index_write_is_read_by_git() {
     let tmp = TempDir::new().expect("tempdir");
     let dir = tmp.path();
     seed_worktree(dir);
-    let split = WriteSplitIndexRequest {
-        explicit: Some(true),
-    };
+    let split = WriteSplitIndexRequest::default().with_explicit(Some(true));
     assert_rewrite_matches(dir, &IndexWriteOptions::default().with_split(split));
     let shared: Vec<_> = fs::read_dir(dir.join(".git"))
         .expect("read .git")
@@ -138,9 +136,7 @@ fn split_index_write_is_read_by_git() {
     assert!(dump.contains("a/deep/three.txt"));
 
     // And back to a single file.
-    let unsplit = WriteSplitIndexRequest {
-        explicit: Some(false),
-    };
+    let unsplit = WriteSplitIndexRequest::default().with_explicit(Some(false));
     assert_rewrite_matches(dir, &IndexWriteOptions::default().with_split(unsplit));
 }
 

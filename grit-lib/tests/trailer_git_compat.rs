@@ -110,10 +110,7 @@ fn grit_write_trailer_artifacts(repo: &Repository) {
     // Match the on-disk MIDX format version system `git` writes (v1 on Git 2.43).
     write_multi_pack_index(
         &pack_dir(repo.git_dir()),
-        &WriteMultiPackIndexOptions {
-            version: Some(1),
-            ..WriteMultiPackIndexOptions::default()
-        },
+        &WriteMultiPackIndexOptions::default().with_version(Some(1)),
     )
     .expect("write midx");
 

@@ -140,13 +140,7 @@ fn injected_store_query_limit_reports_truncation() {
     commit_n(&repo, &tmp.path().join("wt"), 3);
     let page = |limit| {
         repo.reflogs()
-            .query(
-                &head(),
-                &ReflogQuery {
-                    limit: Some(limit),
-                    ..ReflogQuery::default()
-                },
-            )
+            .query(&head(), &ReflogQuery::default().with_limit(Some(limit)))
             .expect("query")
     };
     let two = page(2);

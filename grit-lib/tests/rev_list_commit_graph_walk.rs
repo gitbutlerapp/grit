@@ -75,11 +75,9 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
     git_commit_graph_write(&dir);
     assert!(dir.path().join(".git/objects/info/commit-graph").is_file());
 
-    let opts_base = RevListOptions {
-        count: true,
-        use_commit_graph: false,
-        ..Default::default()
-    };
+    let opts_base = RevListOptions::default()
+        .with_count(true)
+        .with_use_commit_graph(false);
     let without = repo
         .revwalk()
         .rev_list(
@@ -90,10 +88,7 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
             &CancelToken::never(),
         )
         .expect("walk");
-    let with_graph = RevListOptions {
-        count: true,
-        ..Default::default()
-    };
+    let with_graph = RevListOptions::default().with_count(true);
     let with = repo
         .revwalk()
         .rev_list(
@@ -110,10 +105,7 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
         .rev_list(
             &["HEAD".to_owned()],
             &[],
-            &RevListOptions {
-                use_commit_graph: false,
-                ..Default::default()
-            },
+            &RevListOptions::default().with_use_commit_graph(false),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -159,18 +151,12 @@ fn walk_cases() -> [(&'static str, RevListOptions, &'static [&'static str]); 3] 
         ("default", RevListOptions::default(), &[]),
         (
             "topo",
-            RevListOptions {
-                ordering: OrderingMode::Topo,
-                ..Default::default()
-            },
+            RevListOptions::default().with_ordering(OrderingMode::Topo),
             &["--topo-order"],
         ),
         (
             "first-parent",
-            RevListOptions {
-                first_parent: true,
-                ..Default::default()
-            },
+            RevListOptions::default().with_first_parent(true),
             &["--first-parent"],
         ),
     ]
@@ -181,10 +167,7 @@ fn list(
     options: &RevListOptions,
     use_graph: bool,
 ) -> Vec<ObjectId> {
-    let options = RevListOptions {
-        use_commit_graph: use_graph,
-        ..options.clone()
-    };
+    let options = options.clone().with_use_commit_graph(use_graph);
     repo.revwalk()
         .rev_list(
             &["HEAD".to_owned()],

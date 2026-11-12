@@ -184,6 +184,7 @@ impl GpgFormat {
 
 /// Resolved signing/verification configuration.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct GpgConfig {
     /// The selected format.
     pub format: GpgFormat,
@@ -360,6 +361,76 @@ impl GpgConfig {
     /// absolute path is used verbatim, and a bare name is searched on `$PATH`.
     pub fn resolve_program_path(&self) -> crate::error::Result<PathBuf> {
         resolve_program(&self.program)
+    }
+
+    /// Sets [`format`](Self::format).
+    #[must_use]
+    pub fn with_format(mut self, format: GpgFormat) -> Self {
+        self.format = format;
+        self
+    }
+
+    /// Sets [`program`](Self::program).
+    #[must_use]
+    pub fn with_program(mut self, program: String) -> Self {
+        self.program = program;
+        self
+    }
+
+    /// Sets [`generic_program`](Self::generic_program).
+    #[must_use]
+    pub fn with_generic_program(mut self, generic_program: Option<String>) -> Self {
+        self.generic_program = generic_program;
+        self
+    }
+
+    /// Sets [`openpgp_program`](Self::openpgp_program).
+    #[must_use]
+    pub fn with_openpgp_program(mut self, openpgp_program: Option<String>) -> Self {
+        self.openpgp_program = openpgp_program;
+        self
+    }
+
+    /// Sets [`x509_program`](Self::x509_program).
+    #[must_use]
+    pub fn with_x509_program(mut self, x509_program: Option<String>) -> Self {
+        self.x509_program = x509_program;
+        self
+    }
+
+    /// Sets [`ssh_program`](Self::ssh_program).
+    #[must_use]
+    pub fn with_ssh_program(mut self, ssh_program: Option<String>) -> Self {
+        self.ssh_program = ssh_program;
+        self
+    }
+
+    /// Sets [`signing_key`](Self::signing_key).
+    #[must_use]
+    pub fn with_signing_key(mut self, signing_key: Option<String>) -> Self {
+        self.signing_key = signing_key;
+        self
+    }
+
+    /// Sets [`min_trust_level`](Self::min_trust_level).
+    #[must_use]
+    pub fn with_min_trust_level(mut self, min_trust_level: Option<TrustLevel>) -> Self {
+        self.min_trust_level = min_trust_level;
+        self
+    }
+
+    /// Sets [`ssh_allowed_signers`](Self::ssh_allowed_signers).
+    #[must_use]
+    pub fn with_ssh_allowed_signers(mut self, ssh_allowed_signers: Option<String>) -> Self {
+        self.ssh_allowed_signers = ssh_allowed_signers;
+        self
+    }
+
+    /// Sets [`ssh_revocation_file`](Self::ssh_revocation_file).
+    #[must_use]
+    pub fn with_ssh_revocation_file(mut self, ssh_revocation_file: Option<String>) -> Self {
+        self.ssh_revocation_file = ssh_revocation_file;
+        self
     }
 }
 

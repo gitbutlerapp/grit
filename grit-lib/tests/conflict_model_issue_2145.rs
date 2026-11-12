@@ -148,12 +148,11 @@ fn merge_conflicts_and_status_report_the_same_conflict() {
 fn pick_conflicts_and_status_report_the_same_conflict() {
     let fx = modify_delete_repo("main");
     let repo = open(&fx.root);
-    let req = ReplaySequenceRequest {
-        commits: vec![fx.feat],
-        direction: ReplayDirection::Pick,
-        committer: IDENT.parse().expect("committer"),
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(
+        vec![fx.feat],
+        ReplayDirection::Pick,
+        IDENT.parse().expect("committer"),
+    );
     let SequenceOutcome::Conflicts { conflicts, .. } =
         start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick")
     else {

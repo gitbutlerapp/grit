@@ -520,7 +520,7 @@ impl GraphOnelineStream {
         let parents = self.parent_map.get(&oid).cloned().unwrap_or_default();
         let block = self
             .layout
-            .render_commit(&GraphCommitInput { id: oid, parents });
+            .render_commit(&GraphCommitInput::new(oid, parents));
         self.pending_block = Some((block, 0, oid));
     }
 
@@ -618,9 +618,7 @@ fn run_log_group_by_author(
     let reverse = rev.reverse;
     let mailmap = repo.revwalk().mailmap_for_grouping(use_mailmap)?;
     let need_commit_json = output_mode == LogEmitKind::Json && !display.group_count_only;
-    let group_options = GroupByAuthorOptions {
-        count_only: !need_commit_json,
-    };
+    let group_options = GroupByAuthorOptions::default().with_count_only(!need_commit_json);
 
     if need_commit_json {
         if let Some(limit) = max_count {
@@ -633,11 +631,7 @@ fn run_log_group_by_author(
             let (oids, truncated) = truncate_oid_list(oids, Some(limit), reverse);
             let grouped = repo
                 .revwalk()
-                .group_by_author(
-                    &oids,
-                    mailmap.as_ref(),
-                    GroupByAuthorOptions { count_only: false },
-                )
+                .group_by_author(&oids, mailmap.as_ref(), GroupByAuthorOptions::default())
                 .context("could not group commits by author")?;
             return build_author_group_outcome_from_groups(
                 repo,
@@ -653,7 +647,7 @@ fn run_log_group_by_author(
                 token_refs,
                 walk_opts,
                 mailmap.as_ref(),
-                GroupByAuthorOptions { count_only: false },
+                GroupByAuthorOptions::default(),
             )
             .context("could not group commits by author")?;
         return build_author_group_outcome_from_groups(repo, grouped, false, display, output_mode);
@@ -1207,10 +1201,7 @@ fn graph_blocks(
     };
     let inputs: Vec<GraphCommitInput> = oids
         .iter()
-        .map(|&id| GraphCommitInput {
-            id,
-            parents: parent_map.get(&id).cloned().unwrap_or_default(),
-        })
+        .map(|&id| GraphCommitInput::new(id, parent_map.get(&id).cloned().unwrap_or_default()))
         .collect();
     GraphLayout::new_without_topology_recording(charset).render(&inputs)
 }

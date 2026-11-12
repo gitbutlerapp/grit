@@ -941,15 +941,13 @@ fn packed_path_history_modes_match_git_with_bloom_and_both_hashes() {
                         .rev_list(
                             &["HEAD".to_owned()],
                             &[],
-                            &RevListOptions {
-                                paths: vec![path.to_owned()],
-                                sparse,
-                                show_pulls,
-                                first_parent,
-                                use_commit_graph: with_graph,
-                                use_commit_graph_bloom: with_graph,
-                                ..RevListOptions::default()
-                            },
+                            &RevListOptions::default()
+                                .with_paths(vec![path.to_owned()])
+                                .with_sparse(sparse)
+                                .with_show_pulls(show_pulls)
+                                .with_first_parent(first_parent)
+                                .with_use_commit_graph(with_graph)
+                                .with_use_commit_graph_bloom(with_graph),
                             &mut NullProgress,
                             &CancelToken::never(),
                         )

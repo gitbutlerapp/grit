@@ -6904,7 +6904,7 @@ mod tests {
 
     #[test]
     fn streamed_write_matches_in_memory_serialization_across_chunks() {
-        let policy = crate::parallel::ThreadPolicy::with_threads_override(Some(4));
+        let policy = crate::parallel::ThreadPolicy::default().with_threads_override(Some(4));
         let cfg = streaming_config();
         for version in [2, 4] {
             for skip_hash in [false, true] {
@@ -6947,7 +6947,7 @@ mod tests {
 
     #[test]
     fn streamed_write_through_held_lock_matches_in_memory_serialization() {
-        let policy = crate::parallel::ThreadPolicy::with_threads_override(Some(4));
+        let policy = crate::parallel::ThreadPolicy::default().with_threads_override(Some(4));
         let cfg = streaming_config();
         let dir = TempDir::new().unwrap();
         let path = dir.path().join("index");

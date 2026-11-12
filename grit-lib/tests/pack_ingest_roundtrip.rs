@@ -398,12 +398,7 @@ fn build_pack_builder_pack(sha256: bool, delta: bool) -> PackFixture {
         &odb,
         &oids,
         &[],
-        &PackBuildOptions {
-            delta,
-            window: 10,
-            max_depth: 50,
-            ..Default::default()
-        },
+        &PackBuildOptions::default().with_delta(delta),
     )
     .expect("build_pack");
     if delta {
@@ -860,11 +855,7 @@ fn pack_is_thin_classifies_thin_and_full_packs() {
         &odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..Default::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("thin pack");
     assert!(pack_is_thin(&thin, HashAlgo::Sha1));
@@ -1139,10 +1130,7 @@ fn unpack_strict_rejects_missing_tree_reference() {
     let err = unpack_objects(
         &mut pack.as_slice(),
         &odb,
-        &UnpackOptions {
-            strict: true,
-            ..Default::default()
-        },
+        &UnpackOptions::default().with_strict(true),
     )
     .expect_err("strict unpack must fail");
     assert!(
@@ -1268,11 +1256,7 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
         &odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..Default::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("thin");
     assert!(pack_is_thin(&thin, HashAlgo::Sha1));
@@ -1479,11 +1463,7 @@ fn fix_thin_install_rewrites_pack_and_index_that_git_accepts() {
         &src_odb,
         &[want],
         &[have],
-        &PackBuildOptions {
-            delta: true,
-            thin: true,
-            ..Default::default()
-        },
+        &PackBuildOptions::default().with_delta(true).with_thin(true),
     )
     .expect("thin pack");
     assert!(pack_is_thin(&thin, HashAlgo::Sha1), "fixture must be thin");

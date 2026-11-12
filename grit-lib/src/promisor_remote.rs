@@ -193,6 +193,7 @@ pub enum PromisorConfigWarning {
 /// The client's rules for accepting advertised promisor remotes.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
+#[non_exhaustive]
 pub struct PromisorAcceptPolicy {
     /// `promisor.acceptFromServer`.
     pub accept: AcceptFromServer,
@@ -242,6 +243,27 @@ impl PromisorAcceptPolicy {
             },
             warnings,
         )
+    }
+
+    /// Sets [`accept`](Self::accept).
+    #[must_use]
+    pub fn with_accept(mut self, accept: AcceptFromServer) -> Self {
+        self.accept = accept;
+        self
+    }
+
+    /// Sets [`check_fields`](Self::check_fields).
+    #[must_use]
+    pub fn with_check_fields(mut self, check_fields: Vec<PromisorField>) -> Self {
+        self.check_fields = check_fields;
+        self
+    }
+
+    /// Sets [`store_fields`](Self::store_fields).
+    #[must_use]
+    pub fn with_store_fields(mut self, store_fields: Vec<PromisorField>) -> Self {
+        self.store_fields = store_fields;
+        self
     }
 }
 

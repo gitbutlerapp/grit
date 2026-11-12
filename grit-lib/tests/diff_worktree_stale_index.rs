@@ -94,7 +94,9 @@ fn stale_index_parallel_hash_reports_git_changes_in_index_order() {
             .index_to_worktree(
                 &mut index,
                 &TreeDiffOptions::default().with_threads(Some(
-                    ThreadPolicy::with_threads_override(Some(threads)).min_items_override(Some(0)),
+                    ThreadPolicy::default()
+                        .with_threads_override(Some(threads))
+                        .with_min_items_override(Some(0)),
                 )),
             )
             .map(|r| (r.entries, r.index_stat_refreshed))

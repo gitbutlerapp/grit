@@ -105,7 +105,7 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
             &empty_ps,
             options.clone(),
             &config,
-            &ThreadPolicy::with_threads_override(Some(4)),
+            &ThreadPolicy::default().with_threads_override(Some(4)),
         )
         .unwrap();
     let serial = repo
@@ -115,7 +115,7 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
             &empty_ps,
             options.clone(),
             &config,
-            &ThreadPolicy::with_threads_override(Some(1)),
+            &ThreadPolicy::default().with_threads_override(Some(1)),
         )
         .unwrap();
     assert_eq!(parallel, serial);
@@ -158,7 +158,7 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
             &file_ps,
             options,
             &config,
-            &ThreadPolicy::with_threads_override(Some(4)),
+            &ThreadPolicy::default().with_threads_override(Some(4)),
         )
         .unwrap();
     for (all, filtered) in parallel.iter().zip(&filtered) {
@@ -268,7 +268,7 @@ fn commit_line_totals_match_git_numstat_and_skip_merges() {
                     &pathspec,
                     DiffOptions::default(),
                     &config,
-                    &ThreadPolicy::with_threads_override(Some(threads)),
+                    &ThreadPolicy::default().with_threads_override(Some(threads)),
                 )
                 .unwrap();
             for (oid, totals) in oids.iter().zip(totals) {

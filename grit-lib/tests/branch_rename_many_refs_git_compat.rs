@@ -18,12 +18,7 @@ fn open(dir: &Path) -> Repository {
 
 fn rename(repo: &Repository, old: &str, new: &str) {
     repo.branches()
-        .rename(&BranchRenameOptions {
-            old: old.into(),
-            new: new.into(),
-            force: false,
-            dry_run: false,
-        })
+        .rename(&BranchRenameOptions::new(old, new))
         .unwrap();
 }
 

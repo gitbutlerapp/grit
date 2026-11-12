@@ -156,33 +156,30 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
     ];
     for ordering in orderings {
         for use_graph in [false, true] {
-            let opts = RevListOptions {
-                ordering,
-                parent_rewrite: true,
-                paths: vec!["src/".into(), "docs/".into()],
-                all_refs: use_graph,
-                use_commit_graph: use_graph,
-                use_commit_graph_bloom: use_graph,
-                commit_graph_read_changed_paths: use_graph,
-                first_parent: ordering == OrderingMode::Topo,
-                simplify_merges: true,
-                full_history: true,
-                left_right: true,
-                cherry_mark: true,
-                boundary: true,
-                objects: true,
-                filter: Some(ObjectFilter::Combine(vec![
+            let opts = RevListOptions::default()
+                .with_ordering(ordering)
+                .with_parent_rewrite(true)
+                .with_paths(vec!["src/".into(), "docs/".into()])
+                .with_all_refs(use_graph)
+                .with_use_commit_graph(use_graph)
+                .with_use_commit_graph_bloom(use_graph)
+                .with_commit_graph_read_changed_paths(use_graph)
+                .with_first_parent(ordering == OrderingMode::Topo)
+                .with_simplify_merges(true)
+                .with_full_history(true)
+                .with_left_right(true)
+                .with_cherry_mark(true)
+                .with_boundary(true)
+                .with_objects(true)
+                .with_filter(Some(ObjectFilter::Combine(vec![
                     ObjectFilter::BlobLimit(65536),
                     ObjectFilter::TreeDepth(12),
-                ])),
-                filter_print_omitted: true,
-                include_reflog_entries: true,
-                include_indexed_objects: true,
-                max_count: Some(96),
-                reverse: true,
-                count: false,
-                ..RevListOptions::default()
-            };
+                ])))
+                .with_filter_print_omitted(true)
+                .with_include_reflog_entries(true)
+                .with_include_indexed_objects(true)
+                .with_max_count(Some(96))
+                .with_reverse(true);
             let _ = repo.revwalk().rev_list(
                 &[String::from("main"), String::from("feature")],
                 &[],
@@ -203,10 +200,7 @@ fn history_repo_revwalk_merge_base_and_diff_sweep() -> grit_lib::error::Result<(
             String::from("feature"),
         ],
         &[],
-        &RevListOptions {
-            objects: true,
-            ..RevListOptions::default()
-        },
+        &RevListOptions::default().with_objects(true),
         &mut NullProgress,
         &CancelToken::never(),
     )?;

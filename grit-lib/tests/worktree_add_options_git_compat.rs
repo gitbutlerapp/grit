@@ -53,15 +53,10 @@ fn worktree_add_existing_branch_when_head_advanced() {
     let feature_tip = git(&main, &["rev-parse", "feature"]);
     let wt = tmp.path().join("feature-wt");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Existing("feature".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Existing("feature".into()))),
+        )
         .expect("checkout existing branch at its tip");
 
     let wt_head = git(&wt, &["rev-parse", "HEAD"]);
@@ -76,15 +71,11 @@ fn worktree_add_track_with_default_head_succeeds() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
     let wt = tmp.path().join("track-head");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("local".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: true,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("local".into())))
+                .with_track(true),
+        )
         .expect("track with implicit HEAD must not fail");
     git(&main, &["fsck"]);
 }
@@ -98,15 +89,11 @@ fn worktree_add_force_branch_resets_existing_branch() {
 
     let wt = tmp.path().join("wt-b");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::CreateOrReset("topic".into())),
-            start_point: Some("main".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::CreateOrReset("topic".into())))
+                .with_start_point(Some("main".into())),
+        )
         .expect("add -B");
 
     let new_tip = git(&main, &["rev-parse", "topic"]);
@@ -124,17 +111,14 @@ fn worktree_add_lock_writes_reason_git_reads_it() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
     let wt = tmp.path().join("locked-wt");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("side".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: Some(LockWorktreeOptions {
-                reason: Some("hold".into()),
-            }),
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("side".into())))
+                .with_start_point(Some("HEAD".into()))
+                .with_lock(Some(
+                    LockWorktreeOptions::default().with_reason(Some("hold".into())),
+                )),
+        )
         .expect("add --lock");
 
     let porcelain = git(&main, &["worktree", "list", "--porcelain"]);
@@ -152,15 +136,12 @@ fn worktree_add_no_checkout_leaves_tree_empty_git_status_agrees() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
     let wt = tmp.path().join("empty-wt");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("empty".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: true,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("empty".into())))
+                .with_start_point(Some("HEAD".into()))
+                .with_no_checkout(true),
+        )
         .expect("add --no-checkout");
 
     assert!(wt.join(".git").is_file());
@@ -191,15 +172,12 @@ fn worktree_add_track_sets_upstream_git_agrees() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
     let wt = tmp.path().join("track-wt");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("local-main".into())),
-            start_point: Some("origin/main".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: true,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("local-main".into())))
+                .with_start_point(Some("origin/main".into()))
+                .with_track(true),
+        )
         .expect("add --track");
 
     let upstream = git(&wt, &["rev-parse", "@{u}"]);
@@ -218,29 +196,20 @@ fn worktree_add_create_or_reset_leaves_branch_when_checked_out_elsewhere() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
     let first = tmp.path().join("first");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: first.clone(),
-            branch: Some(WorktreeBranch::Existing("topic".into())),
-            start_point: None,
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(first.clone())
+                .with_branch(Some(WorktreeBranch::Existing("topic".into()))),
+        )
         .expect("first checkout of topic");
 
     let second = tmp.path().join("second");
     assert!(repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: second,
-            branch: Some(WorktreeBranch::CreateOrReset("topic".into())),
-            start_point: Some("main".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        },)
+        .add(
+            &AddLinkedWorktreeOptions::new(second)
+                .with_branch(Some(WorktreeBranch::CreateOrReset("topic".into())))
+                .with_start_point(Some("main".into())),
+        )
         .is_err());
     assert_eq!(
         git(&main, &["rev-parse", "topic"]).trim(),
@@ -255,22 +224,18 @@ fn worktree_prune_dry_run_deletes_nothing() {
     let repo = Repository::discover(Some(&main), &RepositoryOptions::empty()).unwrap();
     let wt = tmp.path().join("gone");
     repo.worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: wt.clone(),
-            branch: Some(WorktreeBranch::Create("gone-branch".into())),
-            start_point: Some("HEAD".into()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(wt.clone())
+                .with_branch(Some(WorktreeBranch::Create("gone-branch".into())))
+                .with_start_point(Some("HEAD".into())),
+        )
         .unwrap();
     std::fs::remove_dir_all(&wt).unwrap();
     assert_eq!(repo.worktrees().list().unwrap().len(), 2);
 
     let would = repo
         .worktrees()
-        .prune(&PruneWorktreesOptions { dry_run: true })
+        .prune(&PruneWorktreesOptions::default().with_dry_run(true))
         .expect("dry-run prune");
     assert_eq!(would.len(), 1);
     assert_eq!(repo.worktrees().list().unwrap().len(), 2);

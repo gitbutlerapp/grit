@@ -35,15 +35,11 @@ fn grit_add_and_remove_linked_worktree_git_list() {
     let linked = root.join("linked");
     let entry = repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("linked".to_owned())),
-            start_point: Some("HEAD".to_owned()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("linked".to_owned())))
+                .with_start_point(Some("HEAD".to_owned())),
+        )
         .expect("add worktree");
 
     let gitdir_line = std::fs::read_to_string(linked.join(".git")).expect("linked .git");

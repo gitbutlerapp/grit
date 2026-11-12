@@ -123,11 +123,10 @@ fn ident() -> grit_lib::ident::Signature {
 }
 
 fn continue_opts() -> ContinueOptions {
-    ContinueOptions {
-        message: Some("merged".into()),
-        author: Some(ident()),
-        committer: Some(ident()),
-    }
+    ContinueOptions::default()
+        .with_message(Some("merged".into()))
+        .with_author(Some(ident()))
+        .with_committer(Some(ident()))
 }
 
 #[test]
@@ -286,12 +285,7 @@ fn issue_2468_pick_replays_git_rr_cache() {
     let pick_oid = git_oid(dir.path(), "side");
 
     let repo = open_grit(&dir);
-    let req = ReplaySequenceRequest {
-        commits: vec![pick_oid],
-        direction: ReplayDirection::Pick,
-        committer: ident(),
-        options: ReplayOptions::default(),
-    };
+    let req = ReplaySequenceRequest::new(vec![pick_oid], ReplayDirection::Pick, ident());
     let out =
         start_replay_sequence(&repo, &req, &mut NullProgress, &CancelToken::never()).expect("pick");
     let SequenceOutcome::Conflicts { rerere, .. } = out else {

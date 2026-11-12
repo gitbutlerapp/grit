@@ -124,10 +124,9 @@ fn assert_current_branch_deletion_refused(repo: &Repository, branch: &str) {
                 .branches()
                 .delete(
                     branch,
-                    &grit_lib::porcelain::branch::BranchDeleteOptions {
-                        mode: mode,
-                        dry_run: dry_run,
-                    },
+                    &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                        .with_mode(mode)
+                        .with_dry_run(dry_run),
                 )
                 .unwrap_err();
             assert!(
@@ -256,10 +255,8 @@ fn delete_branch_merged_check_agrees_with_git() {
         let tip = oid(&dir, name);
         let ours = repo.branches().delete(
             name,
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Safe,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Safe),
         );
         assert_eq!(ours.is_ok(), git_deleted, "{name}: {ours:?}");
         match ours {
@@ -285,10 +282,8 @@ fn delete_branch_merged_check_agrees_with_git() {
         .branches()
         .delete(
             "side",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Force,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Force),
         )
         .unwrap();
     assert_eq!(forced.oid, oid(&dir, "refs/remotes/origin/tracked"));
@@ -313,10 +308,9 @@ fn delete_branch_refuses_checked_out_branches() {
                 .branches()
                 .delete(
                     "wt",
-                    &grit_lib::porcelain::branch::BranchDeleteOptions {
-                        mode: mode,
-                        dry_run: dry_run,
-                    },
+                    &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                        .with_mode(mode)
+                        .with_dry_run(dry_run),
                 )
                 .unwrap_err();
             assert!(
@@ -339,10 +333,8 @@ fn delete_branch_refuses_checked_out_branches() {
         .branches()
         .delete(
             "missing",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Force,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Force),
         )
         .unwrap_err();
     assert!(
@@ -473,10 +465,8 @@ fn list_and_delete_on_reftable_backend() {
         repo.branches()
             .delete(
                 "topic",
-                &grit_lib::porcelain::branch::BranchDeleteOptions {
-                    mode: BranchDeleteMode::Safe,
-                    dry_run: false
-                }
+                &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                    .with_mode(BranchDeleteMode::Safe)
             )
             .unwrap()
             .oid,
@@ -578,10 +568,8 @@ fn list_and_delete_use_injected_memory_ref_store() {
         .branches()
         .delete(
             "main",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Force,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Force),
         )
         .unwrap_err();
     assert!(
@@ -598,10 +586,8 @@ fn list_and_delete_use_injected_memory_ref_store() {
         .branches()
         .delete(
             "topic",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Safe,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Safe),
         )
         .unwrap();
     assert_eq!(deleted.oid, tip);
@@ -701,10 +687,8 @@ fn delete_nested_branch_leaves_no_reflog_directories() {
         .branches()
         .delete(
             "feature/x",
-            &grit_lib::porcelain::branch::BranchDeleteOptions {
-                mode: BranchDeleteMode::Safe,
-                dry_run: false,
-            },
+            &grit_lib::porcelain::branch::BranchDeleteOptions::default()
+                .with_mode(BranchDeleteMode::Safe),
         )
         .unwrap();
     assert!(!dir.join(".git/logs/refs/heads/feature").exists());

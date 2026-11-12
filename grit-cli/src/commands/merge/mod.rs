@@ -219,11 +219,10 @@ fn run_continue(
     let label = merge_continue_label(repo);
     let detached = matches!(repo.references().head()?, HeadState::Detached { .. });
     let now = context::wall_clock_now(repo.environment());
-    let options = ContinueOptions {
-        message: message.map(str::to_owned),
-        author: Some(context::signature(repo, IdentRole::Author, now)?),
-        committer: Some(context::signature(repo, IdentRole::Committer, now)?),
-    };
+    let options = ContinueOptions::default()
+        .with_message(message.map(str::to_owned))
+        .with_author(Some(context::signature(repo, IdentRole::Author, now)?))
+        .with_committer(Some(context::signature(repo, IdentRole::Committer, now)?));
     match repo.merge().continue_merge(&options, progress, cancel) {
         Ok(outcome) => {
             let mut merged = MergeOutcome::merged(&label, outcome.oid, outcome.change_id);
@@ -272,12 +271,10 @@ fn check_merge(
     head_short: &str,
     merge_options: &MergeOptions,
 ) -> Result<MergeOutcome> {
-    let options = MergePredictionOptions {
-        favor: merge_options.favor,
-        theirs_label: label.to_owned(),
-        directory_renames: merge_options.directory_renames,
-        ..MergePredictionOptions::default()
-    };
+    let options = MergePredictionOptions::default()
+        .with_favor(merge_options.favor)
+        .with_theirs_label(label.to_owned())
+        .with_directory_renames(merge_options.directory_renames);
     match repo.merge().predict(into_oid, other_oid, &options)? {
         MergePrediction::UpToDate => Ok(MergeOutcome::up_to_date_check(label)),
         MergePrediction::FastForward => Ok(MergeOutcome::fast_forward_check(

@@ -378,11 +378,12 @@ fn tree_to_tree_thread_policies_agree() {
     let fx = handle_fixture();
     let serial = renames()
         .with_copies(CopyDetection::FindHarder(50))
-        .with_threads(Some(ThreadPolicy::with_threads_override(Some(1))));
+        .with_threads(Some(ThreadPolicy::default().with_threads_override(Some(1))));
     let parallel = serial.clone().with_threads(Some(
-        ThreadPolicy::with_threads_override(Some(4))
-            .min_items_override(Some(0))
-            .min_total_bytes_override(Some(0)),
+        ThreadPolicy::default()
+            .with_threads_override(Some(4))
+            .with_min_items_override(Some(0))
+            .with_min_total_bytes_override(Some(0)),
     ));
     let diff = fx.repo.diff();
     let a = diff

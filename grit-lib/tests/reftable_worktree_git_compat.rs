@@ -126,23 +126,20 @@ fn reftable_add_attached_detached_and_no_checkout_are_git_readable() {
         let repo = open(&main);
         let entry = repo
             .worktrees()
-            .add(&AddLinkedWorktreeOptions {
-                path: path.clone(),
-                branch: Some(if detached {
-                    WorktreeBranch::Detach
-                } else {
-                    WorktreeBranch::Existing(name.into())
-                }),
-                start_point: Some(if detached {
-                    base.to_hex()
-                } else {
-                    name.to_owned()
-                }),
-                force: false,
-                lock: None,
-                no_checkout,
-                track: false,
-            })
+            .add(
+                &AddLinkedWorktreeOptions::new(path.clone())
+                    .with_branch(Some(if detached {
+                        WorktreeBranch::Detach
+                    } else {
+                        WorktreeBranch::Existing(name.into())
+                    }))
+                    .with_start_point(Some(if detached {
+                        base.to_hex()
+                    } else {
+                        name.to_owned()
+                    }))
+                    .with_no_checkout(no_checkout),
+            )
             .unwrap();
         assert!(entry.admin_dir.join("reftable/tables.list").is_file());
         assert!(entry.admin_dir.join("refs/heads").is_file());

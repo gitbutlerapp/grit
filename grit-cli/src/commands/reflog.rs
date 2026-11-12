@@ -42,13 +42,12 @@ pub fn run_show(r#ref: Option<String>, options: ReflogListOptions) -> Result<Ref
         .reflogs()
         .query(
             &ref_name,
-            &ReflogQuery {
-                limit: options.max_count,
-                since,
-                until,
-                grep,
-                now,
-            },
+            &ReflogQuery::default()
+                .with_limit(options.max_count)
+                .with_since(since)
+                .with_until(until)
+                .with_grep(grep)
+                .with_now(now),
         )
         .map_err(map_reflog_error)?;
     let entries = page

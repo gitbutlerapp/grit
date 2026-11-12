@@ -96,13 +96,11 @@ fn path_limited_simplify_and_full_history() {
     let commits = seed_linear(&repo, 4);
     let tip = commits.last().copied().expect("tip");
     for (full, simplify) in [(false, false), (true, false), (false, true), (true, true)] {
-        let opts = RevListOptions {
-            paths: vec!["path/file".to_owned()],
-            full_history: full,
-            simplify_merges: simplify,
-            show_pulls: full && simplify,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_paths(vec!["path/file".to_owned()])
+            .with_full_history(full)
+            .with_simplify_merges(simplify)
+            .with_show_pulls(full && simplify);
         let out = repo
             .revwalk()
             .rev_list(
@@ -127,13 +125,11 @@ fn object_walk_filters() {
         ObjectFilter::BlobLimit(1024),
         ObjectFilter::TreeDepth(2),
     ]);
-    let opts = RevListOptions {
-        objects: true,
-        filter: Some(filter),
-        filter_print_omitted: true,
-        filter_provided_objects: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_filter(Some(filter))
+        .with_filter_print_omitted(true)
+        .with_filter_provided_objects(true);
     let out = repo
         .revwalk()
         .rev_list(
@@ -173,14 +169,12 @@ fn merge_history_simplify_sparse_and_ordering() {
         OrderingMode::AuthorDateWalk,
         OrderingMode::AuthorDateTopo,
     ] {
-        let opts = RevListOptions {
-            paths: vec!["path/file".to_owned()],
-            simplify_merges: true,
-            sparse: true,
-            ordering,
-            first_parent: ordering == OrderingMode::Default,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_paths(vec!["path/file".to_owned()])
+            .with_simplify_merges(true)
+            .with_sparse(true)
+            .with_ordering(ordering)
+            .with_first_parent(ordering == OrderingMode::Default);
         let out = repo
             .revwalk()
             .rev_list(
@@ -201,19 +195,17 @@ fn rev_list_limit_boundary_cherry_and_all_refs() {
     let repo = open_bare(dir.path()).expect("repo");
     let commits = seed_linear(&repo, 4);
     let tip = commits.last().copied().expect("tip");
-    let opts = RevListOptions {
-        max_count: Some(2),
-        skip: 1,
-        objects: true,
-        in_commit_order: true,
-        missing_action: MissingAction::Allow,
-        parent_rewrite: true,
-        reverse: true,
-        boundary: true,
-        cherry_mark: true,
-        all_refs: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_max_count(Some(2))
+        .with_skip(1)
+        .with_objects(true)
+        .with_in_commit_order(true)
+        .with_missing_action(MissingAction::Allow)
+        .with_parent_rewrite(true)
+        .with_reverse(true)
+        .with_boundary(true)
+        .with_cherry_mark(true)
+        .with_all_refs(true);
     let out = repo
         .revwalk()
         .rev_list(
@@ -252,13 +244,11 @@ fn shallow_and_filtered_reachability() {
     let bounds = repo.revwalk().shallow_boundary_oids();
     assert!(bounds.contains(&tip));
     let walk = |filter: Option<ObjectFilter>| {
-        let opts = RevListOptions {
-            all_refs: true,
-            objects: true,
-            no_object_names: true,
-            filter,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_all_refs(true)
+            .with_objects(true)
+            .with_no_object_names(true)
+            .with_filter(filter);
         repo.revwalk()
             .rev_list(&[], &[], &opts, &mut NullProgress, &CancelToken::never())
             .expect("walk")
@@ -276,11 +266,9 @@ fn tagged_tip_object_walk_and_symmetric_range() {
     let tip = commits.last().copied().expect("tip");
     let tag_oid = write_tag(repo.odb(), tip, "v1").expect("tag");
     fs::write(repo.git_dir().join("refs/tags/v1"), format!("{tag_oid}\n")).expect("tag ref");
-    let opts = RevListOptions {
-        objects: true,
-        no_object_names: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_no_object_names(true);
     let out = repo
         .revwalk()
         .rev_list(
@@ -297,10 +285,7 @@ fn tagged_tip_object_walk_and_symmetric_range() {
         .rev_list(
             &[commits[2].to_hex()],
             &[commits[0].to_hex()],
-            &RevListOptions {
-                left_right: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_left_right(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -325,16 +310,13 @@ fn dense_pathspec_visibility_and_parent_filters() {
         .rev_list(
             &[tip.to_hex()],
             &[],
-            &RevListOptions {
-                min_parents: Some(2),
-                max_parents: Some(2),
-                until_cutoff: Some(i64::MAX),
-                since_cutoff: Some(0),
-                show_pulls: true,
-                exclude_promisor_objects: true,
-                unpacked_only: false,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default()
+                .with_min_parents(Some(2))
+                .with_max_parents(Some(2))
+                .with_until_cutoff(Some(i64::MAX))
+                .with_since_cutoff(Some(0))
+                .with_show_pulls(true)
+                .with_exclude_promisor_objects(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -344,11 +326,9 @@ fn dense_pathspec_visibility_and_parent_filters() {
     let _ = repo.revwalk().rev_list(
         &[tip.to_hex()],
         &[],
-        &RevListOptions {
-            objects: true,
-            filter: Some(sparse),
-            ..RevListOptions::default()
-        },
+        &RevListOptions::default()
+            .with_objects(true)
+            .with_filter(Some(sparse)),
         &mut NullProgress,
         &CancelToken::never(),
     );

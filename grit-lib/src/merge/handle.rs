@@ -25,6 +25,7 @@ use super::rerere::MergeRerere;
 
 /// Integrate into an explicit branch tip (for example during `pull`).
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct BranchIntegrateRequest<'a> {
     /// Ref updated on success (for example `refs/heads/main`).
     pub into_ref: &'a str,
@@ -34,6 +35,59 @@ pub struct BranchIntegrateRequest<'a> {
     pub source: &'a MergeSource,
     /// Label for merge messages and reflogs.
     pub label: &'a str,
+}
+
+impl<'a> BranchIntegrateRequest<'a> {
+    /// Creates a [`BranchIntegrateRequest`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `into_ref`: ref updated on success (for example `refs/heads/main`).
+    /// - `into_oid`: expected oid of `into_ref` before the merge.
+    /// - `source`: commit being merged in.
+    /// - `label`: label for merge messages and reflogs.
+    #[must_use]
+    pub const fn new(
+        into_ref: &'a str,
+        into_oid: ObjectId,
+        source: &'a MergeSource,
+        label: &'a str,
+    ) -> Self {
+        Self {
+            into_ref,
+            into_oid,
+            source,
+            label,
+        }
+    }
+
+    /// Sets [`into_ref`](Self::into_ref).
+    #[must_use]
+    pub const fn with_into_ref(mut self, into_ref: &'a str) -> Self {
+        self.into_ref = into_ref;
+        self
+    }
+
+    /// Sets [`into_oid`](Self::into_oid).
+    #[must_use]
+    pub const fn with_into_oid(mut self, into_oid: ObjectId) -> Self {
+        self.into_oid = into_oid;
+        self
+    }
+
+    /// Sets [`source`](Self::source).
+    #[must_use]
+    pub const fn with_source(mut self, source: &'a MergeSource) -> Self {
+        self.source = source;
+        self
+    }
+
+    /// Sets [`label`](Self::label).
+    #[must_use]
+    pub const fn with_label(mut self, label: &'a str) -> Self {
+        self.label = label;
+        self
+    }
 }
 
 /// Merge, pick, revert, replay and merge `--continue` / `--abort` for one repository.

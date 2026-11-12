@@ -132,13 +132,12 @@ impl RefStore for RacingStore {
 }
 
 fn opts() -> NotesWriteOptions {
-    NotesWriteOptions {
-        message: "notes".into(),
-        committer: "Race <race@grit-scm.com> 1700000000 +0000"
+    NotesWriteOptions::new(
+        "notes",
+        "Race <race@grit-scm.com> 1700000000 +0000"
             .parse()
             .expect("signature"),
-        author: None,
-    }
+    )
 }
 
 /// Repository on an on-disk object store with the racing ref store, plus three annotated

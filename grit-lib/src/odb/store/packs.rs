@@ -23,6 +23,7 @@ use super::{ObjectStore, ObjectStream};
 
 /// Which local pack indexes participate in filtered membership checks.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct PackFilter {
     /// When false, skip indexes with a sibling `.promisor` marker.
     pub include_promisor: bool,
@@ -36,6 +37,22 @@ impl Default for PackFilter {
             include_promisor: false,
             include_cruft: true,
         }
+    }
+}
+
+impl PackFilter {
+    /// Sets [`include_promisor`](Self::include_promisor).
+    #[must_use]
+    pub const fn with_include_promisor(mut self, include_promisor: bool) -> Self {
+        self.include_promisor = include_promisor;
+        self
+    }
+
+    /// Sets [`include_cruft`](Self::include_cruft).
+    #[must_use]
+    pub const fn with_include_cruft(mut self, include_cruft: bool) -> Self {
+        self.include_cruft = include_cruft;
+        self
     }
 }
 

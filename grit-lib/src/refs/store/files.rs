@@ -59,6 +59,7 @@ type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
 /// Explicit context for a files ref store (no environment reads for namespace).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct FilesRefStoreConfig {
     /// Worktree or bare repository git directory.
     pub git_dir: PathBuf,
@@ -66,6 +67,44 @@ pub struct FilesRefStoreConfig {
     pub common_dir: PathBuf,
     /// Optional `GIT_NAMESPACE`-style prefix applied to storage paths (not read from env).
     pub namespace_prefix: Option<String>,
+}
+
+impl FilesRefStoreConfig {
+    /// Creates a [`FilesRefStoreConfig`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `git_dir`: worktree or bare repository git directory.
+    /// - `common_dir`: shared object/ref store (`commondir` target or same as `git_dir`).
+    #[must_use]
+    pub fn new(git_dir: PathBuf, common_dir: PathBuf) -> Self {
+        Self {
+            git_dir,
+            common_dir,
+            namespace_prefix: None,
+        }
+    }
+
+    /// Sets [`git_dir`](Self::git_dir).
+    #[must_use]
+    pub fn with_git_dir(mut self, git_dir: PathBuf) -> Self {
+        self.git_dir = git_dir;
+        self
+    }
+
+    /// Sets [`common_dir`](Self::common_dir).
+    #[must_use]
+    pub fn with_common_dir(mut self, common_dir: PathBuf) -> Self {
+        self.common_dir = common_dir;
+        self
+    }
+
+    /// Sets [`namespace_prefix`](Self::namespace_prefix).
+    #[must_use]
+    pub fn with_namespace_prefix(mut self, namespace_prefix: Option<String>) -> Self {
+        self.namespace_prefix = namespace_prefix;
+        self
+    }
 }
 
 /// Loose + packed ref storage on disk.

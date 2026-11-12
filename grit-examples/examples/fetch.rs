@@ -21,10 +21,7 @@ fn main() -> grit_lib::error::Result<()> {
         .remotes()
         .ls_remote(
             &Remote::from_url(&remote_git.to_string_lossy())?,
-            &ListRefsOptions {
-                heads: true,
-                ..Default::default()
-            },
+            &ListRefsOptions::default().with_heads(true),
             None,
         )
         .map_err(grit_lib::error::Error::from)?;

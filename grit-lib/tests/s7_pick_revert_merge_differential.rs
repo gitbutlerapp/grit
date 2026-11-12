@@ -116,12 +116,7 @@ fn worktree_fingerprint(wt: &std::path::Path) -> Vec<u8> {
 fn replay_pick(repo: &Repository, commit: ObjectId) -> ReplayOutcome {
     replay_commit(
         repo,
-        &ReplayRequest {
-            commit,
-            direction: ReplayDirection::Pick,
-            committer: IDENT.parse().expect("IDENT"),
-            message_override: None,
-        },
+        &ReplayRequest::new(commit, ReplayDirection::Pick, IDENT.parse().expect("IDENT")),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -176,12 +171,11 @@ fn s7_differential_revert_matches_git() {
     copy_repo(base.path(), grit_dir.path());
     replay_commit(
         &open_repo(grit_dir.path()),
-        &ReplayRequest {
-            commit: bad_oid,
-            direction: ReplayDirection::Revert,
-            committer: IDENT.parse().expect("IDENT"),
-            message_override: None,
-        },
+        &ReplayRequest::new(
+            bad_oid,
+            ReplayDirection::Revert,
+            IDENT.parse().expect("IDENT"),
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )
@@ -268,12 +262,11 @@ fn s7_differential_pick_refuses_dirty_worktree() {
     fs::write(grit_dir.path().join("a.txt"), "dirty\n").expect("dirty");
     let err = replay_commit(
         &open_repo(grit_dir.path()),
-        &ReplayRequest {
-            commit: pick_source,
-            direction: ReplayDirection::Pick,
-            committer: IDENT.parse().expect("IDENT"),
-            message_override: None,
-        },
+        &ReplayRequest::new(
+            pick_source,
+            ReplayDirection::Pick,
+            IDENT.parse().expect("IDENT"),
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

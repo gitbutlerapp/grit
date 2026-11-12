@@ -96,9 +96,10 @@ fn bench_diff_renames(c: &mut Criterion) {
         u64::try_from(fx.entries.len()).expect("count"),
     ));
     for threads in [1usize, 4] {
-        let policy = ThreadPolicy::with_threads_override(Some(threads))
-            .min_items_override(Some(0))
-            .min_total_bytes_override(Some(0));
+        let policy = ThreadPolicy::default()
+            .with_threads_override(Some(threads))
+            .with_min_items_override(Some(0))
+            .with_min_total_bytes_override(Some(0));
         group.bench_with_input(
             BenchmarkId::from_parameter(format!("threads={threads}")),
             &threads,
@@ -178,9 +179,10 @@ fn adoc_fixture(count: usize, lines: usize, unique: bool) -> RenameBenchFixture 
 }
 
 fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
-    let policy = ThreadPolicy::with_threads_override(Some(4))
-        .min_items_override(Some(0))
-        .min_total_bytes_override(Some(0));
+    let policy = ThreadPolicy::default()
+        .with_threads_override(Some(4))
+        .with_min_items_override(Some(0))
+        .with_min_total_bytes_override(Some(0));
     let mut group = c.benchmark_group("diff_renames_adoc_similar");
     group.sample_size(10);
     for (name, count, lines, unique) in [
@@ -315,9 +317,10 @@ fn basename_disjoint_duplicate_fixture(count: usize) -> RenameBenchFixture {
 }
 
 fn bench_diff_renames_basename_disjoint_duplicates(c: &mut Criterion) {
-    let policy = ThreadPolicy::with_threads_override(Some(1))
-        .min_items_override(Some(0))
-        .min_total_bytes_override(Some(0));
+    let policy = ThreadPolicy::default()
+        .with_threads_override(Some(1))
+        .with_min_items_override(Some(0))
+        .with_min_total_bytes_override(Some(0));
     let mut group = c.benchmark_group("diff_renames_basename_disjoint_duplicates");
     group.sample_size(10);
     for count in [512_usize, 2048] {
@@ -341,9 +344,10 @@ fn bench_diff_renames_basename_disjoint_duplicates(c: &mut Criterion) {
 }
 
 fn bench_diff_renames_basename_duplicates(c: &mut Criterion) {
-    let policy = ThreadPolicy::with_threads_override(Some(1))
-        .min_items_override(Some(0))
-        .min_total_bytes_override(Some(0));
+    let policy = ThreadPolicy::default()
+        .with_threads_override(Some(1))
+        .with_min_items_override(Some(0))
+        .with_min_total_bytes_override(Some(0));
     let mut group = c.benchmark_group("diff_renames_basename_duplicates");
     group.sample_size(10);
     for (name, count, limit) in [

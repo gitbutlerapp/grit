@@ -70,12 +70,10 @@ fn symmetric_range_ancestry_and_object_roots() -> grit_lib::error::Result<()> {
     )
     .map_err(Error::Io)?;
 
-    let opts = RevListOptions {
-        ordering: OrderingMode::AuthorDateWalk,
-        objects: true,
-        in_commit_order: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_ordering(OrderingMode::AuthorDateWalk)
+        .with_objects(true)
+        .with_in_commit_order(true);
     let out = repo.revwalk().rev_list(
         &[String::from("main")],
         &[],
@@ -207,28 +205,26 @@ fn long_merged_history_object_walk_and_decoration() -> grit_lib::error::Result<(
         OrderingMode::AuthorDateWalk,
         OrderingMode::AuthorDateTopo,
     ] {
-        let opts = RevListOptions {
-            ordering,
-            objects: true,
-            in_commit_order: true,
-            simplify_by_decoration: true,
-            simplify_by_decoration_oids: deco.clone(),
-            simplify_merges: true,
-            parent_rewrite: true,
-            full_history: true,
-            paths: vec!["tracked.txt".into()],
-            filter: Some(ObjectFilter::Combine(vec![
+        let opts = RevListOptions::default()
+            .with_ordering(ordering)
+            .with_objects(true)
+            .with_in_commit_order(true)
+            .with_simplify_by_decoration(true)
+            .with_simplify_by_decoration_oids(deco.clone())
+            .with_simplify_merges(true)
+            .with_parent_rewrite(true)
+            .with_full_history(true)
+            .with_paths(vec!["tracked.txt".into()])
+            .with_filter(Some(ObjectFilter::Combine(vec![
                 ObjectFilter::BlobLimit(8192),
                 ObjectFilter::TreeDepth(6),
-            ])),
-            filter_print_omitted: true,
-            ancestry_path: true,
-            ancestry_path_bottoms: vec![base],
-            left_right: true,
-            boundary: true,
-            max_count: Some(96),
-            ..RevListOptions::default()
-        };
+            ])))
+            .with_filter_print_omitted(true)
+            .with_ancestry_path(true)
+            .with_ancestry_path_bottoms(vec![base])
+            .with_left_right(true)
+            .with_boundary(true)
+            .with_max_count(Some(96));
         let _ = repo.revwalk().rev_list(
             &[String::from("main"), String::from("side")],
             &[],
@@ -244,10 +240,7 @@ fn long_merged_history_object_walk_and_decoration() -> grit_lib::error::Result<(
             String::from("main^{commit}"),
         ],
         &[],
-        &RevListOptions {
-            objects: true,
-            ..RevListOptions::default()
-        },
+        &RevListOptions::default().with_objects(true),
         &mut NullProgress,
         &CancelToken::never(),
     )?;

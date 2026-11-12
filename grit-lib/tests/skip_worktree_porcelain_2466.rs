@@ -67,26 +67,17 @@ fn restore_opts(pathspecs: &[&str]) -> RestoreOptions {
 }
 
 fn reset_opts(target: grit_lib::objects::ObjectId, mode: ResetMode) -> ResetOptions {
-    ResetOptions {
+    ResetOptions::new(
         target,
         mode,
-        identity: "T <a@b.c> 0 +0000".parse().expect("identity"),
-        message: "reset".into(),
-        dry_run: false,
-        orphan_limit: DEFAULT_ORPHAN_LIMIT,
-    }
+        "T <a@b.c> 0 +0000".parse().expect("identity"),
+        "reset",
+    )
+    .with_orphan_limit(DEFAULT_ORPHAN_LIMIT)
 }
 
 fn stash_push_opts() -> StashPushOptions {
-    StashPushOptions {
-        message: None,
-        include_untracked: false,
-        identity: "T <a@b.c> 0 +0000".parse().expect("identity"),
-        selection: None,
-        pathspecs: Vec::new(),
-        dry_run: false,
-        mode: grit_lib::stash::StashMode::default(),
-    }
+    StashPushOptions::new("T <a@b.c> 0 +0000".parse().expect("identity"))
 }
 
 #[test]

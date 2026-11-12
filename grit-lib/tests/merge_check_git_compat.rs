@@ -273,10 +273,7 @@ fn renamed_dir_repo() -> (tempfile::TempDir, ObjectId, ObjectId) {
 }
 
 fn no_ff() -> MergePredictionOptions {
-    MergePredictionOptions {
-        allow_fast_forward: false,
-        ..MergePredictionOptions::default()
-    }
+    MergePredictionOptions::default().with_allow_fast_forward(false)
 }
 
 #[test]
@@ -421,11 +418,9 @@ fn write_merge_tree_conflict_stages_match_git_merge_tree() {
     let repo = grit_repo(root);
 
     // `git merge-tree <oid> <oid>` labels the conflict markers with the arguments it was given.
-    let options = MergePredictionOptions {
-        ours_label: main.to_hex(),
-        theirs_label: topic.to_hex(),
-        ..MergePredictionOptions::default()
-    };
+    let options = MergePredictionOptions::default()
+        .with_ours_label(main.to_hex())
+        .with_theirs_label(topic.to_hex());
     let written = write_merge_tree(&repo, main, topic, &options).expect("write_merge_tree");
     assert!(!written.is_clean());
     assert_eq!(written.conflicts.len(), 1);
@@ -500,10 +495,7 @@ fn write_merge_tree_unrelated_histories() {
         "{err:?}"
     );
 
-    let options = MergePredictionOptions {
-        allow_unrelated_histories: true,
-        ..MergePredictionOptions::default()
-    };
+    let options = MergePredictionOptions::default().with_allow_unrelated_histories(true);
     let written = write_merge_tree(&repo, main, orphan, &options).expect("write_merge_tree");
     assert!(written.is_clean());
     assert_eq!(
@@ -570,11 +562,9 @@ fn issue_2259_predict_and_write_merge_tree_match_git() {
     let root = tmp.path();
     let repo = grit_repo(root);
 
-    let options = MergePredictionOptions {
-        ours_label: main.to_hex(),
-        theirs_label: theirs.to_hex(),
-        ..MergePredictionOptions::default()
-    };
+    let options = MergePredictionOptions::default()
+        .with_ours_label(main.to_hex())
+        .with_theirs_label(theirs.to_hex());
     let prediction = predict_merge(&repo, main, theirs, &options).expect("predict_merge");
     assert!(
         matches!(prediction, MergePrediction::Conflicts { .. }),
@@ -631,10 +621,7 @@ fn assert_prediction_matches_git(
 ) -> MergePrediction {
     let oracle: GitMergeTreeOracle = git_merge_tree_oracle(root, None, &ours, &theirs, favor);
     let repo = grit_repo(root);
-    let options = MergePredictionOptions {
-        favor,
-        ..MergePredictionOptions::default()
-    };
+    let options = MergePredictionOptions::default().with_favor(favor);
     let prediction = predict_merge(&repo, ours, theirs, &options).expect("predict_merge");
     match &prediction {
         MergePrediction::Clean { tree } => {
@@ -798,11 +785,9 @@ fn write_merge_tree_criss_cross_matches_git_merge_tree() {
     let root = cc.dir.path();
     let repo = grit_repo(root);
     for (ours, theirs) in [(cc.ours, cc.theirs), (cc.theirs, cc.ours)] {
-        let options = MergePredictionOptions {
-            ours_label: ours.to_hex(),
-            theirs_label: theirs.to_hex(),
-            ..MergePredictionOptions::default()
-        };
+        let options = MergePredictionOptions::default()
+            .with_ours_label(ours.to_hex())
+            .with_theirs_label(theirs.to_hex());
         let written = write_merge_tree(&repo, ours, theirs, &options).expect("write_merge_tree");
         let oracle = git_merge_tree_oracle(root, None, &ours, &theirs, MergeFavor::None);
         assert_eq!(

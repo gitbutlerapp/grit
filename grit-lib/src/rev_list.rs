@@ -527,6 +527,7 @@ pub enum OrderingMode {
 /// the smaller [`crate::revwalk::RevWalkListOptions`], which also handles several tokens,
 /// ref selections (`--all`, `--branches`), and path limits, and is translated into these options.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct RevListOptions {
     /// Include all refs (`--all`) as positive tips.
     pub all_refs: bool,
@@ -692,6 +693,452 @@ impl RevListOptions {
         {
             self.use_commit_graph_bloom = true;
         }
+    }
+
+    /// Sets [`all_refs`](Self::all_refs).
+    #[must_use]
+    pub const fn with_all_refs(mut self, all_refs: bool) -> Self {
+        self.all_refs = all_refs;
+        self
+    }
+
+    /// Sets [`first_parent`](Self::first_parent).
+    #[must_use]
+    pub const fn with_first_parent(mut self, first_parent: bool) -> Self {
+        self.first_parent = first_parent;
+        self
+    }
+
+    /// Sets [`ancestry_path`](Self::ancestry_path).
+    #[must_use]
+    pub const fn with_ancestry_path(mut self, ancestry_path: bool) -> Self {
+        self.ancestry_path = ancestry_path;
+        self
+    }
+
+    /// Sets [`ancestry_path_bottoms`](Self::ancestry_path_bottoms).
+    #[must_use]
+    pub fn with_ancestry_path_bottoms(mut self, ancestry_path_bottoms: Vec<ObjectId>) -> Self {
+        self.ancestry_path_bottoms = ancestry_path_bottoms;
+        self
+    }
+
+    /// Sets [`simplify_by_decoration`](Self::simplify_by_decoration).
+    #[must_use]
+    pub const fn with_simplify_by_decoration(mut self, simplify_by_decoration: bool) -> Self {
+        self.simplify_by_decoration = simplify_by_decoration;
+        self
+    }
+
+    /// Sets [`simplify_by_decoration_oids`](Self::simplify_by_decoration_oids).
+    #[must_use]
+    pub fn with_simplify_by_decoration_oids(
+        mut self,
+        simplify_by_decoration_oids: HashSet<ObjectId>,
+    ) -> Self {
+        self.simplify_by_decoration_oids = simplify_by_decoration_oids;
+        self
+    }
+
+    /// Sets [`quiet`](Self::quiet).
+    #[must_use]
+    pub const fn with_quiet(mut self, quiet: bool) -> Self {
+        self.quiet = quiet;
+        self
+    }
+
+    /// Sets [`count`](Self::count).
+    #[must_use]
+    pub const fn with_count(mut self, count: bool) -> Self {
+        self.count = count;
+        self
+    }
+
+    /// Sets [`skip`](Self::skip).
+    #[must_use]
+    pub const fn with_skip(mut self, skip: usize) -> Self {
+        self.skip = skip;
+        self
+    }
+
+    /// Sets [`max_count`](Self::max_count).
+    #[must_use]
+    pub const fn with_max_count(mut self, max_count: Option<usize>) -> Self {
+        self.max_count = max_count;
+        self
+    }
+
+    /// Sets [`ordering`](Self::ordering).
+    #[must_use]
+    pub fn with_ordering(mut self, ordering: OrderingMode) -> Self {
+        self.ordering = ordering;
+        self
+    }
+
+    /// Sets [`reverse`](Self::reverse).
+    #[must_use]
+    pub const fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+
+    /// Sets [`maximal_only`](Self::maximal_only).
+    #[must_use]
+    pub const fn with_maximal_only(mut self, maximal_only: bool) -> Self {
+        self.maximal_only = maximal_only;
+        self
+    }
+
+    /// Sets [`objects`](Self::objects).
+    #[must_use]
+    pub const fn with_objects(mut self, objects: bool) -> Self {
+        self.objects = objects;
+        self
+    }
+
+    /// Sets [`no_object_names`](Self::no_object_names).
+    #[must_use]
+    pub const fn with_no_object_names(mut self, no_object_names: bool) -> Self {
+        self.no_object_names = no_object_names;
+        self
+    }
+
+    /// Sets [`boundary`](Self::boundary).
+    #[must_use]
+    pub const fn with_boundary(mut self, boundary: bool) -> Self {
+        self.boundary = boundary;
+        self
+    }
+
+    /// Sets [`left_right`](Self::left_right).
+    #[must_use]
+    pub const fn with_left_right(mut self, left_right: bool) -> Self {
+        self.left_right = left_right;
+        self
+    }
+
+    /// Sets [`left_right_explicit`](Self::left_right_explicit).
+    #[must_use]
+    pub const fn with_left_right_explicit(mut self, left_right_explicit: bool) -> Self {
+        self.left_right_explicit = left_right_explicit;
+        self
+    }
+
+    /// Sets [`left_only`](Self::left_only).
+    #[must_use]
+    pub const fn with_left_only(mut self, left_only: bool) -> Self {
+        self.left_only = left_only;
+        self
+    }
+
+    /// Sets [`right_only`](Self::right_only).
+    #[must_use]
+    pub const fn with_right_only(mut self, right_only: bool) -> Self {
+        self.right_only = right_only;
+        self
+    }
+
+    /// Sets [`cherry_mark`](Self::cherry_mark).
+    #[must_use]
+    pub const fn with_cherry_mark(mut self, cherry_mark: bool) -> Self {
+        self.cherry_mark = cherry_mark;
+        self
+    }
+
+    /// Sets [`cherry_pick`](Self::cherry_pick).
+    #[must_use]
+    pub const fn with_cherry_pick(mut self, cherry_pick: bool) -> Self {
+        self.cherry_pick = cherry_pick;
+        self
+    }
+
+    /// Sets [`min_parents`](Self::min_parents).
+    #[must_use]
+    pub const fn with_min_parents(mut self, min_parents: Option<usize>) -> Self {
+        self.min_parents = min_parents;
+        self
+    }
+
+    /// Sets [`max_parents`](Self::max_parents).
+    #[must_use]
+    pub const fn with_max_parents(mut self, max_parents: Option<usize>) -> Self {
+        self.max_parents = max_parents;
+        self
+    }
+
+    /// Sets [`symmetric_left`](Self::symmetric_left).
+    #[must_use]
+    pub const fn with_symmetric_left(mut self, symmetric_left: Option<ObjectId>) -> Self {
+        self.symmetric_left = symmetric_left;
+        self
+    }
+
+    /// Sets [`symmetric_right`](Self::symmetric_right).
+    #[must_use]
+    pub const fn with_symmetric_right(mut self, symmetric_right: Option<ObjectId>) -> Self {
+        self.symmetric_right = symmetric_right;
+        self
+    }
+
+    /// Sets [`paths`](Self::paths).
+    #[must_use]
+    pub fn with_paths(mut self, paths: Vec<String>) -> Self {
+        self.paths = paths;
+        self
+    }
+
+    /// Sets [`full_history`](Self::full_history).
+    #[must_use]
+    pub const fn with_full_history(mut self, full_history: bool) -> Self {
+        self.full_history = full_history;
+        self
+    }
+
+    /// Sets [`parent_rewrite`](Self::parent_rewrite).
+    #[must_use]
+    pub const fn with_parent_rewrite(mut self, parent_rewrite: bool) -> Self {
+        self.parent_rewrite = parent_rewrite;
+        self
+    }
+
+    /// Sets [`sparse`](Self::sparse).
+    #[must_use]
+    pub const fn with_sparse(mut self, sparse: bool) -> Self {
+        self.sparse = sparse;
+        self
+    }
+
+    /// Sets [`simplify_merges`](Self::simplify_merges).
+    #[must_use]
+    pub const fn with_simplify_merges(mut self, simplify_merges: bool) -> Self {
+        self.simplify_merges = simplify_merges;
+        self
+    }
+
+    /// Sets [`preserve_simplify_merges_graph_merges`](Self::preserve_simplify_merges_graph_merges).
+    #[must_use]
+    pub const fn with_preserve_simplify_merges_graph_merges(
+        mut self,
+        preserve_simplify_merges_graph_merges: bool,
+    ) -> Self {
+        self.preserve_simplify_merges_graph_merges = preserve_simplify_merges_graph_merges;
+        self
+    }
+
+    /// Sets [`show_pulls`](Self::show_pulls).
+    #[must_use]
+    pub const fn with_show_pulls(mut self, show_pulls: bool) -> Self {
+        self.show_pulls = show_pulls;
+        self
+    }
+
+    /// Sets [`exclude_first_parent_only`](Self::exclude_first_parent_only).
+    #[must_use]
+    pub const fn with_exclude_first_parent_only(mut self, exclude_first_parent_only: bool) -> Self {
+        self.exclude_first_parent_only = exclude_first_parent_only;
+        self
+    }
+
+    /// Sets [`filter`](Self::filter).
+    #[must_use]
+    pub fn with_filter(mut self, filter: Option<ObjectFilter>) -> Self {
+        self.filter = filter;
+        self
+    }
+
+    /// Sets [`filter_raw_specs`](Self::filter_raw_specs).
+    #[must_use]
+    pub fn with_filter_raw_specs(mut self, filter_raw_specs: Vec<String>) -> Self {
+        self.filter_raw_specs = filter_raw_specs;
+        self
+    }
+
+    /// Sets [`filter_provided_objects`](Self::filter_provided_objects).
+    #[must_use]
+    pub const fn with_filter_provided_objects(mut self, filter_provided_objects: bool) -> Self {
+        self.filter_provided_objects = filter_provided_objects;
+        self
+    }
+
+    /// Sets [`filter_print_omitted`](Self::filter_print_omitted).
+    #[must_use]
+    pub const fn with_filter_print_omitted(mut self, filter_print_omitted: bool) -> Self {
+        self.filter_print_omitted = filter_print_omitted;
+        self
+    }
+
+    /// Sets [`in_commit_order`](Self::in_commit_order).
+    #[must_use]
+    pub const fn with_in_commit_order(mut self, in_commit_order: bool) -> Self {
+        self.in_commit_order = in_commit_order;
+        self
+    }
+
+    /// Sets [`no_kept_objects`](Self::no_kept_objects).
+    #[must_use]
+    pub const fn with_no_kept_objects(mut self, no_kept_objects: bool) -> Self {
+        self.no_kept_objects = no_kept_objects;
+        self
+    }
+
+    /// Sets [`missing_action`](Self::missing_action).
+    #[must_use]
+    pub fn with_missing_action(mut self, missing_action: MissingAction) -> Self {
+        self.missing_action = missing_action;
+        self
+    }
+
+    /// Sets [`exclude_promisor_objects`](Self::exclude_promisor_objects).
+    #[must_use]
+    pub const fn with_exclude_promisor_objects(mut self, exclude_promisor_objects: bool) -> Self {
+        self.exclude_promisor_objects = exclude_promisor_objects;
+        self
+    }
+
+    /// Sets [`ignore_missing`](Self::ignore_missing).
+    #[must_use]
+    pub const fn with_ignore_missing(mut self, ignore_missing: bool) -> Self {
+        self.ignore_missing = ignore_missing;
+        self
+    }
+
+    /// Sets [`use_bitmap_index`](Self::use_bitmap_index).
+    #[must_use]
+    pub const fn with_use_bitmap_index(mut self, use_bitmap_index: bool) -> Self {
+        self.use_bitmap_index = use_bitmap_index;
+        self
+    }
+
+    /// Sets [`unpacked_only`](Self::unpacked_only).
+    #[must_use]
+    pub const fn with_unpacked_only(mut self, unpacked_only: bool) -> Self {
+        self.unpacked_only = unpacked_only;
+        self
+    }
+
+    /// Sets [`bitmap_oid_only_objects`](Self::bitmap_oid_only_objects).
+    #[must_use]
+    pub const fn with_bitmap_oid_only_objects(mut self, bitmap_oid_only_objects: bool) -> Self {
+        self.bitmap_oid_only_objects = bitmap_oid_only_objects;
+        self
+    }
+
+    /// Sets [`path_graph_reorder`](Self::path_graph_reorder).
+    #[must_use]
+    pub const fn with_path_graph_reorder(mut self, path_graph_reorder: bool) -> Self {
+        self.path_graph_reorder = path_graph_reorder;
+        self
+    }
+
+    /// Sets [`until_cutoff`](Self::until_cutoff).
+    #[must_use]
+    pub const fn with_until_cutoff(mut self, until_cutoff: Option<i64>) -> Self {
+        self.until_cutoff = until_cutoff;
+        self
+    }
+
+    /// Sets [`since_cutoff`](Self::since_cutoff).
+    #[must_use]
+    pub const fn with_since_cutoff(mut self, since_cutoff: Option<i64>) -> Self {
+        self.since_cutoff = since_cutoff;
+        self
+    }
+
+    /// Sets [`include_reflog_entries`](Self::include_reflog_entries).
+    #[must_use]
+    pub const fn with_include_reflog_entries(mut self, include_reflog_entries: bool) -> Self {
+        self.include_reflog_entries = include_reflog_entries;
+        self
+    }
+
+    /// Sets [`include_indexed_objects`](Self::include_indexed_objects).
+    #[must_use]
+    pub const fn with_include_indexed_objects(mut self, include_indexed_objects: bool) -> Self {
+        self.include_indexed_objects = include_indexed_objects;
+        self
+    }
+
+    /// Sets [`exclude_indexed_objects`](Self::exclude_indexed_objects).
+    #[must_use]
+    pub const fn with_exclude_indexed_objects(mut self, exclude_indexed_objects: bool) -> Self {
+        self.exclude_indexed_objects = exclude_indexed_objects;
+        self
+    }
+
+    /// Sets [`use_commit_graph`](Self::use_commit_graph).
+    #[must_use]
+    pub const fn with_use_commit_graph(mut self, use_commit_graph: bool) -> Self {
+        self.use_commit_graph = use_commit_graph;
+        self
+    }
+
+    /// Sets [`use_commit_graph_bloom`](Self::use_commit_graph_bloom).
+    #[must_use]
+    pub const fn with_use_commit_graph_bloom(mut self, use_commit_graph_bloom: bool) -> Self {
+        self.use_commit_graph_bloom = use_commit_graph_bloom;
+        self
+    }
+
+    /// Sets [`commit_graph_read_changed_paths`](Self::commit_graph_read_changed_paths).
+    #[must_use]
+    pub const fn with_commit_graph_read_changed_paths(
+        mut self,
+        commit_graph_read_changed_paths: bool,
+    ) -> Self {
+        self.commit_graph_read_changed_paths = commit_graph_read_changed_paths;
+        self
+    }
+
+    /// Sets [`commit_graph_changed_paths_version`](Self::commit_graph_changed_paths_version).
+    #[must_use]
+    pub const fn with_commit_graph_changed_paths_version(
+        mut self,
+        commit_graph_changed_paths_version: i32,
+    ) -> Self {
+        self.commit_graph_changed_paths_version = commit_graph_changed_paths_version;
+        self
+    }
+
+    /// Sets [`bloom_stats`](Self::bloom_stats).
+    #[must_use]
+    pub fn with_bloom_stats(mut self, bloom_stats: Option<BloomWalkStatsHandle>) -> Self {
+        self.bloom_stats = bloom_stats;
+        self
+    }
+
+    /// Sets [`paths_resolved_from_argv`](Self::paths_resolved_from_argv).
+    #[must_use]
+    pub const fn with_paths_resolved_from_argv(mut self, paths_resolved_from_argv: bool) -> Self {
+        self.paths_resolved_from_argv = paths_resolved_from_argv;
+        self
+    }
+
+    /// Sets [`commit_filter`](Self::commit_filter).
+    #[must_use]
+    pub fn with_commit_filter(mut self, commit_filter: Option<Arc<CommitFilter>>) -> Self {
+        self.commit_filter = commit_filter;
+        self
+    }
+
+    /// Sets [`pickaxe`](Self::pickaxe).
+    #[must_use]
+    pub fn with_pickaxe(mut self, pickaxe: Option<Arc<crate::diff::Pickaxe>>) -> Self {
+        self.pickaxe = pickaxe;
+        self
+    }
+
+    /// Sets [`retain_commit_data`](Self::retain_commit_data).
+    #[must_use]
+    pub const fn with_retain_commit_data(mut self, retain_commit_data: bool) -> Self {
+        self.retain_commit_data = retain_commit_data;
+        self
+    }
+
+    /// Sets [`follow`](Self::follow).
+    #[must_use]
+    pub const fn with_follow(mut self, follow: bool) -> Self {
+        self.follow = follow;
+        self
     }
 }
 

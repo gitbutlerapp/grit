@@ -28,11 +28,9 @@ fn test_ident() -> grit_lib::ident::Signature {
 
 fn continue_options() -> ContinueOptions {
     let id = test_ident();
-    ContinueOptions {
-        message: None,
-        author: Some(id.clone()),
-        committer: Some(id),
-    }
+    ContinueOptions::default()
+        .with_author(Some(id.clone()))
+        .with_committer(Some(id))
 }
 
 fn git(dir: &Path, args: &[&str]) -> String {
@@ -166,15 +164,8 @@ fn merge_error_variants() {
     let side_tip = topic;
     let pick_err = start_replay_sequence(
         &repo,
-        &ReplaySequenceRequest {
-            direction: ReplayDirection::Pick,
-            commits: vec![side_tip],
-            committer: test_ident(),
-            options: ReplayOptions {
-                empty: ReplayEmptyPolicy::Stop,
-                ..ReplayOptions::default()
-            },
-        },
+        &ReplaySequenceRequest::new(vec![side_tip], ReplayDirection::Pick, test_ident())
+            .with_options(ReplayOptions::default()),
         &mut NullProgress,
         &CancelToken::never(),
     )

@@ -130,12 +130,10 @@ fn build_three_pack_sha256_repo() -> Option<(tempfile::TempDir, PathBuf)> {
 }
 
 fn grit_write_midx_with_rev(pack_dir: &Path) {
-    let opts = WriteMultiPackIndexOptions {
-        write_bitmap: true,
-        write_rev_sidecar: true,
-        version: Some(1),
-        ..WriteMultiPackIndexOptions::default()
-    };
+    let opts = WriteMultiPackIndexOptions::default()
+        .with_write_bitmap(true)
+        .with_write_rev_sidecar(true)
+        .with_version(Some(1));
     write_multi_pack_index(pack_dir, &opts).expect("grit write MIDX");
 }
 
@@ -364,11 +362,9 @@ fn sha256_incremental_midx_read_objects() {
     git(_tmp.path(), &["commit", "-q", "-m", "incr"]);
     git(_tmp.path(), &["repack", "-d"]);
 
-    let opts = WriteMultiPackIndexOptions {
-        incremental: true,
-        version: Some(1),
-        ..WriteMultiPackIndexOptions::default()
-    };
+    let opts = WriteMultiPackIndexOptions::default()
+        .with_incremental(true)
+        .with_version(Some(1));
     write_multi_pack_index(&pack_dir, &opts).expect("incremental MIDX write");
     assert!(
         !pack_dir.join("multi-pack-index").exists(),

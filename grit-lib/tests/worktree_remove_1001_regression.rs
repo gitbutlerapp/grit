@@ -69,15 +69,11 @@ fn linked_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, Repository
     let linked = tmp.path().join("linked");
     main_repo
         .worktrees()
-        .add(&AddLinkedWorktreeOptions {
-            path: linked.clone(),
-            branch: Some(WorktreeBranch::Create("linked".to_owned())),
-            start_point: Some("HEAD".to_owned()),
-            force: false,
-            lock: None,
-            no_checkout: false,
-            track: false,
-        })
+        .add(
+            &AddLinkedWorktreeOptions::new(linked.clone())
+                .with_branch(Some(WorktreeBranch::Create("linked".to_owned())))
+                .with_start_point(Some("HEAD".to_owned())),
+        )
         .expect("add linked");
     (tmp, main, linked, main_repo)
 }

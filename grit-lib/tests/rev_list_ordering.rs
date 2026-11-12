@@ -274,10 +274,7 @@ fn default_order_differs_from_date_order_on_skew_dag() {
         &["--date-order"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            ordering: OrderingMode::DateOrderWalk,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_ordering(OrderingMode::DateOrderWalk),
         "skew dag --date-order",
     );
 }
@@ -306,11 +303,9 @@ fn t6003_topo_date_author_date_order_match_git() {
                 git_args.push("--reverse");
             }
             git_args.push("main");
-            let opts = RevListOptions {
-                ordering,
-                reverse,
-                ..RevListOptions::default()
-            };
+            let opts = RevListOptions::default()
+                .with_ordering(ordering)
+                .with_reverse(reverse);
             assert_rev_list_commits_match_git(
                 wt,
                 &grit,
@@ -340,10 +335,7 @@ fn t6013_reverse_matches_git() {
 
     let grit = open_grit_repo(wt);
     let git_args = ["--reverse", "main"];
-    let opts = RevListOptions {
-        reverse: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_reverse(true);
     assert_rev_list_commits_match_git(
         wt,
         &grit,
@@ -361,13 +353,11 @@ fn t6013_reverse_matches_git() {
         "--",
         "foo",
     ];
-    let path_opts = RevListOptions {
-        reverse: true,
-        full_history: true,
-        parent_rewrite: true,
-        paths: vec!["foo".to_owned()],
-        ..RevListOptions::default()
-    };
+    let path_opts = RevListOptions::default()
+        .with_reverse(true)
+        .with_full_history(true)
+        .with_parent_rewrite(true)
+        .with_paths(vec!["foo".to_owned()]);
     assert_rev_list_commits_match_git(
         wt,
         &grit,
@@ -411,14 +401,12 @@ fn t6013_reverse_matches_git() {
             "foo",
         ],
     );
-    let boundary_opts = RevListOptions {
-        reverse: true,
-        full_history: true,
-        boundary: true,
-        parent_rewrite: true,
-        paths: vec!["foo".to_owned()],
-        ..RevListOptions::default()
-    };
+    let boundary_opts = RevListOptions::default()
+        .with_reverse(true)
+        .with_full_history(true)
+        .with_boundary(true)
+        .with_parent_rewrite(true)
+        .with_paths(vec!["foo".to_owned()]);
     for use_graph in [false, true] {
         if use_graph {
             git_commit_graph_write(wt);
@@ -483,14 +471,12 @@ fn t6013_max_count_boundary_path_limited_parents_match_git() {
         "foo",
     ];
     let git_oids = support::git_rev_list(wt, &git_args);
-    let opts = RevListOptions {
-        max_count: Some(1),
-        boundary: true,
-        full_history: true,
-        parent_rewrite: true,
-        paths: vec!["foo".to_owned()],
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_max_count(Some(1))
+        .with_boundary(true)
+        .with_full_history(true)
+        .with_parent_rewrite(true)
+        .with_paths(vec!["foo".to_owned()]);
     for use_graph in [false, true] {
         if use_graph {
             git_commit_graph_write(wt);
@@ -538,11 +524,9 @@ fn t6005_max_count_skip_match_git() {
             git_args.insert(0, "--skip".to_owned());
         }
         let git_arg_refs: Vec<&str> = git_args.iter().map(String::as_str).collect();
-        let opts = RevListOptions {
-            max_count: max,
-            skip,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default()
+            .with_max_count(max)
+            .with_skip(skip);
         assert_rev_list_commits_match_git(
             wt,
             &grit,
@@ -558,10 +542,7 @@ fn t6005_max_count_skip_match_git() {
         .trim()
         .parse()
         .expect("count");
-    let opts = RevListOptions {
-        count: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_count(true);
     let grit_count = grit
         .revwalk()
         .rev_list(
@@ -600,10 +581,7 @@ fn t6009_first_parent_min_max_parents_match_git() {
         &["--first-parent", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            first_parent: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_first_parent(true),
         "t6009 first-parent",
     );
 
@@ -614,10 +592,7 @@ fn t6009_first_parent_min_max_parents_match_git() {
         &["--min-parents=3", "octopus"],
         &[String::from("octopus")],
         &[],
-        RevListOptions {
-            min_parents: Some(3),
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_min_parents(Some(3)),
         "t6009 min-parents octopus",
     );
 
@@ -627,10 +602,7 @@ fn t6009_first_parent_min_max_parents_match_git() {
         &["--max-parents=1", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            max_parents: Some(1),
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_max_parents(Some(1)),
         "t6009 max-parents",
     );
 }
@@ -666,10 +638,7 @@ fn t6019_ancestry_path_matches_git() {
     let range = format!("{d}..{m}");
     let git_args = ["--ancestry-path", &range];
     let (pos, neg) = split_revision_token(&range);
-    let opts = RevListOptions {
-        ancestry_path: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_ancestry_path(true);
     assert_rev_list_commits_match_git(
         wt,
         &grit,
@@ -700,11 +669,9 @@ fn t6100_in_order_matches_git() {
         .filter_map(|line| line.split_whitespace().next()?.parse().ok())
         .collect();
 
-    let opts = RevListOptions {
-        objects: true,
-        in_commit_order: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_objects(true)
+        .with_in_commit_order(true);
     for use_graph in [false, true] {
         if use_graph {
             git_commit_graph_write(wt);
@@ -775,10 +742,7 @@ fn t6001_grafts_and_replace_refs_match_git() {
         &["--parents", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            parent_rewrite: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_parent_rewrite(true),
         "t6001 graft --parents",
     );
 
@@ -935,12 +899,10 @@ fn symmetric_diff_left_right_cherry_mark_match_git() {
     let (main_ref, side_ref) = cherry_symmetric_fixture(wt);
     let grit = open_grit_repo(wt);
     let token = format!("{main_ref}...{side_ref}");
-    let mut opts = RevListOptions {
-        left_right: true,
-        left_right_explicit: true,
-        cherry_mark: true,
-        ..RevListOptions::default()
-    };
+    let mut opts = RevListOptions::default()
+        .with_left_right(true)
+        .with_left_right_explicit(true)
+        .with_cherry_mark(true);
     let (pos, neg) = expand_token_for_rev_list(&grit, &token, &mut opts).expect("symmetric");
     let git_args = ["--left-right", "--cherry-mark", &token];
     let git_lines = git_rev_list_lines(wt, &git_args);
@@ -1187,10 +1149,7 @@ fn t6000_misc_ranges_and_boundary_match_git() {
     );
 
     git(wt, &["tag", "root", &oids["a"].to_hex()]);
-    let opts = RevListOptions {
-        boundary: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_boundary(true);
     let git_boundary = support::git_rev_list(wt, &["--boundary", "main", "^root"]);
     for use_graph in [false, true] {
         if use_graph {
@@ -1220,10 +1179,7 @@ fn t6014_rev_list_all_match_git() {
     let wt = repo.worktree();
     dual_root_dag(wt);
     let grit = open_grit_repo(wt);
-    let opts = RevListOptions {
-        all_refs: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default().with_all_refs(true);
     assert_rev_list_commits_match_git(wt, &grit, &["--all"], &[], &[], opts, "t6014 --all");
 }
 
@@ -1239,11 +1195,9 @@ fn t4217_log_limit_since_until_match_git() {
     git(wt, &["update-ref", "refs/heads/main", &new_tip.to_hex()]);
     let grit = open_grit_repo(wt);
 
-    let opts = RevListOptions {
-        since_cutoff: Some(1_400_000_000),
-        until_cutoff: Some(1_900_000_000),
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_since_cutoff(Some(1_400_000_000))
+        .with_until_cutoff(Some(1_900_000_000));
     assert_rev_list_commits_match_git(
         wt,
         &grit,
@@ -1267,11 +1221,9 @@ fn t4217_since_with_large_max_count_match_git() {
     git(wt, &["update-ref", "refs/heads/main", &new_tip.to_hex()]);
     let grit = open_grit_repo(wt);
 
-    let opts = RevListOptions {
-        since_cutoff: Some(1_400_000_000),
-        max_count: Some(100_000),
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_since_cutoff(Some(1_400_000_000))
+        .with_max_count(Some(100_000));
     assert_rev_list_commits_match_git(
         wt,
         &grit,
@@ -1310,11 +1262,9 @@ fn t4217_boundary_since_until_match_git() {
 
     let since_git = format!("--since={CUTOFF}");
     let git_since_boundary = git_rev_list(wt, &["--boundary", since_git.as_str(), "main"]);
-    let since_opts = RevListOptions {
-        boundary: true,
-        since_cutoff: Some(CUTOFF),
-        ..RevListOptions::default()
-    };
+    let since_opts = RevListOptions::default()
+        .with_boundary(true)
+        .with_since_cutoff(Some(CUTOFF));
     for use_graph in [false, true] {
         if use_graph {
             git_commit_graph_write(wt);
@@ -1341,11 +1291,9 @@ fn t4217_boundary_since_until_match_git() {
 
     let until_git = format!("--until={CUTOFF}");
     let git_until_boundary = git_rev_list(wt, &["--boundary", until_git.as_str(), "main"]);
-    let until_opts = RevListOptions {
-        boundary: true,
-        until_cutoff: Some(CUTOFF),
-        ..RevListOptions::default()
-    };
+    let until_opts = RevListOptions::default()
+        .with_boundary(true)
+        .with_until_cutoff(Some(CUTOFF));
     for use_graph in [false, true] {
         if use_graph {
             git_commit_graph_write(wt);
@@ -1388,12 +1336,10 @@ fn simplify_by_decoration_boundary_match_git() {
     let mut decorated = HashSet::new();
     decorated.insert(root);
     decorated.insert(tip);
-    let opts = RevListOptions {
-        boundary: true,
-        simplify_by_decoration: true,
-        simplify_by_decoration_oids: decorated,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_boundary(true)
+        .with_simplify_by_decoration(true)
+        .with_simplify_by_decoration_oids(decorated);
 
     for use_graph in [false, true] {
         if use_graph {
@@ -1436,10 +1382,7 @@ fn ordering_identical_with_and_without_commit_graph() {
             OrderingMode::DateOrderWalk => vec!["--date-order", "main"],
             _ => vec!["main"],
         };
-        let opts = RevListOptions {
-            ordering,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default().with_ordering(ordering);
         assert_rev_list_commits_match_git(
             wt,
             &grit,
@@ -1468,10 +1411,7 @@ fn skewed_and_equal_commit_dates_order_like_git() {
         &["--author-date-order", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            ordering: OrderingMode::AuthorDateWalk,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_ordering(OrderingMode::AuthorDateWalk),
         "skewed author dates",
     );
 }
@@ -1489,10 +1429,7 @@ fn multiple_roots_and_octopus_merge_order_match_git() {
         &["--topo-order", "octopus"],
         &[String::from("octopus")],
         &[],
-        RevListOptions {
-            ordering: OrderingMode::Topo,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_ordering(OrderingMode::Topo),
         "octopus topo",
     );
     assert_rev_list_commits_match_git(
@@ -1565,10 +1502,7 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
         &["--merges", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            min_parents: Some(2),
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_min_parents(Some(2)),
         "merges-only",
     );
     assert_rev_list_commits_match_git(
@@ -1577,11 +1511,9 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
         &["--merges", "--max-count=4", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            min_parents: Some(2),
-            max_count: Some(4),
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_min_parents(Some(2))
+            .with_max_count(Some(4)),
         "merges max-count",
     );
     assert_rev_list_commits_match_git(
@@ -1590,11 +1522,9 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
         &["--no-merges", "--max-count=6", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            max_parents: Some(1),
-            max_count: Some(6),
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_max_parents(Some(1))
+            .with_max_count(Some(6)),
         "no-merges max-count",
     );
     assert_rev_list_commits_match_git(
@@ -1603,11 +1533,9 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
         &["--reverse", "--topo-order", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            reverse: true,
-            ordering: OrderingMode::Topo,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_reverse(true)
+            .with_ordering(OrderingMode::Topo),
         "reverse topo",
     );
     assert_rev_list_commits_match_git(
@@ -1616,12 +1544,10 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
         &["--max-count=5", "--skip=2", "--topo-order", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            max_count: Some(5),
-            skip: 2,
-            ordering: OrderingMode::Topo,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_max_count(Some(5))
+            .with_skip(2)
+            .with_ordering(OrderingMode::Topo),
         "topo skip max",
     );
     assert_rev_list_commits_match_git(
@@ -1630,11 +1556,9 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
         &["--first-parent", "--max-count=10", "main"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            first_parent: true,
-            max_count: Some(10),
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_first_parent(true)
+            .with_max_count(Some(10)),
         "first-parent max",
     );
 
@@ -1647,10 +1571,7 @@ fn rev_list_broad_ordering_and_limit_flags_match_git() {
         .rev_list(
             &[String::from("main")],
             &[],
-            &RevListOptions {
-                count: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_count(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1687,12 +1608,10 @@ fn symmetric_cherry_pick_and_left_right_filters_match_git() {
     let grit = open_grit_repo(wt);
     let token = format!("{main_ref}...{side_ref}");
 
-    let mut opts = RevListOptions {
-        left_right: true,
-        left_right_explicit: true,
-        cherry_pick: true,
-        ..RevListOptions::default()
-    };
+    let mut opts = RevListOptions::default()
+        .with_left_right(true)
+        .with_left_right_explicit(true)
+        .with_cherry_pick(true);
     let (pos, neg) = expand_token_for_rev_list(&grit, &token, &mut opts).expect("sym");
     assert_rev_list_commits_match_git(
         wt,
@@ -1704,11 +1623,9 @@ fn symmetric_cherry_pick_and_left_right_filters_match_git() {
         "cherry-pick",
     );
 
-    let mut left_opts = RevListOptions {
-        left_right: true,
-        left_only: true,
-        ..RevListOptions::default()
-    };
+    let mut left_opts = RevListOptions::default()
+        .with_left_right(true)
+        .with_left_only(true);
     let (pos, neg) = expand_token_for_rev_list(&grit, &token, &mut left_opts).expect("sym");
     assert_rev_list_commits_match_git(
         wt,
@@ -1720,11 +1637,9 @@ fn symmetric_cherry_pick_and_left_right_filters_match_git() {
         "left-only",
     );
 
-    let mut right_opts = RevListOptions {
-        left_right: true,
-        right_only: true,
-        ..RevListOptions::default()
-    };
+    let mut right_opts = RevListOptions::default()
+        .with_left_right(true)
+        .with_right_only(true);
     let (pos, neg) = expand_token_for_rev_list(&grit, &token, &mut right_opts).expect("sym");
     assert_rev_list_commits_match_git(
         wt,
@@ -1752,10 +1667,7 @@ fn path_limited_and_maximal_only_match_git() {
         &["main", "--", "tracked.txt"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            paths: vec!["tracked.txt".to_owned()],
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_paths(vec!["tracked.txt".to_owned()]),
         "path-limited default simplify",
     );
 
@@ -1765,11 +1677,9 @@ fn path_limited_and_maximal_only_match_git() {
         &["--full-history", "main", "--", "tracked.txt"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            paths: vec!["tracked.txt".to_owned()],
-            full_history: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_paths(vec!["tracked.txt".to_owned()])
+            .with_full_history(true),
         "path-limited full-history",
     );
 
@@ -1779,11 +1689,9 @@ fn path_limited_and_maximal_only_match_git() {
         &["--simplify-merges", "main", "--", "tracked.txt"],
         &[String::from("main")],
         &[],
-        RevListOptions {
-            paths: vec!["tracked.txt".to_owned()],
-            simplify_merges: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_paths(vec!["tracked.txt".to_owned()])
+            .with_simplify_merges(true),
         "path-limited simplify-merges",
     );
 }
@@ -1802,10 +1710,7 @@ fn rev_list_objects_and_filters_match_git() {
         .rev_list(
             &[String::from("HEAD")],
             &[],
-            &RevListOptions {
-                objects: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default().with_objects(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1824,11 +1729,9 @@ fn rev_list_objects_and_filters_match_git() {
         .rev_list(
             &[String::from("HEAD")],
             &[],
-            &RevListOptions {
-                objects: true,
-                filter: Some(ObjectFilter::BlobNone),
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default()
+                .with_objects(true)
+                .with_filter(Some(ObjectFilter::BlobNone)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1846,10 +1749,7 @@ fn rev_list_objects_and_filters_match_git() {
         &["--topo-order", "--author-date-order", "HEAD"],
         &[String::from("HEAD")],
         &[],
-        RevListOptions {
-            ordering: OrderingMode::AuthorDateTopo,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_ordering(OrderingMode::AuthorDateTopo),
         "author-date-topo",
     );
 
@@ -1862,11 +1762,9 @@ fn rev_list_objects_and_filters_match_git() {
         .rev_list(
             &[String::from("HEAD")],
             &[],
-            &RevListOptions {
-                count: true,
-                objects: true,
-                ..RevListOptions::default()
-            },
+            &RevListOptions::default()
+                .with_count(true)
+                .with_objects(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1882,54 +1780,28 @@ fn rev_list_option_smoke_exercises_library_paths() {
     let grit = open_grit_repo(wt);
     let specs = vec![String::from("main")];
     let combos: Vec<RevListOptions> = vec![
-        RevListOptions {
-            quiet: true,
-            count: true,
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            parent_rewrite: true,
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            sparse: true,
-            paths: vec!["f.txt".to_owned()],
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            show_pulls: true,
-            first_parent: true,
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            exclude_first_parent_only: true,
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            max_parents: Some(1),
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            objects: true,
-            filter: Some(ObjectFilter::parse("tree:2").expect("filter")),
-            filter_print_omitted: true,
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            objects: true,
-            no_object_names: true,
-            quiet: true,
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            ordering: OrderingMode::AuthorDateTopo,
-            ..RevListOptions::default()
-        },
-        RevListOptions {
-            all_refs: true,
-            count: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default().with_quiet(true).with_count(true),
+        RevListOptions::default().with_parent_rewrite(true),
+        RevListOptions::default()
+            .with_sparse(true)
+            .with_paths(vec!["f.txt".to_owned()]),
+        RevListOptions::default()
+            .with_show_pulls(true)
+            .with_first_parent(true),
+        RevListOptions::default().with_exclude_first_parent_only(true),
+        RevListOptions::default().with_max_parents(Some(1)),
+        RevListOptions::default()
+            .with_objects(true)
+            .with_filter(Some(ObjectFilter::parse("tree:2").expect("filter")))
+            .with_filter_print_omitted(true),
+        RevListOptions::default()
+            .with_objects(true)
+            .with_no_object_names(true)
+            .with_quiet(true),
+        RevListOptions::default().with_ordering(OrderingMode::AuthorDateTopo),
+        RevListOptions::default()
+            .with_all_refs(true)
+            .with_count(true),
     ];
     for opts in combos {
         let _ = grit
@@ -2031,10 +1903,7 @@ fn issue_1067_bounded_rev_list_matches_git_on_equal_dates() {
             git_args.insert(0, "--max-count".to_owned());
         }
         let git_arg_refs: Vec<&str> = git_args.iter().map(String::as_str).collect();
-        let opts = RevListOptions {
-            max_count: max,
-            ..RevListOptions::default()
-        };
+        let opts = RevListOptions::default().with_max_count(max);
         assert_rev_list_commits_match_git(
             wt,
             &grit,
@@ -2078,11 +1947,9 @@ fn exclude_first_parent_only_with_range_matches_git() {
         ],
         &[String::from("side")],
         &[String::from("main")],
-        RevListOptions {
-            max_count: Some(1),
-            exclude_first_parent_only: true,
-            ..RevListOptions::default()
-        },
+        RevListOptions::default()
+            .with_max_count(Some(1))
+            .with_exclude_first_parent_only(true),
         "exclude-first-parent-only",
     );
 }

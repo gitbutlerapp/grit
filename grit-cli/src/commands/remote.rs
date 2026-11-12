@@ -109,19 +109,22 @@ pub fn run_refs(remote_or_url: &str, cli: &RemoteRefsCliOptions) -> Result<Remot
     let protocol_version =
         grit_lib::remote::protocol::try_effective_client_protocol_version_from_config(&config)
             .context("could not read protocol.version")?;
-    let opts = ListRefsOptions {
-        prefixes: cli.prefixes.clone(),
-        heads: cli.heads,
-        tags: cli.tags,
-        peel: true,
-        sort: RefSort::default()
-            .with_key(sort_key)
-            .with_reverse(cli.reverse),
-        limit: cli.limit,
-        versionsort_suffixes: crate::context::config_strings(&config, "versionsort.suffix"),
-        protocol_version: Some(protocol_version),
-        ..Default::default()
-    };
+    let opts = ListRefsOptions::default()
+        .with_prefixes(cli.prefixes.clone())
+        .with_heads(cli.heads)
+        .with_tags(cli.tags)
+        .with_peel(true)
+        .with_sort(
+            RefSort::default()
+                .with_key(sort_key)
+                .with_reverse(cli.reverse),
+        )
+        .with_limit(cli.limit)
+        .with_versionsort_suffixes(crate::context::config_strings(
+            &config,
+            "versionsort.suffix",
+        ))
+        .with_protocol_version(Some(protocol_version));
     let remote = resolve_remote_argument(&config, remote_or_url).map_err(map_remote_error)?;
     let raw = remote
         .list_refs(repo.as_ref(), &opts, Some(&factory))
@@ -313,7 +316,7 @@ pub fn run_remove(name: &str, dry_run: bool) -> Result<RemoteOutcome> {
     let repo = context::discover()?;
     let removal = repo
         .remotes()
-        .remove(name, RemoveOptions { dry_run })
+        .remove(name, RemoveOptions::default().with_dry_run(dry_run))
         .map_err(|e| match e {
             grit_lib::error::Error::Remote(RemoteError::UnknownRemote { .. }) => {
                 anyhow::Error::from(RemoteUsageError).context(map_remote_error(e))
@@ -339,10 +342,9 @@ pub struct RemoteShowCliOptions {
 pub fn run_show(name: &str, cli: &RemoteShowCliOptions) -> Result<RemoteOutcome> {
     let factory = crate::context::http_client_factory();
     let repo = context::discover()?;
-    let options = InspectOptions {
-        query: cli.query,
-        limit: cli.limit,
-    };
+    let options = InspectOptions::default()
+        .with_query(cli.query)
+        .with_limit(cli.limit);
     let summary = repo
         .remotes()
         .inspect(name, &options, Some(&factory))

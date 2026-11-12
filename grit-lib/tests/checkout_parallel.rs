@@ -26,7 +26,9 @@ const PINNED_MTIME: FileTime = FileTime::from_unix_time(1_700_000_000, 0);
 const TEST_COMMITTER: &str = "Test <t@example.com> 1700000000 +0000";
 
 fn policy(threads: usize, min_items: Option<usize>) -> ThreadPolicy {
-    ThreadPolicy::with_threads_override(Some(threads)).min_items_override(min_items)
+    ThreadPolicy::default()
+        .with_threads_override(Some(threads))
+        .with_min_items_override(min_items)
 }
 
 fn open_with_policy(root: &Path, threads: usize, min_items: Option<usize>) -> Repository {

@@ -241,20 +241,17 @@ fn assert_rev_list_filter_matches_git(worktree: &Path, repo: &Repository, args: 
         Pathspec::scoped(parsed.paths.clone(), PathspecGlobalFlags::default())
     };
     let paths = repo.resolve_rev_walk_pathspecs(&path_ps).expect("paths");
-    let mut opts = RevListOptions {
-        max_count: parsed.max_count,
-        min_parents: parsed.min_parents,
-        max_parents: parsed.max_parents,
-        count: parsed.count,
-        since_cutoff: parsed.since_cutoff,
-        until_cutoff: parsed.until_cutoff,
-        commit_filter: parsed.filter,
-        paths,
-        paths_resolved_from_argv: !parsed.paths.is_empty(),
-        use_commit_graph: true,
-        use_commit_graph_bloom: !parsed.paths.is_empty(),
-        ..RevListOptions::default()
-    };
+    let mut opts = RevListOptions::default()
+        .with_max_count(parsed.max_count)
+        .with_min_parents(parsed.min_parents)
+        .with_max_parents(parsed.max_parents)
+        .with_count(parsed.count)
+        .with_since_cutoff(parsed.since_cutoff)
+        .with_until_cutoff(parsed.until_cutoff)
+        .with_commit_filter(parsed.filter)
+        .with_paths(paths)
+        .with_paths_resolved_from_argv(!parsed.paths.is_empty())
+        .with_use_commit_graph_bloom(!parsed.paths.is_empty());
     for use_graph in [false, true] {
         if use_graph {
             git_commit_graph_write(worktree);
@@ -582,11 +579,9 @@ fn mailmap_author_matches_git() {
             .rev_list(
                 &[String::from("main")],
                 &[],
-                &RevListOptions {
-                    commit_filter: Some(filter.clone()),
-                    use_commit_graph: use_graph,
-                    ..RevListOptions::default()
-                },
+                &RevListOptions::default()
+                    .with_commit_filter(Some(filter.clone()))
+                    .with_use_commit_graph(use_graph),
                 &mut NullProgress,
                 &CancelToken::never(),
             )
@@ -751,15 +746,13 @@ fn bounded_filters_retain_only_selected_rows_across_git_storage_formats() {
                             .rev_list(
                                 &["main".to_owned()],
                                 &[base.to_hex()],
-                                &RevListOptions {
-                                    max_count: Some(2),
-                                    skip,
-                                    reverse,
-                                    commit_filter: Some(Arc::clone(&filter)),
-                                    retain_commit_data: retain,
-                                    use_commit_graph: storage == "commit-graph",
-                                    ..Default::default()
-                                },
+                                &RevListOptions::default()
+                                    .with_max_count(Some(2))
+                                    .with_skip(skip)
+                                    .with_reverse(reverse)
+                                    .with_commit_filter(Some(Arc::clone(&filter)))
+                                    .with_retain_commit_data(retain)
+                                    .with_use_commit_graph(storage == "commit-graph"),
                                 &mut NullProgress,
                                 &CancelToken::never(),
                             )
@@ -1014,13 +1007,10 @@ fn bounded_filter_since_until_matches_git() {
             .map(String::as_str)
             .collect::<Vec<_>>(),
     );
-    let opts = RevListOptions {
-        max_count: None,
-        since_cutoff: parsed.since_cutoff,
-        commit_filter: parsed.filter,
-        use_commit_graph: false,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_since_cutoff(parsed.since_cutoff)
+        .with_commit_filter(parsed.filter)
+        .with_use_commit_graph(false);
     let result = repo
         .revwalk()
         .rev_list(
@@ -1126,13 +1116,11 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
             .map(String::as_str)
             .collect::<Vec<_>>(),
     );
-    let opts = RevListOptions {
-        max_count: parsed.max_count,
-        since_cutoff: parsed.since_cutoff,
-        commit_filter: parsed.filter,
-        use_commit_graph: false,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_max_count(parsed.max_count)
+        .with_since_cutoff(parsed.since_cutoff)
+        .with_commit_filter(parsed.filter)
+        .with_use_commit_graph(false);
     let result = repo
         .revwalk()
         .rev_list(
@@ -1158,13 +1146,11 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
             .map(String::as_str)
             .collect::<Vec<_>>(),
     );
-    let opts = RevListOptions {
-        count: true,
-        since_cutoff: parsed_count.since_cutoff,
-        commit_filter: parsed_count.filter,
-        use_commit_graph: false,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_count(true)
+        .with_since_cutoff(parsed_count.since_cutoff)
+        .with_commit_filter(parsed_count.filter)
+        .with_use_commit_graph(false);
     let git_n = git_rev_list_count(
         wt,
         &[
@@ -1191,13 +1177,9 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         .author("Alice")
         .build()
         .expect("filter");
-    let opts = RevListOptions {
-        max_count: Some(5000),
-        commit_filter: Some(Arc::new(list_filter)),
-        missing_action: MissingAction::Error,
-        use_commit_graph: true,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_max_count(Some(5000))
+        .with_commit_filter(Some(Arc::new(list_filter)));
     assert!(
         repo.revwalk()
             .rev_list(
@@ -1214,14 +1196,10 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         .author("Alice")
         .build()
         .expect("filter");
-    let opts = RevListOptions {
-        max_count: None,
-        since_cutoff: parsed.since_cutoff,
-        commit_filter: Some(Arc::new(list_filter)),
-        missing_action: MissingAction::Error,
-        use_commit_graph: false,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_since_cutoff(parsed.since_cutoff)
+        .with_commit_filter(Some(Arc::new(list_filter)))
+        .with_use_commit_graph(false);
     let result = repo
         .revwalk()
         .rev_list(
@@ -1237,13 +1215,10 @@ fn bounded_filter_since_frontier_avoids_missing_ancestor() {
         .author("Alice")
         .build()
         .expect("filter");
-    let opts = RevListOptions {
-        count: true,
-        commit_filter: Some(Arc::new(count_filter)),
-        missing_action: MissingAction::Error,
-        use_commit_graph: false,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_count(true)
+        .with_commit_filter(Some(Arc::new(count_filter)))
+        .with_use_commit_graph(false);
     assert!(
         repo.revwalk()
             .rev_list(
@@ -1479,16 +1454,13 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         Pathspec::scoped(parsed.paths.clone(), PathspecGlobalFlags::default())
     };
     let paths = repo.resolve_rev_walk_pathspecs(&path_ps).expect("paths");
-    let opts = RevListOptions {
-        max_count: Some(5000),
-        since_cutoff: parsed.since_cutoff,
-        commit_filter: Some(Arc::new(list_filter)),
-        paths,
-        paths_resolved_from_argv: true,
-        missing_action: MissingAction::Error,
-        use_commit_graph: false,
-        ..RevListOptions::default()
-    };
+    let opts = RevListOptions::default()
+        .with_max_count(Some(5000))
+        .with_since_cutoff(parsed.since_cutoff)
+        .with_commit_filter(Some(Arc::new(list_filter)))
+        .with_paths(paths)
+        .with_paths_resolved_from_argv(true)
+        .with_use_commit_graph(false);
     let result = repo
         .revwalk()
         .rev_list(
@@ -1521,20 +1493,18 @@ fn bounded_path_filter_since_frontier_avoids_missing_ancestor() {
         .author("Alice")
         .build()
         .expect("filter");
-    let opts = RevListOptions {
-        max_count: Some(5000),
-        commit_filter: Some(Arc::new(list_filter)),
-        paths: repo
-            .resolve_rev_walk_pathspecs(&Pathspec::scoped(
+    let opts = RevListOptions::default()
+        .with_max_count(Some(5000))
+        .with_commit_filter(Some(Arc::new(list_filter)))
+        .with_paths(
+            repo.resolve_rev_walk_pathspecs(&Pathspec::scoped(
                 ["frontier-path.txt".to_owned()],
                 PathspecGlobalFlags::default(),
             ))
             .expect("paths"),
-        paths_resolved_from_argv: true,
-        missing_action: MissingAction::Error,
-        use_commit_graph: false,
-        ..RevListOptions::default()
-    };
+        )
+        .with_paths_resolved_from_argv(true)
+        .with_use_commit_graph(false);
     assert!(
         repo.revwalk()
             .rev_list(

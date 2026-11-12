@@ -51,7 +51,7 @@ fn assert_shortlog_count_parity(root: &std::path::Path) -> grit_lib::error::Resu
         &["HEAD"],
         &walk,
         None,
-        GroupByAuthorOptions { count_only: true },
+        GroupByAuthorOptions::default().with_count_only(true),
     )?;
 
     let git_count: usize = git_stdout(root, &["rev-list", "--count", "HEAD"])
@@ -194,13 +194,13 @@ fn group_by_author_count_only_matches_full_for_case_distinct_authors() -> grit_l
         &["HEAD"],
         &walk,
         None,
-        GroupByAuthorOptions { count_only: false },
+        GroupByAuthorOptions::default(),
     )?;
     let counts = repo.revwalk().group_by_author_in_walk(
         &["HEAD"],
         &walk,
         None,
-        GroupByAuthorOptions { count_only: true },
+        GroupByAuthorOptions::default().with_count_only(true),
     )?;
 
     assert_eq!(full.len(), 2);
@@ -332,7 +332,7 @@ fn group_by_author_accepts_non_utf8_author_header() -> grit_lib::error::Result<(
     let groups = repo.revwalk().group_by_author(
         std::slice::from_ref(&oid),
         None,
-        GroupByAuthorOptions { count_only: true },
+        GroupByAuthorOptions::default().with_count_only(true),
     )?;
     assert_eq!(groups.len(), 1);
     assert_eq!(groups[0].count, 1);

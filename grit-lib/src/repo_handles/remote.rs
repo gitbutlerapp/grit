@@ -811,9 +811,19 @@ fn head_branch_from_advertisement(refs: &[RemoteRef]) -> Option<String> {
 
 /// Options for [`RepositoryRemotes::remove`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RemoveOptions {
     /// When true, report what would change without writing config or refs.
     pub dry_run: bool,
+}
+
+impl RemoveOptions {
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
 }
 
 /// Outcome of removing a remote.

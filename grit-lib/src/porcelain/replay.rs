@@ -46,6 +46,7 @@ pub enum ReplayDirection {
 
 /// Inputs for [`replay_commit`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct ReplayRequest {
     /// Commit object to replay (at most one parent; root commits are allowed for pick).
     pub commit: ObjectId,
@@ -55,6 +56,53 @@ pub struct ReplayRequest {
     pub committer: Signature,
     /// When set, replaces the default commit message (pick: source message; revert: revert template).
     pub message_override: Option<String>,
+}
+
+impl ReplayRequest {
+    /// Creates a [`ReplayRequest`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `commit`: commit object to replay (at most one parent; root commits are allowed for pick).
+    /// - `direction`: pick or revert semantics for the three-way merge and commit message.
+    /// - `committer`: committer for the replayed commit and branch reflog entries.
+    #[must_use]
+    pub fn new(commit: ObjectId, direction: ReplayDirection, committer: Signature) -> Self {
+        Self {
+            commit,
+            direction,
+            committer,
+            message_override: None,
+        }
+    }
+
+    /// Sets [`commit`](Self::commit).
+    #[must_use]
+    pub const fn with_commit(mut self, commit: ObjectId) -> Self {
+        self.commit = commit;
+        self
+    }
+
+    /// Sets [`direction`](Self::direction).
+    #[must_use]
+    pub fn with_direction(mut self, direction: ReplayDirection) -> Self {
+        self.direction = direction;
+        self
+    }
+
+    /// Sets [`committer`](Self::committer).
+    #[must_use]
+    pub fn with_committer(mut self, committer: Signature) -> Self {
+        self.committer = committer;
+        self
+    }
+
+    /// Sets [`message_override`](Self::message_override).
+    #[must_use]
+    pub fn with_message_override(mut self, message_override: Option<String>) -> Self {
+        self.message_override = message_override;
+        self
+    }
 }
 
 /// Result of [`replay_commit`].

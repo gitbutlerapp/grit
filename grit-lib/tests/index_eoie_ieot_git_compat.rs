@@ -60,7 +60,9 @@ fn load_config(repo: &Repository) -> ConfigSet {
 }
 
 fn grit_parse_parallel(bytes: &[u8], algo: HashAlgo, cfg: &ConfigSet, threads: usize) -> Index {
-    let ctx = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(threads)));
+    let ctx = IndexParseContext::from_policy(
+        ThreadPolicy::default().with_threads_override(Some(threads)),
+    );
     Index::parse(
         bytes,
         &grit_lib::index::IndexParseOptions::default()
@@ -195,7 +197,7 @@ fn grit_write_git_accepts(version: u32) {
         });
     }
 
-    let repo = repo.with_thread_policy(ThreadPolicy::with_threads_override(Some(4)));
+    let repo = repo.with_thread_policy(ThreadPolicy::default().with_threads_override(Some(4)));
     repo.index()
         .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
         .expect("write");
@@ -254,7 +256,7 @@ fn grit_write_v4_ieot_git_reads_with_one_index_thread() {
         });
     }
 
-    let repo = repo.with_thread_policy(ThreadPolicy::with_threads_override(Some(4)));
+    let repo = repo.with_thread_policy(ThreadPolicy::default().with_threads_override(Some(4)));
     repo.index()
         .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
         .expect("write v4 ieot index");
@@ -317,7 +319,7 @@ fn parallel_ieot_load_preserves_fsmonitor_valid_bits() {
     idx.set_fsmonitor_last_update(Some("builtin:fake".to_owned()));
     idx.sync_fsmonitor_dirty_bitmap();
 
-    let repo = repo.with_thread_policy(ThreadPolicy::with_threads_override(Some(4)));
+    let repo = repo.with_thread_policy(ThreadPolicy::default().with_threads_override(Some(4)));
     repo.index()
         .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())
         .expect("write ieot index");
@@ -372,7 +374,8 @@ fn invalid_eoie_falls_back_to_serial_parse() {
     )
     .expect("open");
     let cfg = load_config(&repo);
-    let ctx = IndexParseContext::from_policy(ThreadPolicy::with_threads_override(Some(4)));
+    let ctx =
+        IndexParseContext::from_policy(ThreadPolicy::default().with_threads_override(Some(4)));
     let parsed = Index::parse(
         &bytes,
         &grit_lib::index::IndexParseOptions::default()

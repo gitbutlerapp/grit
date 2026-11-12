@@ -189,11 +189,9 @@ fn remove_cached_with_git_index_file_edits_temp_index_only() {
     let repo = open_with_index(&root, &alt_index);
     repo.checkout()
         .remove_paths(
-            &RemoveOptions {
-                pathspecs: vec!["a".into()],
-                cached: true,
-                ..Default::default()
-            },
+            &RemoveOptions::default()
+                .with_pathspecs(vec!["a".into()])
+                .with_cached(true),
             &grit_lib::progress::CancelToken::never(),
         )
         .expect("rm cached");

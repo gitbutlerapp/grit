@@ -445,10 +445,8 @@ fn write_merge_tree_and_predict_merge_follow_the_config() {
         }
     );
 
-    let off = MergePredictionOptions {
-        directory_renames: Some(DirectoryRenameMode::Off),
-        ..MergePredictionOptions::default()
-    };
+    let off =
+        MergePredictionOptions::default().with_directory_renames(Some(DirectoryRenameMode::Off));
     fx.set_config(Some("false"));
     let off_oracle = git_merge_tree_oracle(fx.root(), None, &fx.ours, &fx.theirs, MergeFavor::None);
     fx.set_config(Some("true"));
@@ -591,12 +589,11 @@ fn pick_of_the_added_file_follows_the_rename() {
     let fx = fixture(Scenario::Basic);
     let outcome = replay_commit(
         &fx.repo(),
-        &ReplayRequest {
-            commit: fx.theirs,
-            direction: ReplayDirection::Pick,
-            committer: COMMITTER.parse().expect("COMMITTER"),
-            message_override: None,
-        },
+        &ReplayRequest::new(
+            fx.theirs,
+            ReplayDirection::Pick,
+            COMMITTER.parse().expect("COMMITTER"),
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

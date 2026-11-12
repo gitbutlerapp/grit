@@ -1257,11 +1257,42 @@ pub(crate) fn verify_ref_available_for_create(
 
 /// One ref create/update/delete in a batch transaction (see [`crate::gc::update_refs`]).
 #[derive(Clone, Debug)]
+#[non_exhaustive]
 pub struct RefBatchItem {
     /// Full ref name (e.g. `refs/heads/main`).
     pub name: String,
     /// New oid to write, or `None` to delete the ref.
     pub new_oid: Option<ObjectId>,
+}
+
+impl RefBatchItem {
+    /// Creates a [`RefBatchItem`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: full ref name (e.g.
+    /// - `new_oid`: new oid to write, or `None` to delete the ref.
+    #[must_use]
+    pub fn new(name: impl Into<String>, new_oid: Option<ObjectId>) -> Self {
+        Self {
+            name: name.into(),
+            new_oid,
+        }
+    }
+
+    /// Sets [`name`](Self::name).
+    #[must_use]
+    pub fn with_name(mut self, name: String) -> Self {
+        self.name = name;
+        self
+    }
+
+    /// Sets [`new_oid`](Self::new_oid).
+    #[must_use]
+    pub const fn with_new_oid(mut self, new_oid: Option<ObjectId>) -> Self {
+        self.new_oid = new_oid;
+        self
+    }
 }
 
 /// Verify that every *new* ref in a batch can be created without D/F or namespace

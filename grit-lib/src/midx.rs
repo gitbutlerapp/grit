@@ -66,6 +66,7 @@ struct MidxEntry {
 
 /// Options for writing a multi-pack index (extension of the simple writer).
 #[derive(Clone, Default)]
+#[non_exhaustive]
 pub struct WriteMultiPackIndexOptions {
     /// When set, objects also present in other packs are taken from this pack
     /// (`pack_names` index in the sorted name list).
@@ -91,6 +92,70 @@ pub struct WriteMultiPackIndexOptions {
     pub version: Option<u8>,
     /// When set, non-fatal MIDX write warnings are reported here instead of being discarded.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+}
+
+impl WriteMultiPackIndexOptions {
+    /// Sets [`preferred_pack_idx`](Self::preferred_pack_idx).
+    #[must_use]
+    pub const fn with_preferred_pack_idx(mut self, preferred_pack_idx: Option<u32>) -> Self {
+        self.preferred_pack_idx = preferred_pack_idx;
+        self
+    }
+
+    /// Sets [`preferred_pack_name`](Self::preferred_pack_name).
+    #[must_use]
+    pub fn with_preferred_pack_name(mut self, preferred_pack_name: Option<String>) -> Self {
+        self.preferred_pack_name = preferred_pack_name;
+        self
+    }
+
+    /// Sets [`pack_names_subset_ordered`](Self::pack_names_subset_ordered).
+    #[must_use]
+    pub fn with_pack_names_subset_ordered(
+        mut self,
+        pack_names_subset_ordered: Option<Vec<String>>,
+    ) -> Self {
+        self.pack_names_subset_ordered = pack_names_subset_ordered;
+        self
+    }
+
+    /// Sets [`write_bitmap`](Self::write_bitmap).
+    #[must_use]
+    pub const fn with_write_bitmap(mut self, write_bitmap: bool) -> Self {
+        self.write_bitmap = write_bitmap;
+        self
+    }
+
+    /// Sets [`incremental`](Self::incremental).
+    #[must_use]
+    pub const fn with_incremental(mut self, incremental: bool) -> Self {
+        self.incremental = incremental;
+        self
+    }
+
+    /// Sets [`write_rev_sidecar`](Self::write_rev_sidecar).
+    #[must_use]
+    pub const fn with_write_rev_sidecar(mut self, write_rev_sidecar: bool) -> Self {
+        self.write_rev_sidecar = write_rev_sidecar;
+        self
+    }
+
+    /// Sets [`version`](Self::version).
+    #[must_use]
+    pub fn with_version(mut self, version: Option<u8>) -> Self {
+        self.version = version;
+        self
+    }
+
+    /// Sets [`diagnostics`](Self::diagnostics).
+    #[must_use]
+    pub fn with_diagnostics(
+        mut self,
+        diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    ) -> Self {
+        self.diagnostics = diagnostics;
+        self
+    }
 }
 
 /// Validate a requested on-disk MIDX version, using `default` when none was requested.

@@ -50,11 +50,9 @@ fn dry_run_clean(root: &Path) -> Duration {
     let outcome = repo
         .checkout()
         .clean(
-            &CleanOptions {
-                directories: true,
-                dry_run: true,
-                ..CleanOptions::default()
-            },
+            &CleanOptions::default()
+                .with_directories(true)
+                .with_dry_run(true),
             &mut NullProgress,
             &CancelToken::never(),
         )
