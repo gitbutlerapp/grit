@@ -120,11 +120,9 @@ fn grit_blame_range(
         .diff()
         .blame(
             file,
-            &BlameOptions {
-                start: Some(start),
-                line_range: Some(range),
-                ..Default::default()
-            },
+            &BlameOptions::default()
+                .with_start(Some(start))
+                .with_line_range(Some(range)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -330,10 +328,7 @@ fn packed_deep_history_range_matches_git_across_pack_layouts() {
                 .diff()
                 .blame(
                     "target.txt",
-                    &BlameOptions {
-                        line_range: Some(1..=3),
-                        ..Default::default()
-                    },
+                    &BlameOptions::default().with_line_range(Some(1..=3)),
                     &mut NullProgress,
                     &CancelToken::never(),
                 )
@@ -397,10 +392,7 @@ fn ranged_blame_visits_history_across_many_packs() {
             .diff()
             .blame(
                 "target.txt",
-                &BlameOptions {
-                    line_range: Some(1..=3),
-                    ..Default::default()
-                },
+                &BlameOptions::default().with_line_range(Some(1..=3)),
                 &mut NullProgress,
                 &CancelToken::never(),
             )

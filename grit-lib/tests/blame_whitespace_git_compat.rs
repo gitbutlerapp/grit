@@ -112,10 +112,7 @@ fn grit_blame_w(repo: &Repository, file: &str) -> Vec<PorcelainLine> {
         .diff()
         .blame(
             file,
-            &BlameOptions {
-                whitespace: WhitespaceMode::ignore_all_space(),
-                ..Default::default()
-            },
+            &BlameOptions::default().with_whitespace(WhitespaceMode::ignore_all_space()),
             &mut NullProgress,
             &CancelToken::never(),
         )

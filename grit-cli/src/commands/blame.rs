@@ -97,12 +97,10 @@ pub fn run(
         None if explicit_rev.is_none() && repo.work_tree().is_some() => BlameFinalSource::Worktree,
         None => BlameFinalSource::Revision,
     };
-    let mut options = BlameOptions {
-        start: Some(start),
-        final_source,
-        now: Some(now),
-        ..BlameOptions::default()
-    };
+    let mut options = BlameOptions::default()
+        .with_start(Some(start))
+        .with_final_source(final_source)
+        .with_now(Some(now));
 
     let blame_path = if repo.work_tree().is_some() {
         repo.resolve_worktree_pathspec(&file, repo.pathspec_argv_prefix(&file))

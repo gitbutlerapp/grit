@@ -254,10 +254,7 @@ fn drop_and_squash_on_memory_backends_move_refs_and_worktree() {
         .history()
         .squash(
             &[range.as_str()],
-            &SquashOptions {
-                message: SquashMessage::Custom("squashed\n".into()),
-                rewrite: rewrite_opts(),
-            },
+            &SquashOptions::new(SquashMessage::Custom("squashed\n".into()), rewrite_opts()),
         )
         .expect("squash plan");
     let applied = apply(&repo, &plan, &apply_opts("squash", None)).expect("squash");
@@ -296,16 +293,11 @@ fn clean_start_rebase_on_memory_backends_moves_the_branch_in_the_store() {
     let outcome = repo
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                request: RebaseRequest {
-                    upstream: side,
-                    onto: None,
-                    branch_tip: main_only,
-                },
-                rebase: RebaseOntoOptions::new(rewrite_opts().with_scope(RefScope::Head)),
-                apply: apply_opts("rebase", Some("rebase")),
-                exec: None,
-            },
+            &StartRebaseOptions::new(
+                RebaseRequest::new(side, main_only),
+                RebaseOntoOptions::new(rewrite_opts().with_scope(RefScope::Head)),
+                apply_opts("rebase", Some("rebase")),
+            ),
             repo.command_runner().as_ref(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -392,9 +384,7 @@ fn rebase_exec_detaches_and_restores_head_in_the_store() {
         .history()
         .verify_rebase(
             &mut plan,
-            &ExecSpec {
-                commands: vec!["test -f f2".into()],
-            },
+            &ExecSpec::default().with_commands(vec!["test -f f2".into()]),
             &rewrite_opts(),
             system_command_runner().as_ref(),
         )

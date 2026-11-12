@@ -215,16 +215,7 @@ fn history_change_ids_survive_every_rewrite() {
     git(wt, &["add", "fix.txt"]);
     let plan = grit
         .history()
-        .fixup(
-            f1,
-            &FixupOptions {
-                message: None,
-                empty: EmptyPolicy::Drop,
-                rewrite: rewrite_opts(2),
-                selection: None,
-                pathspecs: Vec::new(),
-            },
-        )
+        .fixup(f1, &FixupOptions::new(rewrite_opts(2)))
         .expect("fixup");
     let new_f1 = replacement_id(&plan, f1);
     grit.history()
@@ -262,10 +253,7 @@ fn history_change_ids_survive_every_rewrite() {
     git(wt, &["add", "absorb.txt"]);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(base),
-            rewrite: rewrite_opts(3),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts(3)).with_base(Some(base)))
         .expect("absorb");
     grit.history()
         .apply_absorb(
@@ -349,10 +337,7 @@ fn history_change_ids_survive_every_rewrite() {
         .history()
         .squash(
             &[&format!("{}..{}", s1.to_hex(), s3.to_hex())],
-            &SquashOptions {
-                message: SquashMessage::Oldest,
-                rewrite: rewrite_opts(6),
-            },
+            &SquashOptions::new(SquashMessage::Oldest, rewrite_opts(6)),
         )
         .expect("squash");
     let new_s1 = replacement_id(&plan, s1);
@@ -381,9 +366,7 @@ fn history_change_ids_survive_every_rewrite() {
             head,
             &["split-a".to_string()],
             "inserted\n".into(),
-            &SplitOptions {
-                rest_message: Some("rest\n".into()),
-            },
+            &SplitOptions::default().with_rest_message(Some("rest\n".into())),
             &rewrite_opts(7),
         )
         .expect("split");
@@ -590,13 +573,7 @@ fn fixup_hunks_preserves_change_id() {
         .history()
         .fixup(
             pick1,
-            &FixupOptions {
-                message: None,
-                empty: EmptyPolicy::Drop,
-                rewrite: rewrite_opts(1),
-                selection: Some(selection.clone()),
-                pathspecs: Vec::new(),
-            },
+            &FixupOptions::new(rewrite_opts(1)).with_selection(Some(selection.clone())),
         )
         .expect("fixup hunks");
     let new_pick1 = replacement_id(&plan, pick1);

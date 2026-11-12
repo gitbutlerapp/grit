@@ -16,7 +16,8 @@ use super::Diff;
 use super::DiffEntry;
 
 /// Options for [`Diff::commit_files_many`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CommitFilesManyOptions {
     /// Line diff and rename settings.
     pub diff_options: DiffOptions,
@@ -25,6 +26,29 @@ pub struct CommitFilesManyOptions {
     /// When set, merge commits (2+ parents) produce empty file lists for every detail level
     /// (like `git log` without `-m`, `-c`, or `--cc`).
     pub skip_merge_patches: bool,
+}
+
+impl CommitFilesManyOptions {
+    /// Sets [`diff_options`](Self::diff_options).
+    #[must_use]
+    pub fn with_diff_options(mut self, diff_options: DiffOptions) -> Self {
+        self.diff_options = diff_options;
+        self
+    }
+
+    /// Sets [`detail`](Self::detail).
+    #[must_use]
+    pub fn with_detail(mut self, detail: DiffDetail) -> Self {
+        self.detail = detail;
+        self
+    }
+
+    /// Sets [`skip_merge_patches`](Self::skip_merge_patches).
+    #[must_use]
+    pub const fn with_skip_merge_patches(mut self, skip_merge_patches: bool) -> Self {
+        self.skip_merge_patches = skip_merge_patches;
+        self
+    }
 }
 
 /// One commit's diff output in [`Diff::commit_files_many`] (same order as input oids).
@@ -203,6 +227,7 @@ fn diff_one_commit(
 
 /// One commit's identity for [`Diff::commit_files_many_work`], avoiding a second ODB read.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CommitFilesManyInput {
     /// Commit object id (order matches the log walk).
     pub oid: ObjectId,
@@ -210,6 +235,41 @@ pub struct CommitFilesManyInput {
     pub parents: Vec<ObjectId>,
     /// Tree object id for this commit.
     pub tree: ObjectId,
+}
+
+impl CommitFilesManyInput {
+    /// Creates a [`CommitFilesManyInput`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `oid`: commit object id (order matches the log walk).
+    /// - `parents`: first-parent chain and other parents from the commit object.
+    /// - `tree`: tree object id for this commit.
+    #[must_use]
+    pub fn new(oid: ObjectId, parents: Vec<ObjectId>, tree: ObjectId) -> Self {
+        Self { oid, parents, tree }
+    }
+
+    /// Sets [`oid`](Self::oid).
+    #[must_use]
+    pub const fn with_oid(mut self, oid: ObjectId) -> Self {
+        self.oid = oid;
+        self
+    }
+
+    /// Sets [`parents`](Self::parents).
+    #[must_use]
+    pub fn with_parents(mut self, parents: Vec<ObjectId>) -> Self {
+        self.parents = parents;
+        self
+    }
+
+    /// Sets [`tree`](Self::tree).
+    #[must_use]
+    pub const fn with_tree(mut self, tree: ObjectId) -> Self {
+        self.tree = tree;
+        self
+    }
 }
 
 impl Diff<'_> {

@@ -183,6 +183,16 @@ fn collect_alternate_ref_oids_honors_prefix_config() {
 }
 
 #[test]
+fn ref_name_ref_debug_matches_ref_name() {
+    let owned = RefName::new("refs/heads/main").expect("valid ref name");
+    let borrowed = RefNameRef::new("refs/heads/main").expect("valid ref name");
+    assert_eq!(format!("{owned:?}"), r#"RefName("refs/heads/main")"#);
+    assert_eq!(format!("{borrowed:?}"), r#"RefNameRef("refs/heads/main")"#);
+    let as_ref: &RefNameRef = owned.as_ref();
+    assert_eq!(format!("{as_ref:?}"), format!("{borrowed:?}"));
+}
+
+#[test]
 fn ref_name_policy_edge_cases_for_coverage() {
     let format = RefNamePolicy::default();
     let storable = RefNamePolicy::default().storable();

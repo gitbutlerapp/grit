@@ -35,9 +35,19 @@ use super::types::{RewriteOptions, RewritePlan};
 
 /// Shell commands to run at each replayed commit during `rebase --exec`.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct ExecSpec {
     /// Commands executed in order at every rewritten commit (`sh -c`).
     pub commands: Vec<String>,
+}
+
+impl ExecSpec {
+    /// Sets [`commands`](Self::commands).
+    #[must_use]
+    pub fn with_commands(mut self, commands: Vec<String>) -> Self {
+        self.commands = commands;
+        self
+    }
 }
 
 /// One `--exec` invocation at a specific commit.

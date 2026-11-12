@@ -60,11 +60,8 @@ fn main() -> ExitCode {
         }
     };
 
-    let query = ReachabilityQuery {
-        wants: &[commit],
-        haves: &[],
-        filter: None,
-    };
+    let wants = [commit];
+    let query = ReachabilityQuery::new(&wants, &[]);
     match index.reachability(&repo, query, MissingAction::Error) {
         Ok(set) => {
             println!("reachable objects: {}", set.count());

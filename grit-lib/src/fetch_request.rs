@@ -134,11 +134,41 @@ pub struct FetchRemoteAdvertisement<'a> {
 
 /// Remote name and explicit refspec strings after parsing `grit fetch` positionals.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FetchInvocation {
     /// Configured remote name, URL, or filesystem path to fetch from.
     pub remote: String,
     /// Command-line refspecs (`main`, `refs/heads/x:refs/heads/y`, …). Empty uses configured refspecs.
     pub user_refspecs: Vec<String>,
+}
+
+impl FetchInvocation {
+    /// Creates a [`FetchInvocation`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `remote`: configured remote name, URL, or filesystem path to fetch from.
+    #[must_use]
+    pub fn new(remote: impl Into<String>) -> Self {
+        Self {
+            remote: remote.into(),
+            user_refspecs: Default::default(),
+        }
+    }
+
+    /// Sets [`remote`](Self::remote).
+    #[must_use]
+    pub fn with_remote(mut self, remote: String) -> Self {
+        self.remote = remote;
+        self
+    }
+
+    /// Sets [`user_refspecs`](Self::user_refspecs).
+    #[must_use]
+    pub fn with_user_refspecs(mut self, user_refspecs: Vec<String>) -> Self {
+        self.user_refspecs = user_refspecs;
+        self
+    }
 }
 
 /// Resolve the repository argument of fetch, pull, or a ref listing into a [`Remote`].

@@ -315,22 +315,17 @@ fn issue_2468_rebase_replays_git_rr_cache() {
     let repo = open_grit(&dir);
     let upstream = git_oid(dir.path(), "main");
     let tip = git_oid(dir.path(), "HEAD");
-    let opts = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: None,
-            branch_tip: tip,
-        },
-        rebase: RebaseOntoOptions::new(
+    let opts = StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip),
+        RebaseOntoOptions::new(
             RewriteOptions::new(ident())
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         )
         .with_skip_applied(false)
         .with_favor(Default::default()),
-        apply: grit_lib::revwalk::history::ApplyOptions::new(ident(), "rebase"),
-        exec: None,
-    };
+        grit_lib::revwalk::history::ApplyOptions::new(ident(), "rebase"),
+    );
     let out = repo
         .history()
         .start_rebase(

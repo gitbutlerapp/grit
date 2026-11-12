@@ -804,12 +804,12 @@ fn squash_fold_preserves_oldest_change_id() {
         .history()
         .squash(
             &[range.as_str()],
-            &SquashOptions {
-                message: SquashMessage::Custom("squashed\n".into()),
-                rewrite: RewriteOptions::new(ident())
+            &SquashOptions::new(
+                SquashMessage::Custom("squashed\n".into()),
+                RewriteOptions::new(ident())
                     .with_scope(RefScope::Head)
                     .with_sign(false),
-            },
+            ),
         )
         .expect("squash plan");
     let row = plan

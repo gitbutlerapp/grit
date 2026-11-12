@@ -119,11 +119,7 @@ fn bench_history_plan_rebase(c: &mut Criterion) {
             .with_scope(RefScope::Head)
             .with_sign(false),
     );
-    let request = RebaseRequest {
-        upstream: fork,
-        onto: Some(onto),
-        branch_tip: tip,
-    };
+    let request = RebaseRequest::new(fork, tip).with_onto(Some(onto));
     let mut group = c.benchmark_group("history_plan_rebase");
     group.throughput(Throughput::Elements(onto_side as u64));
     group.bench_function("plan_with_10k_onto_side", |b| {

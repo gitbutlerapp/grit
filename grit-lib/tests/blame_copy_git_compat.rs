@@ -156,11 +156,9 @@ fn grit_blame_copy(
     grit_blame_with_options(
         repo,
         file,
-        &BlameOptions {
-            line_range,
-            copy_detection: level,
-            ..Default::default()
-        },
+        &BlameOptions::default()
+            .with_line_range(line_range)
+            .with_copy_detection(level),
     )
 }
 
@@ -472,10 +470,7 @@ fn within_file_block_move_matches_git_move_detection() {
     let grit_lines = grit_blame_with_options(
         &repo,
         "m.txt",
-        &BlameOptions {
-            move_detection: true,
-            ..Default::default()
-        },
+        &BlameOptions::default().with_move_detection(true),
     );
     assert_eq!(git_lines, grit_lines);
     assert!(
@@ -570,11 +565,9 @@ fn repeated_identical_lines_move_detection_one_row_per_file_line() {
         let grit_lines = grit_blame_with_options(
             &repo,
             "f",
-            &BlameOptions {
-                move_detection: extra.contains(&"-M"),
-                copy_detection: copy_level,
-                ..Default::default()
-            },
+            &BlameOptions::default()
+                .with_move_detection(extra.contains(&"-M"))
+                .with_copy_detection(copy_level),
         );
         assert_eq!(grit_lines.len(), file_line_count, "grit extra={extra:?}");
         assert_eq!(git_lines, grit_lines, "extra={extra:?}");
@@ -582,11 +575,7 @@ fn repeated_identical_lines_move_detection_one_row_per_file_line() {
     let plain = grit_blame_with_options(
         &repo,
         "f",
-        &BlameOptions {
-            move_detection: false,
-            copy_detection: CopyDetection::Off,
-            ..Default::default()
-        },
+        &BlameOptions::default().with_copy_detection(CopyDetection::Off),
     );
     assert_eq!(plain.len(), 2);
     assert!(
@@ -602,10 +591,7 @@ fn repeated_line_and_blank_move_detection_matches_git() {
     let grit_lines = grit_blame_with_options(
         &repo,
         "f",
-        &BlameOptions {
-            move_detection: true,
-            ..Default::default()
-        },
+        &BlameOptions::default().with_move_detection(true),
     );
     let file_line_count = std::fs::read_to_string(tmp.path().join("f"))
         .unwrap()
@@ -626,10 +612,7 @@ fn within_file_line_permutation_matches_git_move_detection() {
     let grit_m = grit_blame_with_options(
         &repo,
         "m.txt",
-        &BlameOptions {
-            move_detection: true,
-            ..Default::default()
-        },
+        &BlameOptions::default().with_move_detection(true),
     );
     assert_eq!(git_m, grit_m);
     assert!(grit_m

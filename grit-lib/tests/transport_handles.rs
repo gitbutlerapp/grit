@@ -87,10 +87,7 @@ fn bundles_write_verify_unbundle_and_fetch_between_repositories() {
     let src = init(&tmp.path().join("src"), true);
     let c1 = commit(&src, "a.txt", "one\n", None);
     let c2 = commit(&src, "b.txt", "two\n", Some(c1));
-    let spec = BundleSpec {
-        include: vec![(c2, "refs/heads/main".to_owned())],
-        ..Default::default()
-    };
+    let spec = BundleSpec::default().with_include(vec![(c2, "refs/heads/main".to_owned())]);
 
     let plan = src.bundles().plan_create(&spec).expect("plan");
     assert_eq!(plan.refs.len(), 1);
@@ -192,10 +189,7 @@ fn bundles_write_leaves_the_destination_alone_when_cancelled() {
     let err = src
         .bundles()
         .write(
-            &BundleSpec {
-                include: vec![(tip, "refs/heads/main".to_owned())],
-                ..Default::default()
-            },
+            &BundleSpec::default().with_include(vec![(tip, "refs/heads/main".to_owned())]),
             &path,
             &mut NullProgress,
             &cancel,

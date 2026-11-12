@@ -31,6 +31,7 @@ use crate::repo::Repository;
 
 /// Options for [`History::fixup`](super::History::fixup).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FixupOptions {
     /// Replacement message for the target commit; `None` keeps the existing message.
     pub message: Option<String>,
@@ -42,6 +43,59 @@ pub struct FixupOptions {
     pub selection: Option<HunkSelection>,
     /// Pathspec filter when resolving [`Self::selection`].
     pub pathspecs: Vec<String>,
+}
+
+impl FixupOptions {
+    /// Creates a [`FixupOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `rewrite`: ref scope, committer, and replay empty policy (the `empty` field is overwritten from [`Self::empty`]).
+    #[must_use]
+    pub fn new(rewrite: RewriteOptions) -> Self {
+        Self {
+            rewrite,
+            message: None,
+            empty: Default::default(),
+            selection: None,
+            pathspecs: Default::default(),
+        }
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`empty`](Self::empty).
+    #[must_use]
+    pub fn with_empty(mut self, empty: EmptyPolicy) -> Self {
+        self.empty = empty;
+        self
+    }
+
+    /// Sets [`rewrite`](Self::rewrite).
+    #[must_use]
+    pub fn with_rewrite(mut self, rewrite: RewriteOptions) -> Self {
+        self.rewrite = rewrite;
+        self
+    }
+
+    /// Sets [`selection`](Self::selection).
+    #[must_use]
+    pub fn with_selection(mut self, selection: Option<HunkSelection>) -> Self {
+        self.selection = selection;
+        self
+    }
+
+    /// Sets [`pathspecs`](Self::pathspecs).
+    #[must_use]
+    pub fn with_pathspecs(mut self, pathspecs: Vec<String>) -> Self {
+        self.pathspecs = pathspecs;
+        self
+    }
 }
 
 /// Plan a fixup of `target`: merge staged index changes onto `target`'s tree and replay descendants.

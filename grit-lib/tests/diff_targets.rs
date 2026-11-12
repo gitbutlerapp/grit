@@ -45,14 +45,9 @@ fn resolve_diff_default_target_is_worktree_vs_head() {
         .diff()
         .resolve_request(
             None,
-            &DiffRequest {
-                staged: false,
-                unstaged: false,
-                against: None,
-                positionals: (&[]).to_vec(),
-                paths: (&[]).to_vec(),
-                ..DiffRequest::default()
-            },
+            &DiffRequest::default()
+                .with_positionals((&[]).to_vec())
+                .with_paths((&[]).to_vec()),
         )
         .expect("resolve");
     assert_eq!(args.target, DiffTarget::WorktreeVsHead);
@@ -68,14 +63,11 @@ fn resolve_diff_staged_and_unstaged_conflict() {
         .diff()
         .resolve_request(
             None,
-            &DiffRequest {
-                staged: true,
-                unstaged: true,
-                against: None,
-                positionals: (&[]).to_vec(),
-                paths: (&[]).to_vec(),
-                ..DiffRequest::default()
-            },
+            &DiffRequest::default()
+                .with_staged(true)
+                .with_unstaged(true)
+                .with_positionals((&[]).to_vec())
+                .with_paths((&[]).to_vec()),
         )
         .unwrap_err();
     assert!(matches!(err, ResolveDiffArgumentsError::StagedAndUnstaged));
@@ -97,14 +89,10 @@ fn files_staged_matches_git_name_only() {
         .diff()
         .resolve_request(
             None,
-            &DiffRequest {
-                staged: true,
-                unstaged: false,
-                against: None,
-                positionals: (&[]).to_vec(),
-                paths: (&[]).to_vec(),
-                ..DiffRequest::default()
-            },
+            &DiffRequest::default()
+                .with_staged(true)
+                .with_positionals((&[]).to_vec())
+                .with_paths((&[]).to_vec()),
         )
         .expect("resolve");
     let files = repo
@@ -313,14 +301,9 @@ fn triple_dot_uses_merge_base_like_git() {
         .diff()
         .resolve_request(
             None,
-            &DiffRequest {
-                staged: false,
-                unstaged: false,
-                against: None,
-                positionals: (&["main...topic".into()]).to_vec(),
-                paths: (&[]).to_vec(),
-                ..DiffRequest::default()
-            },
+            &DiffRequest::default()
+                .with_positionals((&["main...topic".into()]).to_vec())
+                .with_paths((&[]).to_vec()),
         )
         .expect("resolve");
     let grit = grit_raw(&repo, args.target);
@@ -372,14 +355,9 @@ fn resolve_diff_arguments_too_many_revisions() {
         .diff()
         .resolve_request(
             None,
-            &DiffRequest {
-                staged: false,
-                unstaged: false,
-                against: None,
-                positionals: (&["HEAD~2".into(), "HEAD~1".into(), "HEAD".into()]).to_vec(),
-                paths: (&[]).to_vec(),
-                ..DiffRequest::default()
-            },
+            &DiffRequest::default()
+                .with_positionals((&["HEAD~2".into(), "HEAD~1".into(), "HEAD".into()]).to_vec())
+                .with_paths((&[]).to_vec()),
         )
         .unwrap_err();
     assert!(matches!(err, ResolveDiffArgumentsError::TooManyRevisions));
@@ -452,14 +430,10 @@ fn resolve_diff_arguments_against_with_commits() {
         .diff()
         .resolve_request(
             None,
-            &DiffRequest {
-                staged: false,
-                unstaged: false,
-                against: Some("HEAD").map(str::to_owned),
-                positionals: (&["HEAD~1".into()]).to_vec(),
-                paths: (&[]).to_vec(),
-                ..DiffRequest::default()
-            },
+            &DiffRequest::default()
+                .with_against(Some("HEAD").map(str::to_owned))
+                .with_positionals((&["HEAD~1".into()]).to_vec())
+                .with_paths((&[]).to_vec()),
         )
         .unwrap_err();
     assert!(matches!(err, ResolveDiffArgumentsError::AgainstWithCommits));

@@ -93,11 +93,10 @@ fn packed_batch_stats_match_git_for_small_edits_and_file_changes() {
     let config = ConfigSet::new();
     let mut diff_options = DiffOptions::default();
     diff_options.renames = RenameDetection::Off;
-    let options = CommitFilesManyOptions {
-        diff_options,
-        detail: DiffDetail::Stat,
-        skip_merge_patches: true,
-    };
+    let options = CommitFilesManyOptions::default()
+        .with_diff_options(diff_options)
+        .with_detail(DiffDetail::Stat)
+        .with_skip_merge_patches(true);
     let empty_ps = Pathspec::entire_tree(PathspecGlobalFlags::default());
     let parallel = repo
         .diff()

@@ -294,14 +294,12 @@ impl WorktreeBenchFixtures {
         std::env::set_var("GIT_CONFIG_SYSTEM", "/dev/null");
         std::env::set_var("GIT_CONFIG_NOSYSTEM", "1");
 
-        let config_load_opts = LoadConfigOptions {
-            include_system: false,
-            include_ctx: grit_lib::config::IncludeContext {
-                git_dir: Some(config_git_dir.clone()),
-                ..Default::default()
-            },
-            ..LoadConfigOptions::default()
-        };
+        let config_load_opts = LoadConfigOptions::default()
+            .with_include_system(false)
+            .with_include_ctx(
+                grit_lib::config::IncludeContext::default()
+                    .with_git_dir(Some(config_git_dir.clone())),
+            );
 
         let ignore_root = base.join("ignore-repo");
         let (ignore_repo, _) = Repository::init(

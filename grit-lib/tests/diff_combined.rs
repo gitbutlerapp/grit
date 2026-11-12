@@ -405,10 +405,7 @@ fn t4048_combined_binary_matches_git() {
 
 #[test]
 fn combined_diff_patch_coalesce_and_whitespace() {
-    let ws = CombinedDiffWsOptions {
-        ignore_space_change: true,
-        ..Default::default()
-    };
+    let ws = CombinedDiffWsOptions::default().with_ignore_space_change(true);
     let parents = vec!["alpha\n".to_string(), "beta\n".to_string()];
     let dense = format_combined_diff_body(&parents, "gamma\n", 3, true, ws);
     assert!(dense.contains("@@@"), "dense combined diff body");
@@ -425,11 +422,9 @@ fn combined_diff_patch_coalesce_and_whitespace() {
         format_combined_diff_body(&["gone\n".to_string()], "", 3, true, Default::default());
     assert!(emptied.contains('-') || emptied.contains("@@@"));
 
-    let all_ws = CombinedDiffWsOptions {
-        ignore_all_space: true,
-        ignore_cr_at_eol: true,
-        ..Default::default()
-    };
+    let all_ws = CombinedDiffWsOptions::default()
+        .with_ignore_all_space(true)
+        .with_ignore_cr_at_eol(true);
     let _ = format_combined_diff_body(&["a b\n".to_string()], "ab\n", 1, false, all_ws);
 }
 
@@ -464,10 +459,9 @@ fn combined_find_object_and_recursive_raw() {
         .parse()
         .unwrap();
 
-    let walk = CombinedTreeDiffOptions {
-        recursive: true,
-        tree_in_recursive: true,
-    };
+    let walk = CombinedTreeDiffOptions::default()
+        .with_recursive(true)
+        .with_tree_in_recursive(true);
     let filtered = combined_diff_paths_filtered(
         &dr.repo.odb(),
         &result_tree,

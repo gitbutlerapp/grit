@@ -138,11 +138,9 @@ fn grit_blame(
         .diff()
         .blame(
             file,
-            &BlameOptions {
-                start,
-                line_range,
-                ..Default::default()
-            },
+            &BlameOptions::default()
+                .with_start(start)
+                .with_line_range(line_range),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -1939,15 +1937,13 @@ fn blame_copy_matching_preserves_final_newline() {
                     .diff()
                     .blame(
                         "target",
-                        &BlameOptions {
-                            copy_detection: CopyDetection::FromAnyCommit,
-                            whitespace: if ignore_space {
+                        &BlameOptions::default()
+                            .with_copy_detection(CopyDetection::FromAnyCommit)
+                            .with_whitespace(if ignore_space {
                                 grit_lib::diff::WhitespaceMode::ignore_all_space()
                             } else {
                                 Default::default()
-                            },
-                            ..Default::default()
-                        },
+                            }),
                         &mut NullProgress,
                         &CancelToken::never(),
                     )

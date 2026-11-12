@@ -40,11 +40,9 @@ fn filter_attrs(required: bool) -> FileAttrs {
 }
 
 fn clean_opts(runner: &dyn CommandRunner) -> ConvertToGitOpts<'_> {
-    ConvertToGitOpts {
-        check_safecrlf: false,
-        command_runner: Some(runner),
-        ..ConvertToGitOpts::default()
-    }
+    ConvertToGitOpts::default()
+        .with_check_safecrlf(false)
+        .with_command_runner(Some(runner))
 }
 
 fn expected_spawn_error(phase: FilterPhase) -> FilterError {
@@ -109,10 +107,7 @@ fn required_process_filter_that_cannot_spawn_reports_the_cause() {
         "y.up",
         &conv,
         &attrs,
-        ConvertToGitOpts {
-            check_safecrlf: false,
-            ..ConvertToGitOpts::default()
-        },
+        ConvertToGitOpts::default().with_check_safecrlf(false),
     )
     .expect_err("required process filter must fail");
     assert_eq!(err, expected_spawn_error(FilterPhase::Clean));

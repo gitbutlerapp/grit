@@ -150,11 +150,8 @@ fn bench_pack_bitmap(c: &mut Criterion) {
             let index = BitmapIndex::open(&repo)
                 .expect("open")
                 .expect("bitmap present");
-            let query = ReachabilityQuery {
-                wants: &[fx.sample_commit],
-                haves: &[],
-                filter: None,
-            };
+            let wants = [fx.sample_commit];
+            let query = ReachabilityQuery::new(&wants, &[]);
             let set = index
                 .reachability(&repo, query, MissingAction::Error)
                 .expect("reachability");

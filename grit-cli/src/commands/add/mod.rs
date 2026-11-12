@@ -155,10 +155,7 @@ pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
     let outcome = apply_patch_to_index_and_write(
         &repo,
         &patches,
-        &IndexApplyOptions {
-            dry_run,
-            ..IndexApplyOptions::default()
-        },
+        &IndexApplyOptions::default().with_dry_run(dry_run),
         &crate::interrupt::process_cancel_token(),
     )
     .map_err(map_apply_error)?;

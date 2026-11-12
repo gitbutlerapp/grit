@@ -730,11 +730,7 @@ fn history_rebase_matches_git_replay_onto() {
 }
 
 fn rebase_request(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> RebaseRequest {
-    RebaseRequest {
-        upstream,
-        onto,
-        branch_tip: tip,
-    }
+    RebaseRequest::new(upstream, tip).with_onto(onto)
 }
 
 fn plan_apply(grit: &Repository, request: RebaseRequest, opts: &RebaseOntoOptions) -> ObjectId {
@@ -1251,11 +1247,7 @@ fn rebase_check_reports_conflict_without_side_effects() {
     git(wt, &["config", "grit.changeIds", "false"]);
     let (upstream, onto, tip) = init_rebase_favor_fixture(wt);
     let grit = open_grit(wt);
-    let request = RebaseRequest {
-        upstream,
-        onto: Some(onto),
-        branch_tip: tip,
-    };
+    let request = RebaseRequest::new(upstream, tip).with_onto(Some(onto));
     let opts = rebase_opts(RefScope::Head, EmptyPolicy::Abort, true);
     let before = snapshot_repo_side_effects(wt);
     let check = grit
@@ -1286,11 +1278,7 @@ fn rebase_check_names_sibling_branch_whose_replay_conflicts() {
     let m1 = commit_file(wt, "a.txt", "1m\n2\n3\n", "m1");
     git(wt, &["switch", "-q", "topic"]);
     let grit = open_grit(wt);
-    let request = RebaseRequest {
-        upstream: m1,
-        onto: None,
-        branch_tip: t1,
-    };
+    let request = RebaseRequest::new(m1, t1);
 
     let opts = rebase_opts(RefScope::Branches, EmptyPolicy::Drop, true);
     match grit

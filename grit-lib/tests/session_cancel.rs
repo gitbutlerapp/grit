@@ -662,22 +662,17 @@ fn conflicting_merge_cancel_after_checkout_rolls_back_worktree() {
 }
 
 fn rebase_start(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
-    StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: None,
-            branch_tip: tip,
-        },
-        rebase: RebaseOntoOptions::new(
+    StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip),
+        RebaseOntoOptions::new(
             RewriteOptions::new(IDENT.parse().expect("signature"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         )
         .with_skip_applied(false),
-        apply: ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
+        ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
             .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
-        exec: None,
-    }
+    )
 }
 
 /// `topic` (checked out) adds one file on `base`; `side` adds [`FILES`] files on `base`.

@@ -60,6 +60,7 @@ pub mod patch_id_inject {
 
 /// Inputs for [`History::plan_rebase`](super::History::plan_rebase), matching `git rebase [--onto <base>] <upstream>` on a single branch tip.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct RebaseRequest {
     /// Commits reachable from the branch tip but not from this commit are replayed (Git's upstream argument).
     pub upstream: ObjectId,
@@ -67,6 +68,44 @@ pub struct RebaseRequest {
     pub onto: Option<ObjectId>,
     /// Tip of the branch being rebased (typically `HEAD`).
     pub branch_tip: ObjectId,
+}
+
+impl RebaseRequest {
+    /// Creates a [`RebaseRequest`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `upstream`: commits reachable from the branch tip but not from this commit are replayed (Git's upstream argument).
+    /// - `branch_tip`: tip of the branch being rebased (typically `HEAD`).
+    #[must_use]
+    pub const fn new(upstream: ObjectId, branch_tip: ObjectId) -> Self {
+        Self {
+            upstream,
+            branch_tip,
+            onto: None,
+        }
+    }
+
+    /// Sets [`upstream`](Self::upstream).
+    #[must_use]
+    pub const fn with_upstream(mut self, upstream: ObjectId) -> Self {
+        self.upstream = upstream;
+        self
+    }
+
+    /// Sets [`onto`](Self::onto).
+    #[must_use]
+    pub const fn with_onto(mut self, onto: Option<ObjectId>) -> Self {
+        self.onto = onto;
+        self
+    }
+
+    /// Sets [`branch_tip`](Self::branch_tip).
+    #[must_use]
+    pub const fn with_branch_tip(mut self, branch_tip: ObjectId) -> Self {
+        self.branch_tip = branch_tip;
+        self
+    }
 }
 
 /// Builds a [`RebaseRequest`] for pull/rebase and implicit-upstream `rebase` after fetch.

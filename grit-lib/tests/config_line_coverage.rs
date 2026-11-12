@@ -156,11 +156,9 @@ fn parse_bool_i64_and_git_config_count_env() {
     let mut env = Environment::empty();
     env.git_config_count = Some("1".into());
     env.git_config_pairs = vec![("env.key".into(), "v".into())];
-    let opts = LoadConfigOptions {
-        include_system: false,
-        include_ctx: Default::default(),
-        ..Default::default()
-    };
+    let opts = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_include_ctx(Default::default());
     let set = ConfigSet::load(&env, None, &opts).expect("load");
     assert_eq!(set.get("env.key").unwrap().as_deref(), Some("v"));
     let paths = global_config_paths_pub(&env);

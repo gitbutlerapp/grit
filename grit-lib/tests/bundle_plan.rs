@@ -92,10 +92,7 @@ fn bundle_plan_create_matches_written_bundle() {
     let src = tmp.path();
     init_two_commit_repo(src);
     let repo = Repository::discover(Some(src), &RepositoryOptions::empty()).expect("open");
-    let options = BundleCreateOptions {
-        all_refs: false,
-        rev_tokens: vec!["HEAD~1..HEAD".to_owned()],
-    };
+    let options = BundleCreateOptions::default().with_rev_tokens(vec!["HEAD~1..HEAD".to_owned()]);
     let plan = repo
         .bundles()
         .plan_create_from_revs(&options)
@@ -177,10 +174,7 @@ fn bundle_and_maintenance_dry_run_public_apis_smoke() {
     let tmp = tempfile::tempdir().expect("tempdir");
     init_two_commit_repo(tmp.path());
     let repo = Repository::discover(Some(tmp.path()), &RepositoryOptions::empty()).expect("open");
-    let options = BundleCreateOptions {
-        all_refs: false,
-        rev_tokens: vec!["HEAD".to_owned()],
-    };
+    let options = BundleCreateOptions::default().with_rev_tokens(vec!["HEAD".to_owned()]);
     let spec = resolve_bundle_spec(&repo, &options).expect("spec");
     let _ = repo.bundles().plan_create(&spec).expect("plan_create");
     let _ = repo
@@ -189,10 +183,7 @@ fn bundle_and_maintenance_dry_run_public_apis_smoke() {
         .expect("plan_create_from_revs");
     let _ = repo
         .bundles()
-        .plan_create(&BundleSpec {
-            include: spec.include,
-            ..Default::default()
-        })
+        .plan_create(&BundleSpec::default().with_include(spec.include))
         .expect("plan_bundle_create");
 
     let _ = CommitGraphOptions::with_dry_run(true);

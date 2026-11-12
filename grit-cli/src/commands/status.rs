@@ -460,10 +460,8 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         .status()
         .assemble_summary(
             model,
-            StatusSummaryOptions::default().standing(StandingOptions {
-                newest_ahead_limit: SHORTLOG_LIMIT,
-                counts: show_counts,
-            }),
+            StatusSummaryOptions::default()
+                .standing(StandingOptions::new(SHORTLOG_LIMIT).with_counts(show_counts)),
         )
         .context("could not assemble status summary")?;
     let model = summary.model;

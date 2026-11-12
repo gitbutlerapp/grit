@@ -334,10 +334,7 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
         .diff()
         .blame(
             "a.txt",
-            &BlameOptions {
-                start: Some(merge_commit),
-                ..BlameOptions::default()
-            },
+            &BlameOptions::default().with_start(Some(merge_commit)),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -382,10 +379,7 @@ fn bare_repository_with_every_store_injected_never_touches_the_filesystem() {
     let mut bundle = Vec::new();
     repo.bundles()
         .write_to(
-            &BundleSpec {
-                include: vec![(merge_commit, "refs/heads/main".into())],
-                ..BundleSpec::default()
-            },
+            &BundleSpec::default().with_include(vec![(merge_commit, "refs/heads/main".into())]),
             &mut bundle,
             &mut NullProgress,
             &CancelToken::never(),

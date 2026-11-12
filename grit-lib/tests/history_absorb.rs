@@ -36,13 +36,7 @@ fn apply_opts() -> ApplyOptions {
 }
 
 fn fixup_opts() -> FixupOptions {
-    FixupOptions {
-        selection: None,
-        pathspecs: Vec::new(),
-        message: None,
-        empty: EmptyPolicy::Drop,
-        rewrite: rewrite_opts(),
-    }
+    FixupOptions::new(rewrite_opts())
 }
 
 #[test]
@@ -59,10 +53,7 @@ fn absorb_assigns_hunks_to_last_touching_commit() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(base),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(base)))
         .expect("plan");
     assert_eq!(plan.assignments.len(), 1);
     assert_eq!(plan.assignments[0].commit, middle);
@@ -106,10 +97,7 @@ fn absorb_multiple_targets_single_replay() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(base),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(base)))
         .expect("plan");
     assert_eq!(plan.assignments.len(), 2);
     let targets: std::collections::HashSet<_> = plan.assignments.iter().map(|a| a.commit).collect();
@@ -144,10 +132,7 @@ fn absorb_leaves_ambiguous_hunk_staged() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(c1),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(c1)))
         .expect("plan");
     assert!(plan.assignments.is_empty());
     assert_eq!(plan.unassigned.len(), 1);
@@ -172,10 +157,7 @@ fn absorb_ignores_new_files() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: None,
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()))
         .expect("plan");
     assert!(plan.assignments.is_empty());
     assert_eq!(plan.unassigned.len(), 1);
@@ -198,10 +180,7 @@ fn absorb_respects_base() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(mid),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(mid)))
         .expect("plan");
     assert!(plan.assignments.is_empty());
     assert!(!plan.unassigned.is_empty());
@@ -221,10 +200,7 @@ fn absorb_dry_run_leaves_index_file_unchanged() {
     let grit = open_grit(wt);
     let _plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(target),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(target)))
         .expect("plan");
     let after_index = fs::read(&index_path).expect("read index");
     assert_eq!(
@@ -243,10 +219,7 @@ fn absorb_dry_run_assignment_matches_apply() {
     fs::write(wt.join("file.txt"), "line1\nchanged\nfix\n").expect("write");
     git(wt, &["add", "file.txt"]);
     let grit = open_grit(wt);
-    let opts = AbsorbOptions {
-        base: Some(base),
-        rewrite: rewrite_opts(),
-    };
+    let opts = AbsorbOptions::new(rewrite_opts()).with_base(Some(base));
     let plan = grit.history().absorb(&opts).expect("plan");
     let dry_assignments = plan.assignments.clone();
     assert_eq!(dry_assignments.len(), 1);
@@ -292,10 +265,7 @@ fn absorb_dry_run_changes_nothing() {
     let grit = open_grit(wt);
     let _plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(target),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(target)))
         .expect("plan");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(before));
 }
@@ -372,10 +342,7 @@ fn absorb_result_equals_manual_fixups() {
     git(wt, &["reset", "--hard", &pre_rewrite.to_hex()]);
     stage_absorb_hunks(wt);
     let grit = open_grit(wt);
-    let absorb_opts = AbsorbOptions {
-        base: Some(base),
-        rewrite: rewrite_opts(),
-    };
+    let absorb_opts = AbsorbOptions::new(rewrite_opts()).with_base(Some(base));
     let absorb_plan = grit.history().absorb(&absorb_opts).expect("plan");
     grit.history()
         .apply_absorb(
@@ -437,10 +404,7 @@ fn absorb_leaves_unassigned_hunks_on_same_path_staged() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(base),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(base)))
         .expect("plan");
     assert_eq!(plan.assignments.len(), 1);
     assert_eq!(plan.assignments[0].commit, target);
@@ -500,10 +464,7 @@ fn absorb_coordinate_safe_insertion_with_unassigned_line8() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(base),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(base)))
         .expect("plan");
     assert_eq!(plan.assignments.len(), 1, "{plan:?}");
     assert_eq!(plan.unassigned.len(), 1);
@@ -549,10 +510,7 @@ fn absorb_empty_stack_leaves_hunks_unassigned() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(tip),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(tip)))
         .expect("plan");
     assert!(plan.assignments.is_empty());
     assert_eq!(plan.unassigned.len(), 1);
@@ -567,10 +525,7 @@ fn absorb_nothing_staged_errors() {
     let grit = open_grit(wt);
     let err = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: None,
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()))
         .unwrap_err();
     assert!(matches!(err, HistoryError::NothingStaged));
 }
@@ -613,10 +568,7 @@ fn absorb_assigns_with_second_branch_name_at_head() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: None,
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()))
         .expect("plan");
     assert_eq!(plan.assignments.len(), 1, "{plan:?}");
     assert_eq!(plan.assignments[0].commit, target);
@@ -652,10 +604,7 @@ fn absorb_hidden_by_ref_when_review_branch_covers_introducing_commit() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: None,
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()))
         .expect("plan");
     assert!(plan.assignments.is_empty(), "{plan:?}");
     assert_eq!(plan.unassigned.len(), 1);
@@ -699,10 +648,7 @@ fn absorb_stack_cap_is_not_hidden_by_ref_when_main_at_base() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: None,
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()))
         .expect("plan");
     assert_eq!(plan.unassigned.len(), 1);
     assert_eq!(plan.unassigned[0].reason, UnassignedReason::NoCandidate);
@@ -710,10 +656,7 @@ fn absorb_stack_cap_is_not_hidden_by_ref_when_main_at_base() {
     git(wt, &["branch", "-D", "main"]);
     let plan_without_main = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: None,
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()))
         .expect("plan");
     assert_eq!(
         plan_without_main.unassigned[0].reason,
@@ -756,10 +699,7 @@ fn absorb_diverged_branch_at_main_does_not_block_feature_stack() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: None,
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()))
         .expect("plan");
     assert_eq!(plan.assignments.len(), 1, "{plan:?}");
     assert_eq!(plan.assignments[0].commit, target);

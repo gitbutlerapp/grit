@@ -1,6 +1,8 @@
 //! Coverage for the constructors and `with_*` setters of the `#[non_exhaustive]` options and
 //! request structs: rev walks, ref updates and queries, tag creation, reflog expiry, history
-//! rewrites, push, clone, pull, serve, switch, restore, merge, status and ownership checks.
+//! rewrites, push, clone, pull, serve, switch, restore, merge, status and ownership checks, plus
+//! apply, blame, bundle, hooks, config loading, diff and patch output, index, pack ingest, branch
+//! comparison, history edits and CRLF conversion.
 
 use grit_lib::command_runner::hooks::PostOperationHooks;
 use grit_lib::commits::HookPolicy;
@@ -839,6 +841,10 @@ fn branch_merge_and_history_input_setters_set_each_field() {
         CommitEdit::reuse(oid(2), oid(3)),
         CommitEdit::Reuse { existing, parent, .. } if existing == oid(2) && parent == oid(3)
     ));
+    assert!(matches!(
+        CommitEdit::reparent(oid(4)),
+        CommitEdit::Reparent { parent, .. } if parent == oid(4)
+    ));
 }
 
 #[test]
@@ -948,4 +954,525 @@ fn trailer_and_patch_input_setters_set_each_field() {
         .with_new(PatchSide::Bytes(b"new".to_vec()));
     assert_eq!(side.old, PatchSide::Bytes(b"old".to_vec()));
     assert_eq!(side.new, PatchSide::Bytes(b"new".to_vec()));
+}
+
+#[test]
+fn apply_and_bundle_options_setters_set_each_field() {
+    use grit_lib::apply::IndexApplyOptions;
+    use grit_lib::bundle::bundle_remote::BundleCreateOptions;
+    use grit_lib::bundle::BundleSpec;
+
+    assert!(
+        grit_lib::apply::ApplyOptions::default()
+            .with_reverse(true)
+            .reverse
+    );
+
+    let index = IndexApplyOptions::default()
+        .with_dry_run(true)
+        .with_reverse(true)
+        .with_head_tree_oid(Some(oid(1)));
+    assert!(index.dry_run && index.reverse);
+    assert_eq!(index.head_tree_oid, Some(oid(1)));
+
+    let spec = BundleSpec::default()
+        .with_include(vec![(oid(2), "refs/heads/main".to_owned())])
+        .with_exclude(vec![oid(3)])
+        .with_filter(None);
+    assert_eq!(spec.include, vec![(oid(2), "refs/heads/main".to_owned())]);
+    assert_eq!(spec.exclude, vec![oid(3)]);
+    assert!(spec.filter.is_none());
+
+    let create = BundleCreateOptions::default()
+        .with_all_refs(true)
+        .with_rev_tokens(vec!["main".to_owned()]);
+    assert!(create.all_refs);
+    assert_eq!(create.rev_tokens, vec!["main".to_owned()]);
+}
+
+#[test]
+fn blame_options_setters_set_each_field() {
+    use grit_lib::blame::{BlameFinalSource, BlameOptions, CopyDetection, IgnoreRevs};
+    use grit_lib::diff::WhitespaceMode;
+
+    let now = time::OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("time");
+    let opts = BlameOptions::default()
+        .with_start(Some(oid(1)))
+        .with_line_range(Some(2..=4))
+        .with_first_parent_only(true)
+        .with_ignore(IgnoreRevs::default())
+        .with_whitespace(WhitespaceMode::ignore_all_space())
+        .with_copy_detection(CopyDetection::FromAnyCommit)
+        .with_move_detection(true)
+        .with_final_source(BlameFinalSource::Contents(b"x\n".to_vec()))
+        .with_now(Some(now));
+    assert_eq!(opts.start, Some(oid(1)));
+    assert_eq!(opts.line_range, Some(2..=4));
+    assert!(opts.first_parent_only && opts.move_detection);
+    assert_eq!(opts.whitespace, WhitespaceMode::ignore_all_space());
+    assert!(matches!(opts.copy_detection, CopyDetection::FromAnyCommit));
+    assert!(matches!(opts.final_source, BlameFinalSource::Contents(ref c) if c == b"x\n"));
+    assert_eq!(opts.now, Some(now));
+}
+
+#[test]
+fn command_spec_constructor_and_setters_set_each_field() {
+    use grit_lib::command_runner::{CommandEnvironment, CommandSpec, CommandStdin, CommandStdio};
+    use std::ffi::OsString;
+
+    let spec = CommandSpec::new("tool");
+    assert_eq!(spec.program, PathBuf::from("tool"));
+    assert!(spec.args.is_empty() && spec.shell.is_none() && spec.cwd.is_none());
+    assert!(matches!(spec.stdin, CommandStdin::Inherit));
+    assert_eq!(spec.stdout, CommandStdio::Inherit);
+
+    let spec = spec
+        .with_program(PathBuf::from("other"))
+        .with_args(vec![OsString::from("--flag")])
+        .with_shell(None)
+        .with_cwd(Some(PathBuf::from("/tmp")))
+        .with_env(CommandEnvironment::default())
+        .with_stdin(CommandStdin::Pipe(b"in".to_vec()))
+        .with_stdout(CommandStdio::Pipe)
+        .with_stderr(CommandStdio::Null);
+    assert_eq!(spec.program, PathBuf::from("other"));
+    assert_eq!(spec.args, vec![OsString::from("--flag")]);
+    assert_eq!(spec.cwd, Some(PathBuf::from("/tmp")));
+    assert!(matches!(spec.stdin, CommandStdin::Pipe(ref b) if b == b"in"));
+    assert_eq!(spec.stdout, CommandStdio::Pipe);
+    assert_eq!(spec.stderr, CommandStdio::Null);
+}
+
+#[test]
+fn hook_and_trailer_options_setters_set_each_field() {
+    use grit_lib::command_runner::hooks::{CommitHookEnv, HookStdio, RunHookOptions};
+    use grit_lib::commit::trailers::interpret::ProcessTrailerOptions;
+    use std::path::Path;
+
+    let env = CommitHookEnv::default();
+    let vars = [("A", "1")];
+    let opts = RunHookOptions::default()
+        .with_stdio(HookStdio::Capture)
+        .with_stdout_to_stderr(true)
+        .with_path_to_stdin(Some(Path::new("in.txt")))
+        .with_stdin_data(Some(b"data"))
+        .with_env_vars(&vars)
+        .with_cwd(Some(Path::new("/tmp")))
+        .with_commit_env(Some(&env));
+    assert_eq!(opts.stdio, HookStdio::Capture);
+    assert!(opts.stdout_to_stderr);
+    assert_eq!(opts.path_to_stdin, Some(Path::new("in.txt")));
+    assert_eq!(opts.stdin_data, Some(&b"data"[..]));
+    assert_eq!(opts.env_vars, &vars);
+    assert_eq!(opts.cwd, Some(Path::new("/tmp")));
+    assert!(opts.commit_env.is_some());
+
+    let trailers = ProcessTrailerOptions::default()
+        .with_trim_empty(true)
+        .with_only_trailers(true)
+        .with_only_input(true)
+        .with_unfold(true)
+        .with_no_divider(true);
+    assert!(trailers.trim_empty && trailers.only_trailers && trailers.only_input);
+    assert!(trailers.unfold && trailers.no_divider);
+}
+
+#[test]
+fn config_load_options_setters_set_each_field() {
+    use grit_lib::config::init_filesystem::{InitFilesystemConfigOptions, PrecomposeDetection};
+    use grit_lib::config::{IncludeContext, LoadConfigOptions};
+    use std::sync::Arc;
+
+    let ctx = IncludeContext::default()
+        .with_git_dir(Some(PathBuf::from("/repo/.git")))
+        .with_command_line_relative_include_is_error(true)
+        .with_cwd(PathBuf::from("/repo"))
+        .with_pwd(Some("/repo".to_owned()))
+        .with_env(Arc::new(Environment::empty()));
+    assert_eq!(ctx.git_dir, Some(PathBuf::from("/repo/.git")));
+    assert!(ctx.command_line_relative_include_is_error);
+    assert_eq!(ctx.cwd, PathBuf::from("/repo"));
+    assert_eq!(ctx.pwd.as_deref(), Some("/repo"));
+
+    let opts = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_repo_local_only(true)
+        .with_protected_only(true)
+        .with_process_includes(false)
+        .with_command_includes(false)
+        .with_include_ctx(ctx)
+        .with_diagnostics(None)
+        .with_repo_caches(None);
+    assert!(!opts.include_system && opts.repo_local_only && opts.protected_only);
+    assert!(!opts.process_includes && !opts.command_includes);
+    assert_eq!(opts.include_ctx.cwd, PathBuf::from("/repo"));
+    assert!(opts.diagnostics.is_none() && opts.repo_caches.is_none());
+
+    let init = InitFilesystemConfigOptions::default()
+        .with_is_reinit(true)
+        .with_precompose_detection(PrecomposeDetection::Always);
+    assert!(init.is_reinit);
+    assert_eq!(init.precompose_detection, PrecomposeDetection::Always);
+}
+
+#[test]
+fn diff_request_and_patch_options_setters_set_each_field() {
+    use grit_lib::diff::combined_diff_patch::CombinedDiffWsOptions;
+    use grit_lib::diff::combined_tree_diff::CombinedTreeDiffOptions;
+    use grit_lib::diff::fmt_merge_msg::FmtMergeMsgOptions;
+    use grit_lib::diff::{
+        CommitFilesManyInput, CommitFilesManyOptions, DiffDetail, DiffMerges, DiffOptions,
+        DiffRequest, LogPatchBinaryFormat, LogPatchCommitHeader, LogPatchOptions, PatchTextOptions,
+    };
+    use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
+
+    let input = CommitFilesManyInput::new(oid(1), vec![oid(2)], oid(3));
+    assert_eq!((input.oid, input.tree), (oid(1), oid(3)));
+    assert_eq!(input.parents, vec![oid(2)]);
+    let input = input
+        .with_oid(oid(4))
+        .with_parents(Vec::new())
+        .with_tree(oid(5));
+    assert_eq!((input.oid, input.tree), (oid(4), oid(5)));
+    assert!(input.parents.is_empty());
+
+    let many = CommitFilesManyOptions::default()
+        .with_diff_options(DiffOptions::default().with_context_lines(1))
+        .with_detail(DiffDetail::NameOnly)
+        .with_skip_merge_patches(true);
+    assert_eq!(many.diff_options.context_lines, 1);
+    assert_eq!(many.detail, DiffDetail::NameOnly);
+    assert!(many.skip_merge_patches);
+
+    let request = DiffRequest::default()
+        .with_staged(true)
+        .with_unstaged(true)
+        .with_against(Some("HEAD".to_owned()))
+        .with_positionals(vec!["a".to_owned()])
+        .with_paths(vec!["b".to_owned()])
+        .with_pathspec_file(Some(vec!["c".to_owned()]));
+    assert!(request.staged && request.unstaged);
+    assert_eq!(request.against.as_deref(), Some("HEAD"));
+    assert_eq!(request.positionals, vec!["a".to_owned()]);
+    assert_eq!(request.paths, vec!["b".to_owned()]);
+    assert_eq!(request.pathspec_file, Some(vec!["c".to_owned()]));
+
+    let log = LogPatchOptions::new(DiffOptions::default());
+    assert_eq!(log.abbrev_len, 7);
+    assert!(matches!(log.commit_header, LogPatchCommitHeader::Full));
+    assert!(matches!(log.diff_merges, DiffMerges::Combined));
+    assert!(log.pathspec.is_entire_tree());
+    let log = log
+        .with_diff(DiffOptions::default().with_context_lines(2))
+        .with_abbrev_len(12)
+        .with_commit_header(LogPatchCommitHeader::Full)
+        .with_binary_format(LogPatchBinaryFormat::GitApplyBinaryPatch)
+        .with_pathspec(Pathspec::entire_tree(PathspecGlobalFlags::default()))
+        .with_diff_merges(DiffMerges::FirstParent);
+    assert_eq!(log.diff.context_lines, 2);
+    assert_eq!(log.abbrev_len, 12);
+    assert!(matches!(
+        log.binary_format,
+        LogPatchBinaryFormat::GitApplyBinaryPatch
+    ));
+    assert!(matches!(log.diff_merges, DiffMerges::FirstParent));
+
+    let text = PatchTextOptions::new(DiffOptions::default(), 9);
+    assert_eq!(text.abbrev_len, 9);
+    let text = text
+        .with_diff(DiffOptions::default().with_context_lines(4))
+        .with_abbrev_len(10);
+    assert_eq!(text.diff.context_lines, 4);
+    assert_eq!(text.abbrev_len, 10);
+
+    let ws = CombinedDiffWsOptions::default()
+        .with_ignore_all_space(true)
+        .with_ignore_space_change(true)
+        .with_ignore_space_at_eol(true)
+        .with_ignore_cr_at_eol(true);
+    assert!(ws.ignore_all_space && ws.ignore_space_change);
+    assert!(ws.ignore_space_at_eol && ws.ignore_cr_at_eol);
+
+    let tree = CombinedTreeDiffOptions::default()
+        .with_recursive(true)
+        .with_tree_in_recursive(true);
+    assert!(tree.recursive && tree.tree_in_recursive);
+
+    let fmt = FmtMergeMsgOptions::default()
+        .with_message(Some("msg".to_owned()))
+        .with_into_name(Some("main".to_owned()));
+    assert_eq!(fmt.message.as_deref(), Some("msg"));
+    assert_eq!(fmt.into_name.as_deref(), Some("main"));
+}
+
+#[test]
+fn index_and_object_options_setters_set_each_field() {
+    use grit_lib::config::ConfigSet;
+    use grit_lib::index::{IndexParseContext, StatMatchPolicy, WorktreeModePolicy};
+    use grit_lib::maintenance::fsck::FsckObjectOptions;
+    use grit_lib::objects::bitmap::ReachabilityQuery;
+    use grit_lib::objects::index_pack::IngestPackOptions;
+    use grit_lib::objects::HashAlgo;
+
+    let policy = ThreadPolicy::with_threads_override(Some(2));
+    assert_eq!(
+        IndexParseContext::default()
+            .with_thread_policy(policy)
+            .thread_policy,
+        policy
+    );
+
+    let stat = StatMatchPolicy::default()
+        .with_trust_ctime(false)
+        .with_check_stat(false)
+        .with_use_nanosec(true);
+    assert!(!stat.trust_ctime && !stat.check_stat && stat.use_nanosec);
+
+    let mode = WorktreeModePolicy::default()
+        .with_trust_filemode(false)
+        .with_has_symlinks(false);
+    assert!(!mode.trust_filemode && !mode.has_symlinks);
+
+    assert_eq!(
+        FsckObjectOptions::default()
+            .with_hash_algo(HashAlgo::Sha256)
+            .hash_algo,
+        HashAlgo::Sha256
+    );
+
+    let wants = [oid(1)];
+    let haves = [oid(2)];
+    let query = ReachabilityQuery::new(&wants, &haves);
+    assert_eq!(query.wants, &wants);
+    assert_eq!(query.haves, &haves);
+    assert!(query.filter.is_none());
+    let query = query
+        .with_wants(&haves)
+        .with_haves(&wants)
+        .with_filter(None);
+    assert_eq!(query.wants, &haves);
+    assert_eq!(query.haves, &wants);
+
+    let ingest = IngestPackOptions::default()
+        .with_fix_thin(true)
+        .with_threads(Some(3))
+        .with_skip_post_index_verify(true)
+        .with_merged_config(Some(ConfigSet::new()))
+        .with_environment(Environment::empty())
+        .with_mark_promisor_pack(true)
+        .with_keep_message(Some("keep".to_owned()))
+        .with_trusted_index_rows(Some(vec![(oid(4), 12, 7)]));
+    assert!(ingest.fix_thin && ingest.skip_post_index_verify && ingest.mark_promisor_pack);
+    assert_eq!(ingest.threads, Some(3));
+    assert!(ingest.merged_config.is_some());
+    assert_eq!(ingest.keep_message.as_deref(), Some("keep"));
+    assert_eq!(ingest.trusted_index_rows, Some(vec![(oid(4), 12, 7)]));
+}
+
+#[test]
+fn branch_and_fetch_queries_setters_set_each_field() {
+    use grit_lib::refs::branch_tracking::{
+        BranchListQuery, BranchScope, StandingOptions, TargetComparisonOptions, TargetSpec,
+    };
+    use grit_lib::remote::fetch_request::FetchInvocation;
+
+    let list = BranchListQuery::default()
+        .with_scope(BranchScope::All)
+        .with_refs(RefQuery::default());
+    assert_eq!(list.scope, BranchScope::All);
+    assert_eq!(list.refs, RefQuery::default());
+
+    let standing = StandingOptions::new(5);
+    assert_eq!(standing.newest_ahead_limit, 5);
+    assert!(standing.counts);
+    let standing = standing.with_newest_ahead_limit(6).with_counts(false);
+    assert_eq!(standing.newest_ahead_limit, 6);
+    assert!(!standing.counts);
+
+    let target = TargetComparisonOptions::new(10);
+    assert_eq!(target.list_limit, 10);
+    assert!(target.target.is_none() && !target.include_behind);
+    let target = target
+        .with_target(Some(TargetSpec("origin/main".to_owned())))
+        .with_list_limit(11)
+        .with_include_behind(true);
+    assert_eq!(target.target, Some(TargetSpec("origin/main".to_owned())));
+    assert_eq!(target.list_limit, 11);
+    assert!(target.include_behind);
+
+    let fetch = FetchInvocation::new("origin");
+    assert_eq!(fetch.remote, "origin");
+    assert!(fetch.user_refspecs.is_empty());
+    let fetch = fetch
+        .with_remote("upstream".to_owned())
+        .with_user_refspecs(vec!["main".to_owned()]);
+    assert_eq!(fetch.remote, "upstream");
+    assert_eq!(fetch.user_refspecs, vec!["main".to_owned()]);
+}
+
+#[test]
+fn history_edit_options_constructors_and_setters_set_each_field() {
+    use grit_lib::porcelain::hunk_select::HunkSelection;
+    use grit_lib::revwalk::history::{
+        AbsorbOptions, ExecSpec, FixupOptions, HunkRange, RebaseRequest, SplitOptions,
+        SquashMessage, SquashOptions, StartRebaseOptions,
+    };
+    use grit_lib::revwalk::log_walk::LogWalkQuery;
+    use grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs;
+
+    let rewrite = RewriteOptions::new(signature());
+
+    let absorb = AbsorbOptions::new(rewrite.clone());
+    assert_eq!(absorb.base, None);
+    let absorb = absorb
+        .with_base(Some(oid(1)))
+        .with_rewrite(rewrite.clone().with_sign(false));
+    assert_eq!(absorb.base, Some(oid(1)));
+    assert!(!absorb.rewrite.sign);
+
+    let exec = ExecSpec::default().with_commands(vec!["make".to_owned()]);
+    assert_eq!(exec.commands, vec!["make".to_owned()]);
+
+    let fixup = FixupOptions::new(rewrite.clone());
+    assert_eq!(fixup.empty, EmptyPolicy::Drop);
+    assert!(fixup.message.is_none() && fixup.selection.is_none() && fixup.pathspecs.is_empty());
+    let fixup = fixup
+        .with_message(Some("m".to_owned()))
+        .with_empty(EmptyPolicy::Keep)
+        .with_rewrite(rewrite.clone())
+        .with_selection(Some(HunkSelection::default()))
+        .with_pathspecs(vec!["src".to_owned()]);
+    assert_eq!(fixup.message.as_deref(), Some("m"));
+    assert_eq!(fixup.empty, EmptyPolicy::Keep);
+    assert_eq!(fixup.selection, Some(HunkSelection::default()));
+    assert_eq!(fixup.pathspecs, vec!["src".to_owned()]);
+
+    let range = HunkRange::new(1, 2, 3, 4);
+    assert_eq!(
+        (
+            range.old_start,
+            range.old_lines,
+            range.new_start,
+            range.new_lines
+        ),
+        (1, 2, 3, 4)
+    );
+    let range = range
+        .with_old_start(5)
+        .with_old_lines(6)
+        .with_new_start(7)
+        .with_new_lines(8);
+    assert_eq!(
+        (
+            range.old_start,
+            range.old_lines,
+            range.new_start,
+            range.new_lines
+        ),
+        (5, 6, 7, 8)
+    );
+
+    let request = RebaseRequest::new(oid(1), oid(2));
+    assert_eq!((request.upstream, request.branch_tip), (oid(1), oid(2)));
+    assert_eq!(request.onto, None);
+    let request = request
+        .with_upstream(oid(3))
+        .with_onto(Some(oid(4)))
+        .with_branch_tip(oid(5));
+    assert_eq!(
+        (request.upstream, request.onto, request.branch_tip),
+        (oid(3), Some(oid(4)), oid(5))
+    );
+
+    let split = SplitOptions::default().with_rest_message(Some("rest".to_owned()));
+    assert_eq!(split.rest_message.as_deref(), Some("rest"));
+
+    let squash = SquashOptions::new(SquashMessage::Oldest, rewrite.clone());
+    assert_eq!(squash.message, SquashMessage::Oldest);
+    let squash = squash
+        .with_message(SquashMessage::Custom("c".to_owned()))
+        .with_rewrite(rewrite.clone());
+    assert_eq!(squash.message, SquashMessage::Custom("c".to_owned()));
+
+    let apply = ApplyOptions::new(signature(), "rebase");
+    let onto = RebaseOntoOptions::new(rewrite.clone());
+    let start = StartRebaseOptions::new(request, onto.clone(), apply.clone());
+    assert_eq!(start.request, request);
+    assert_eq!(start.exec, None);
+    let start = start
+        .with_request(RebaseRequest::new(oid(6), oid(7)))
+        .with_rebase(onto)
+        .with_apply(apply)
+        .with_exec(Some(exec.clone()));
+    assert_eq!(start.request.upstream, oid(6));
+    assert_eq!(start.exec, Some(exec));
+
+    let walk = LogWalkQuery::default()
+        .with_tips(vec![oid(1)])
+        .with_hide(vec![oid(2)])
+        .with_cutoffs(ReachableWalkCommitterCutoffs::default().with_since(Some(10)));
+    assert_eq!(walk.tips, vec![oid(1)]);
+    assert_eq!(walk.hide, vec![oid(2)]);
+    assert_eq!(walk.cutoffs.since, Some(10));
+}
+
+#[test]
+fn crlf_conversion_options_setters_set_each_field() {
+    use grit_lib::config::ConfigSet;
+    use grit_lib::worktree::crlf::{
+        AutoCrlf, ConversionConfig, ConvertToGitOpts, CoreEol, CrlfLegacyAttr, DiffAttr, EolAttr,
+        FileAttrs, MergeAttr, SafeCrlf, TextAttr,
+    };
+
+    let base = ConversionConfig::from_config(&ConfigSet::new());
+    let runner = base.command_runner.clone();
+    let conv = base
+        .with_autocrlf(AutoCrlf::Input)
+        .with_eol(CoreEol::Crlf)
+        .with_safecrlf(SafeCrlf::True)
+        .with_command_runner(runner);
+    assert_eq!(conv.autocrlf, AutoCrlf::Input);
+    assert_eq!(conv.eol, CoreEol::Crlf);
+    assert_eq!(conv.safecrlf, SafeCrlf::True);
+
+    let blob = b"blob";
+    let opts = ConvertToGitOpts::default()
+        .with_index_blob(Some(blob))
+        .with_renormalize(true)
+        .with_check_safecrlf(false)
+        .with_filter_process(None)
+        .with_command_runner(None);
+    assert_eq!(opts.index_blob, Some(&blob[..]));
+    assert!(opts.renormalize && !opts.check_safecrlf);
+    assert!(opts.filter_process.is_none() && opts.command_runner.is_none());
+
+    let attrs = FileAttrs::default()
+        .with_text(TextAttr::Set)
+        .with_eol(EolAttr::Lf)
+        .with_diff_attr(DiffAttr::Unset)
+        .with_filter_clean(Some("clean".to_owned()))
+        .with_filter_smudge(Some("smudge".to_owned()))
+        .with_filter_process(Some("proc".to_owned()))
+        .with_filter_driver_name(Some("lfs".to_owned()))
+        .with_filter_smudge_required(true)
+        .with_filter_clean_required(true)
+        .with_ident(true)
+        .with_merge(MergeAttr::Unset)
+        .with_conflict_marker_size(Some("9".to_owned()))
+        .with_working_tree_encoding(Some("UTF-16".to_owned()))
+        .with_crlf_legacy(CrlfLegacyAttr::Input)
+        .with_whitespace(Some("trailing-space".to_owned()));
+    assert_eq!(attrs.text, TextAttr::Set);
+    assert_eq!(attrs.eol, EolAttr::Lf);
+    assert_eq!(attrs.diff_attr, DiffAttr::Unset);
+    assert_eq!(attrs.filter_clean.as_deref(), Some("clean"));
+    assert_eq!(attrs.filter_smudge.as_deref(), Some("smudge"));
+    assert_eq!(attrs.filter_process.as_deref(), Some("proc"));
+    assert_eq!(attrs.filter_driver_name.as_deref(), Some("lfs"));
+    assert!(attrs.filter_smudge_required && attrs.filter_clean_required && attrs.ident);
+    assert_eq!(attrs.merge, MergeAttr::Unset);
+    assert_eq!(attrs.conflict_marker_size.as_deref(), Some("9"));
+    assert_eq!(attrs.working_tree_encoding.as_deref(), Some("UTF-16"));
+    assert_eq!(attrs.crlf_legacy, CrlfLegacyAttr::Input);
+    assert_eq!(attrs.whitespace.as_deref(), Some("trailing-space"));
 }

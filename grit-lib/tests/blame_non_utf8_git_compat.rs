@@ -299,10 +299,7 @@ fn distinct_byte_paths_match_git_with_and_without_bloom_filters() {
                     .unwrap(),
                 2..=2
             );
-            let range = BlameOptions {
-                line_range: Some(2..=2),
-                ..Default::default()
-            };
+            let range = BlameOptions::default().with_line_range(Some(2..=2));
             assert_attribution(
                 &repo
                     .diff()
@@ -374,14 +371,11 @@ fn rename_and_copy_origins_preserve_bytes_and_hunks() {
         }
         let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
         for (path, copies) in [(renamed.as_slice(), false), (copied.as_slice(), true)] {
-            let options = BlameOptions {
-                copy_detection: if copies {
-                    CopyDetection::FromCreatingCommit
-                } else {
-                    CopyDetection::Off
-                },
-                ..Default::default()
-            };
+            let options = BlameOptions::default().with_copy_detection(if copies {
+                CopyDetection::FromCreatingCommit
+            } else {
+                CopyDetection::Off
+            });
             let result = repo
                 .diff()
                 .blame(
@@ -474,10 +468,7 @@ fn assert_literal_prefix_blame(root: &Path, cwd: &Path, operand: &str) {
         .diff()
         .blame(
             operand,
-            &BlameOptions {
-                line_range: Some(range),
-                ..Default::default()
-            },
+            &BlameOptions::default().with_line_range(Some(range)),
             &mut NullProgress,
             &CancelToken::never(),
         )

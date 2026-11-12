@@ -63,17 +63,12 @@ fn detached_rebase_opts() -> RebaseOntoOptions {
 }
 
 fn start_rebase_opts(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
-    StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: None,
-            branch_tip: tip,
-        },
-        rebase: detached_rebase_opts(),
-        apply: ApplyOptions::new(ident(), "rebase")
+    StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip),
+        detached_rebase_opts(),
+        ApplyOptions::new(ident(), "rebase")
             .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
-        exec: None,
-    }
+    )
 }
 
 /// Conflicting rebase while `HEAD` is detached at `topic` tip (same layout as

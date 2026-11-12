@@ -386,24 +386,15 @@ fn bare_repository_rejects_working_tree_diffs() {
 
     for request in [
         DiffRequest::default(),
-        DiffRequest {
-            unstaged: true,
-            ..DiffRequest::default()
-        },
-        DiffRequest {
-            against: Some("HEAD".to_owned()),
-            ..DiffRequest::default()
-        },
+        DiffRequest::default().with_unstaged(true),
+        DiffRequest::default().with_against(Some("HEAD".to_owned())),
     ] {
         assert!(matches!(
             repo.diff().resolve_request(None, &request),
             Err(ResolveDiffArgumentsError::NoWorkTree)
         ));
     }
-    let staged = DiffRequest {
-        staged: true,
-        ..DiffRequest::default()
-    };
+    let staged = DiffRequest::default().with_staged(true);
     let arguments = repo
         .diff()
         .resolve_request(None, &staged)

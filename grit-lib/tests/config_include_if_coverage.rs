@@ -13,13 +13,11 @@ use support::{grit_file_from_content, isolated_env};
 use tempfile::tempdir;
 
 fn ctx(git_dir: &std::path::Path, env: &Environment) -> IncludeContext {
-    IncludeContext {
-        git_dir: Some(git_dir.to_path_buf()),
-        cwd: env.cwd.clone(),
-        pwd: env.pwd.clone(),
-        env: std::sync::Arc::new(env.clone()),
-        ..Default::default()
-    }
+    IncludeContext::default()
+        .with_git_dir(Some(git_dir.to_path_buf()))
+        .with_cwd(env.cwd.clone())
+        .with_pwd(env.pwd.clone())
+        .with_env(std::sync::Arc::new(env.clone()))
 }
 
 #[test]

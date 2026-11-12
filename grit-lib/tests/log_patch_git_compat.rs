@@ -80,10 +80,7 @@ fn grit_log_patch(repo: &Repository, limit: usize, diff: DiffOptions) -> Vec<u8>
         .snapshot()
         .map(|c| (*c).clone())
         .unwrap_or_default();
-    let patch_opts = LogPatchOptions {
-        diff,
-        ..LogPatchOptions::git_default(&config)
-    };
+    let patch_opts = LogPatchOptions::git_default(&config).with_diff(diff);
     let mut patch_opts = patch_opts;
     patch_opts.commit_header = LogPatchCommitHeader::FormatPercentH;
     let mut out = Cursor::new(Vec::new());

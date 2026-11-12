@@ -126,11 +126,7 @@ fn long_history_revwalk_revparse_and_blame() -> grit_lib::error::Result<()> {
         .merge_bases(&[tip, tip], grit_lib::revwalk::MergeBaseMode::All)?;
     let blame = repo.diff().blame(
         "a.txt",
-        &BlameOptions {
-            start: Some(tip),
-            line_range: None,
-            ..Default::default()
-        },
+        &BlameOptions::default().with_start(Some(tip)),
         &mut NullProgress,
         &CancelToken::never(),
     )?;

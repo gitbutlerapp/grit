@@ -51,7 +51,7 @@ fn git_log_date(mode: &str) -> String {
 fn git_log_date_iso_matches_show_date() {
     for mode in ["iso", "iso-strict", "short", "raw", "unix"] {
         let git_s = git_log_date(mode);
-        let mut parsed = parse_date_format(mode).expect("parse mode");
+        let mut parsed = parse_date_format(mode, false).expect("parse mode");
         let grit_s = show_date(FIXED, 0, &mut parsed);
         let normalize = |s: &str| s.replace("+00:00", "Z");
         assert_eq!(
@@ -60,6 +60,16 @@ fn git_log_date_iso_matches_show_date() {
             "date mode {mode}: grit {grit_s:?} vs git {git_s:?}"
         );
     }
+}
+
+#[test]
+fn parse_date_format_auto_uses_caller_terminal_flag() {
+    let on_terminal = parse_date_format("auto:iso", true).expect("auto on terminal");
+    assert_eq!(on_terminal, parse_date_format("iso", false).expect("iso"));
+    let piped = parse_date_format("auto:iso", false).expect("auto piped");
+    assert_eq!(piped, parse_date_format("default", false).expect("default"));
+    assert!(parse_date_format("auto:bogus", true).is_err());
+    assert!(parse_date_format("auto:bogus", false).is_ok());
 }
 
 #[test]

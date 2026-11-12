@@ -822,11 +822,9 @@ fn commit_files_resolve_request_and_has_changes() {
         .expect("root commit");
     assert_eq!(root.files.len(), base_files().len());
 
-    let request = DiffRequest {
-        positionals: vec![fx.base_commit.to_hex(), fx.tip_commit.to_hex()],
-        paths: vec!["dir".to_owned()],
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default()
+        .with_positionals(vec![fx.base_commit.to_hex(), fx.tip_commit.to_hex()])
+        .with_paths(vec!["dir".to_owned()]);
     let args = diff.resolve_request(None, &request).expect("request");
     assert!(
         matches!(args.target, DiffTarget::Trees { .. }),
@@ -834,11 +832,7 @@ fn commit_files_resolve_request_and_has_changes() {
         args.target
     );
     assert_eq!(args.pathspec.specs(), ["dir"]);
-    let staged_and_unstaged = DiffRequest {
-        staged: true,
-        unstaged: true,
-        ..DiffRequest::default()
-    };
+    let staged_and_unstaged = DiffRequest::default().with_staged(true).with_unstaged(true);
     assert!(diff.resolve_request(None, &staged_and_unstaged).is_err());
 
     let spec = diff

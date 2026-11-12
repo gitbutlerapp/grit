@@ -48,10 +48,7 @@ fn main() -> Result<()> {
         .ok_or_else(|| anyhow::anyhow!("HEAD has no commit"))?;
 
     repo.bundles().write(
-        &BundleSpec {
-            include: vec![(tip, "refs/heads/main".into())],
-            ..Default::default()
-        },
+        &BundleSpec::default().with_include(vec![(tip, "refs/heads/main".into())]),
         &bundle_path,
         &mut NullProgress,
         &CancelToken::never(),

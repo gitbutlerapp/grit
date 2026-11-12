@@ -113,12 +113,11 @@ fn interrupted_rewrite_repo() -> (tempfile::TempDir, String) {
     repo.history()
         .apply(
             &plan,
-            &ApplyOptions {
-                identity: grit_lib::ident::parse_signature("A <a@b.c> 1 +0000").expect("ident"),
-                reflog_message: "rewrite".into(),
-                record_operation: None,
-                hooks: grit_lib::command_runner::hooks::PostOperationHooks::Skip,
-            },
+            &ApplyOptions::new(
+                grit_lib::ident::parse_signature("A <a@b.c> 1 +0000").expect("ident"),
+                "rewrite",
+            )
+            .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
             &mut grit_lib::progress::NullProgress,
             &CancelToken::never(),
         )

@@ -271,10 +271,7 @@ fn relative_include_from_non_file_config_is_typed_or_skipped() {
     .expect("relative command-line include is skipped by default");
     assert_eq!(set.get("x.y").unwrap(), None);
 
-    let strict = IncludeContext {
-        command_line_relative_include_is_error: true,
-        ..IncludeContext::default()
-    };
+    let strict = IncludeContext::default().with_command_line_relative_include_is_error(true);
     let err = config_error(
         ConfigSet::new()
             .merge_file(

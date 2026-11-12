@@ -44,16 +44,11 @@ fn rebase_opts() -> RebaseOntoOptions {
 }
 
 fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> StartRebaseOptions {
-    StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto,
-            branch_tip: tip,
-        },
-        rebase: rebase_opts(),
-        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
-        exec: None,
-    }
+    StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip).with_onto(onto),
+        rebase_opts(),
+        grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
+    )
 }
 
 /// Assert the finish step is the newest `HEAD` reflog entry (from the detached replay tip to
@@ -1151,17 +1146,12 @@ fn exec_replay_conflict_stops_resumably_and_continue_runs_command() {
     git(wt, &["switch", "topic"]);
     let grit = open_grit(wt);
     let opts = start_opts(upstream, Some(onto), tip);
-    let spec = ExecSpec {
-        commands: vec!["touch exec-ran".into()],
-    };
+    let spec = ExecSpec::default().with_commands(vec!["touch exec-ran".into()]);
     let runner = grit_lib::command_runner::system_command_runner();
     let out = grit
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(spec.clone()),
-                ..opts.clone()
-            },
+            &opts.clone().with_exec(Some(spec.clone())),
             runner.as_ref(),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
@@ -1213,17 +1203,12 @@ fn exec_single_commit_conflict_continue_completes() {
     git(wt, &["switch", "topic"]);
     let grit = open_grit(wt);
     let opts = start_opts(upstream, Some(onto), tip);
-    let spec = ExecSpec {
-        commands: vec!["true".into()],
-    };
+    let spec = ExecSpec::default().with_commands(vec!["true".into()]);
     let runner = grit_lib::command_runner::system_command_runner();
     let RebaseOutcome::Stopped(_) = grit
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(spec.clone()),
-                ..opts.clone()
-            },
+            &opts.clone().with_exec(Some(spec.clone())),
             runner.as_ref(),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
@@ -1257,17 +1242,12 @@ fn exec_failed_after_resolution_rolls_back_and_keeps_grit_plan() {
     git(wt, &["switch", "topic"]);
     let grit = open_grit(wt);
     let opts = start_opts(upstream, Some(onto), tip);
-    let spec = ExecSpec {
-        commands: vec!["printf dirty > exec-dirty; false".into()],
-    };
+    let spec = ExecSpec::default().with_commands(vec!["printf dirty > exec-dirty; false".into()]);
     let runner = grit_lib::command_runner::system_command_runner();
     let RebaseOutcome::Stopped(_) = grit
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(spec.clone()),
-                ..opts.clone()
-            },
+            &opts.clone().with_exec(Some(spec.clone())),
             runner.as_ref(),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
@@ -1311,17 +1291,12 @@ fn exec_failed_on_later_replay_preserves_grit_session() {
     git(wt, &["switch", "topic"]);
     let grit = open_grit(wt);
     let opts = start_opts(upstream, Some(onto), tip);
-    let spec = ExecSpec {
-        commands: vec!["test ! -f g".into()],
-    };
+    let spec = ExecSpec::default().with_commands(vec!["test ! -f g".into()]);
     let runner = grit_lib::command_runner::system_command_runner();
     let RebaseOutcome::Stopped(_) = grit
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(spec.clone()),
-                ..opts.clone()
-            },
+            &opts.clone().with_exec(Some(spec.clone())),
             runner.as_ref(),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
@@ -1359,17 +1334,12 @@ fn exec_replay_conflict_abort_restores_branch() {
     git(wt, &["switch", "topic"]);
     let grit = open_grit(wt);
     let opts = start_opts(upstream, Some(onto), tip);
-    let spec = ExecSpec {
-        commands: vec!["true".into()],
-    };
+    let spec = ExecSpec::default().with_commands(vec!["true".into()]);
     let runner = grit_lib::command_runner::system_command_runner();
     let RebaseOutcome::Stopped(_) = grit
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(spec.clone()),
-                ..opts.clone()
-            },
+            &opts.clone().with_exec(Some(spec.clone())),
             runner.as_ref(),
             &mut grit_lib::progress::NullProgress,
             &grit_lib::progress::CancelToken::never(),
@@ -2008,16 +1978,11 @@ fn stacked_branches_move_atomically_after_continue() {
     git(wt, &["switch", "main"]);
     let mut opts = rebase_opts();
     opts.rewrite.scope = RefScope::Branches;
-    let start = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream: oids["u"],
-            onto: Some(onto),
-            branch_tip,
-        },
-        rebase: opts,
-        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
-        exec: None,
-    };
+    let start = StartRebaseOptions::new(
+        RebaseRequest::new(oids["u"], branch_tip).with_onto(Some(onto)),
+        opts,
+        grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
+    );
     let main_before = grit
         .references()
         .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))
@@ -2096,16 +2061,11 @@ fn git_rebase_continue_leaves_stacked_branch_untouched_on_primary_conflict() {
     let grit = open_grit(wt);
     let mut opts = rebase_opts();
     opts.rewrite.scope = RefScope::Branches;
-    let start = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: Some(onto),
-            branch_tip: a_tip,
-        },
-        rebase: opts.clone(),
-        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
-        exec: None,
-    };
+    let start = StartRebaseOptions::new(
+        RebaseRequest::new(upstream, a_tip).with_onto(Some(onto)),
+        opts.clone(),
+        grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
+    );
 
     match grit
         .history()
@@ -2177,16 +2137,11 @@ fn git_rebase_continue_todo_excludes_descendant_merge_commit() {
     let grit = open_grit(wt);
     let mut opts = rebase_opts();
     opts.rewrite.scope = RefScope::Branches;
-    let start = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: Some(onto),
-            branch_tip: a_tip,
-        },
-        rebase: opts,
-        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
-        exec: None,
-    };
+    let start = StartRebaseOptions::new(
+        RebaseRequest::new(upstream, a_tip).with_onto(Some(onto)),
+        opts,
+        grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase"),
+    );
 
     match grit
         .history()
@@ -2377,10 +2332,7 @@ fn status_reports_git_started_rebase_with_branch_and_git_continue_step() {
     let standing = BranchStanding::compute(
         &grit,
         &model.head,
-        StandingOptions {
-            newest_ahead_limit: 1,
-            counts: false,
-        },
+        StandingOptions::new(1).with_counts(false),
     )
     .expect("standing");
     let header = StatusHeader::resolve(&standing, &model.state, &grit.operation().in_progress());
@@ -3134,9 +3086,7 @@ fn run_exec(
     use grit_lib::revwalk::history::ExecSpec;
     open_grit(wt).history().verify_rebase(
         plan,
-        &ExecSpec {
-            commands: commands.iter().map(|c| (*c).to_owned()).collect(),
-        },
+        &ExecSpec::default().with_commands(commands.iter().map(|c| (*c).to_owned()).collect()),
         &rebase_opts().rewrite,
         grit_lib::command_runner::system_command_runner().as_ref(),
     )
@@ -4231,9 +4181,7 @@ fn exec_resume_keeps_the_rewrite_options_the_rebase_started_with() {
         .history()
         .verify_rebase(
             &mut plan,
-            &ExecSpec {
-                commands: vec![conflicting_amend()],
-            },
+            &ExecSpec::default().with_commands(vec![conflicting_amend()]),
             &keep.rebase.rewrite,
             grit_lib::command_runner::system_command_runner().as_ref(),
         )
@@ -4485,16 +4433,11 @@ fn continue_after_conflict_records_history_last_for_undo_issue_2274() {
     let onto = git_oid(wt, "HEAD");
     git(wt, &["switch", "topic"]);
 
-    let start = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: Some(onto),
-            branch_tip: tip,
-        },
-        rebase: rebase_opts(),
-        apply: rebase_apply_with_record(),
-        exec: None,
-    };
+    let start = StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip).with_onto(Some(onto)),
+        rebase_opts(),
+        rebase_apply_with_record(),
+    );
     let (before, after) = finish_conflict_rebase_with_record(wt, &start);
     assert_eq!(before, orig_tip);
     assert_ne!(before, after);
@@ -4546,16 +4489,11 @@ fn skip_after_conflict_records_history_last_for_undo_issue_2274() {
     let onto = git_oid(wt, "HEAD");
     git(wt, &["switch", "topic"]);
 
-    let start = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: Some(onto),
-            branch_tip: tip,
-        },
-        rebase: rebase_opts(),
-        apply: rebase_apply_with_record(),
-        exec: None,
-    };
+    let start = StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip).with_onto(Some(onto)),
+        rebase_opts(),
+        rebase_apply_with_record(),
+    );
     match open_grit(wt)
         .history()
         .start_rebase(
@@ -4633,16 +4571,11 @@ fn stacked_continue_after_conflict_undo_restores_all_branch_tips_issue_2274() {
     let grit = open_grit(wt);
     let mut opts = rebase_opts();
     opts.rewrite.scope = RefScope::Branches;
-    let start = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream: oids["u"],
-            onto: Some(onto),
-            branch_tip,
-        },
-        rebase: opts,
-        apply: rebase_apply_with_record(),
-        exec: None,
-    };
+    let start = StartRebaseOptions::new(
+        RebaseRequest::new(oids["u"], branch_tip).with_onto(Some(onto)),
+        opts,
+        rebase_apply_with_record(),
+    );
     let main_before = grit
         .references()
         .resolve(grit_lib::refs::store::RefNameRef::new("refs/heads/main").expect("valid ref name"))

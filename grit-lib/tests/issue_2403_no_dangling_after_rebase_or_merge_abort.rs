@@ -134,16 +134,11 @@ fn clean_add_only_rebase_leaves_no_dangling_empty_objects() {
     let outcome = repo
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                request: RebaseRequest {
-                    upstream: main,
-                    onto: None,
-                    branch_tip: side_tip,
-                },
-                rebase: RebaseOntoOptions::new(rewrite_options()),
-                apply: apply_options(),
-                exec: None,
-            },
+            &StartRebaseOptions::new(
+                RebaseRequest::new(main, side_tip),
+                RebaseOntoOptions::new(rewrite_options()),
+                apply_options(),
+            ),
             repo.command_runner().as_ref(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -313,16 +308,11 @@ fn sha256_rebase_and_merge_abort_leave_no_dangling_empty_objects() {
     let outcome = repo
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                request: RebaseRequest {
-                    upstream: main,
-                    onto: None,
-                    branch_tip: side_tip,
-                },
-                rebase: RebaseOntoOptions::new(rewrite_options()),
-                apply: apply_options(),
-                exec: None,
-            },
+            &StartRebaseOptions::new(
+                RebaseRequest::new(main, side_tip),
+                RebaseOntoOptions::new(rewrite_options()),
+                apply_options(),
+            ),
             repo.command_runner().as_ref(),
             &mut NullProgress,
             &CancelToken::never(),

@@ -64,6 +64,7 @@ pub enum TrailerIfMissing {
 
 #[derive(Debug, Clone, Default)]
 /// `ProcessTrailerOptions` struct.
+#[non_exhaustive]
 pub struct ProcessTrailerOptions {
     /// `trim_empty` field.
     pub trim_empty: bool,
@@ -75,6 +76,43 @@ pub struct ProcessTrailerOptions {
     pub unfold: bool,
     /// `no_divider` field.
     pub no_divider: bool,
+}
+
+impl ProcessTrailerOptions {
+    /// Sets [`trim_empty`](Self::trim_empty).
+    #[must_use]
+    pub const fn with_trim_empty(mut self, trim_empty: bool) -> Self {
+        self.trim_empty = trim_empty;
+        self
+    }
+
+    /// Sets [`only_trailers`](Self::only_trailers).
+    #[must_use]
+    pub const fn with_only_trailers(mut self, only_trailers: bool) -> Self {
+        self.only_trailers = only_trailers;
+        self
+    }
+
+    /// Sets [`only_input`](Self::only_input).
+    #[must_use]
+    pub const fn with_only_input(mut self, only_input: bool) -> Self {
+        self.only_input = only_input;
+        self
+    }
+
+    /// Sets [`unfold`](Self::unfold).
+    #[must_use]
+    pub const fn with_unfold(mut self, unfold: bool) -> Self {
+        self.unfold = unfold;
+        self
+    }
+
+    /// Sets [`no_divider`](Self::no_divider).
+    #[must_use]
+    pub const fn with_no_divider(mut self, no_divider: bool) -> Self {
+        self.no_divider = no_divider;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]

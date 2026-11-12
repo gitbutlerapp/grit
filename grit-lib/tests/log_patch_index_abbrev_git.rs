@@ -124,12 +124,10 @@ fn index_line_abbrev_for_colliding_blobs_matches_git_show() {
         .snapshot()
         .map(|c| (*c).clone())
         .unwrap_or_default();
-    let patch_opts = LogPatchOptions {
-        diff: DiffOptions::default(),
-        abbrev_len: 7,
-        commit_header: LogPatchCommitHeader::FormatPercentH,
-        ..LogPatchOptions::git_default(&config)
-    };
+    let patch_opts = LogPatchOptions::git_default(&config)
+        .with_diff(DiffOptions::default())
+        .with_abbrev_len(7)
+        .with_commit_header(LogPatchCommitHeader::FormatPercentH);
     let mut out = Cursor::new(Vec::new());
     repo.odb()
         .with_pack_read_context(|| write_commit_log_patch(&repo, &mut out, &head_oid, &patch_opts))

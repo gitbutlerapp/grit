@@ -93,17 +93,13 @@ fn command_parameters_merged_when_includes_enabled() {
         inc.display().to_string().replace('\\', "\\\\")
     ));
     env.cwd = dir.path().to_path_buf();
-    let opts = LoadConfigOptions {
-        include_system: false,
-        process_includes: true,
-        command_includes: true,
-        include_ctx: grit_lib::config::IncludeContext {
-            cwd: dir.path().to_path_buf(),
-            env: std::sync::Arc::new(env.clone()),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let opts = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_include_ctx(
+            grit_lib::config::IncludeContext::default()
+                .with_cwd(dir.path().to_path_buf())
+                .with_env(std::sync::Arc::new(env.clone())),
+        );
     let set = ConfigSet::load(&env, None, &opts).expect("load");
     assert_eq!(set.get("top.key").unwrap().as_deref(), Some("override"));
     assert_eq!(set.get("fromparam.k").unwrap().as_deref(), Some("yes"));
@@ -156,16 +152,11 @@ fn includeif_onbranch_misses_when_branch_differs() {
     let set = ConfigSet::load(
         &env,
         Some(&git_dir),
-        &grit_lib::config::LoadConfigOptions {
-            include_system: false,
-            process_includes: true,
-            command_includes: true,
-            include_ctx: grit_lib::config::IncludeContext {
-                git_dir: Some(git_dir.clone()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
+        &grit_lib::config::LoadConfigOptions::default()
+            .with_include_system(false)
+            .with_include_ctx(
+                grit_lib::config::IncludeContext::default().with_git_dir(Some(git_dir.clone())),
+            ),
     )
     .expect("load");
     assert!(set.get("miss.k").unwrap().is_none());

@@ -72,10 +72,7 @@ fn run_captured(repo: &Repository, hook: &str) -> (grit_lib::error::Result<HookR
         hook,
         &[],
         config.as_ref(),
-        RunHookOptions {
-            stdout_to_stderr: true,
-            ..RunHookOptions::default()
-        },
+        RunHookOptions::default().with_stdout_to_stderr(true),
     );
     let output = match &result {
         Ok(r) => r.output().map_or_else(String::new, |o| {

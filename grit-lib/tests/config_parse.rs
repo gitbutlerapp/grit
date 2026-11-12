@@ -463,11 +463,7 @@ fn load_with_includes_disabled() {
     let file = grit_file_from_content(&cfg, &content, ConfigScope::Local);
     let mut set = ConfigSet::new();
     let env = Environment::empty();
-    let ctx = grit_lib::config::IncludeContext {
-        git_dir: None,
-        env: std::sync::Arc::new(env),
-        ..Default::default()
-    };
+    let ctx = grit_lib::config::IncludeContext::default().with_env(std::sync::Arc::new(env));
     set.merge_file(
         &file,
         &grit_lib::config::IncludeOptions::default()

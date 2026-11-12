@@ -175,10 +175,8 @@ fn handle_bundle_verify_and_git_unbundle() {
     let repo = open_grit(dir.path());
     repo.bundles()
         .write(
-            &grit_lib::bundle::BundleSpec {
-                include: vec![(head, "refs/heads/main".into())],
-                ..Default::default()
-            },
+            &grit_lib::bundle::BundleSpec::default()
+                .with_include(vec![(head, "refs/heads/main".into())]),
             &bundle_path,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),

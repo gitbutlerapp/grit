@@ -300,22 +300,17 @@ fn merge_dry_run_plan_does_not_create_orig_head() {
 }
 
 fn rebase_opts(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
-    StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: None,
-            branch_tip: tip,
-        },
-        rebase: RebaseOntoOptions::new(
+    StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip),
+        RebaseOntoOptions::new(
             RewriteOptions::new(IDENT.parse().expect("signature"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         )
         .with_skip_applied(false),
-        apply: ApplyOptions::new(ident(), "rebase")
+        ApplyOptions::new(ident(), "rebase")
             .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
-        exec: None,
-    }
+    )
 }
 
 fn rebase(dir: &Path, upstream: ObjectId, tip: ObjectId) -> RebaseOutcome {
@@ -368,12 +363,11 @@ fn up_to_date_rebase_with_exec_runs_at_each_commit_without_rewriting_tip() {
     let outcome = open(dir)
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(grit_lib::revwalk::history::ExecSpec::clone(&ExecSpec {
-                    commands: vec!["true".into()],
-                })),
-                ..rebase_opts(upstream, tip_before)
-            },
+            &(rebase_opts(upstream, tip_before)).with_exec(Some(
+                grit_lib::revwalk::history::ExecSpec::clone(
+                    &ExecSpec::default().with_commands(vec!["true".into()]),
+                ),
+            )),
             runner.as_ref(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -409,12 +403,11 @@ fn up_to_date_rebase_with_exec_amend_moves_stacked_branch() {
     let outcome = open(dir)
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(grit_lib::revwalk::history::ExecSpec::clone(&ExecSpec {
-                    commands: vec![amend.into()],
-                })),
-                ..opts.clone()
-            },
+            &opts
+                .clone()
+                .with_exec(Some(grit_lib::revwalk::history::ExecSpec::clone(
+                    &ExecSpec::default().with_commands(vec![amend.into()]),
+                ))),
             system_command_runner().as_ref(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -459,12 +452,9 @@ fn up_to_date_rebase_with_exec_on_empty_range_runs_nothing() {
     let outcome = open(dir)
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                exec: Some(grit_lib::revwalk::history::ExecSpec::clone(&ExecSpec {
-                    commands: vec!["true".into()],
-                })),
-                ..rebase_opts(tip, tip)
-            },
+            &(rebase_opts(tip, tip)).with_exec(Some(grit_lib::revwalk::history::ExecSpec::clone(
+                &ExecSpec::default().with_commands(vec!["true".into()]),
+            ))),
             runner.as_ref(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -481,12 +471,9 @@ fn rebase_with_exec(
     command: &str,
 ) -> grit_lib::error::Result<RebaseOutcome> {
     open(dir).history().start_rebase(
-        &StartRebaseOptions {
-            exec: Some(grit_lib::revwalk::history::ExecSpec::clone(&ExecSpec {
-                commands: vec![command.to_owned()],
-            })),
-            ..rebase_opts(upstream, tip)
-        },
+        &(rebase_opts(upstream, tip)).with_exec(Some(grit_lib::revwalk::history::ExecSpec::clone(
+            &ExecSpec::default().with_commands(vec![command.to_owned()]),
+        ))),
         system_command_runner().as_ref(),
         &mut NullProgress,
         &CancelToken::never(),

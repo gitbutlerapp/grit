@@ -40,11 +40,31 @@ pub enum PrecomposeDetection {
 
 /// Controls when init-time filesystem capability detection may write local config.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct InitFilesystemConfigOptions {
     /// Skip all detection (Git skips on re-init).
     pub is_reinit: bool,
     /// How aggressively to detect `core.precomposeunicode`.
     pub precompose_detection: PrecomposeDetection,
+}
+
+impl InitFilesystemConfigOptions {
+    /// Sets [`is_reinit`](Self::is_reinit).
+    #[must_use]
+    pub const fn with_is_reinit(mut self, is_reinit: bool) -> Self {
+        self.is_reinit = is_reinit;
+        self
+    }
+
+    /// Sets [`precompose_detection`](Self::precompose_detection).
+    #[must_use]
+    pub const fn with_precompose_detection(
+        mut self,
+        precompose_detection: PrecomposeDetection,
+    ) -> Self {
+        self.precompose_detection = precompose_detection;
+        self
+    }
 }
 
 /// Platform limits Git records as `core.*` during init.

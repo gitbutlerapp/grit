@@ -278,10 +278,9 @@ fn porcelain_checkout_glob_and_branch_tracking() {
             .ok(),
         Some(head)
     );
-    let query = BranchListQuery {
-        scope: BranchScope::Local,
-        refs: RefQuery::default(),
-    };
+    let query = BranchListQuery::default()
+        .with_scope(BranchScope::Local)
+        .with_refs(RefQuery::default());
     let _ = repo
         .branches()
         .list(&query, BranchDetail::Names)

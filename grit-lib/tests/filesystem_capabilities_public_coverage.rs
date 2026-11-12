@@ -15,10 +15,8 @@ fn filesystem_capabilities_public_api_smoke() {
     fs::write(git_dir.join("config"), "[core]\n").expect("config");
 
     let _ = FilesystemCapabilitiesError::Io(std::io::Error::other("smoke"));
-    let _opts = InitFilesystemConfigOptions {
-        is_reinit: false,
-        precompose_detection: PrecomposeDetection::Platform,
-    };
+    let _opts = InitFilesystemConfigOptions::default()
+        .with_precompose_detection(PrecomposeDetection::Platform);
     let caps = FilesystemCapabilities::detect(&git_dir).expect("detect");
     assert_eq!(
         FilesystemCapabilities::detect_case_insensitive(&git_dir).expect("case"),

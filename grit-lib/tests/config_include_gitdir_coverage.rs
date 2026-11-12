@@ -35,12 +35,10 @@ fn relative_gitdir_include_from_disk_file() {
     .expect("cfg");
 
     let env = Environment::empty();
-    let ctx = IncludeContext {
-        git_dir: Some(git_dir.clone()),
-        cwd: repo.clone(),
-        env: std::sync::Arc::new(env),
-        ..Default::default()
-    };
+    let ctx = IncludeContext::default()
+        .with_git_dir(Some(git_dir.clone()))
+        .with_cwd(repo.clone())
+        .with_env(std::sync::Arc::new(env));
     let file = ConfigFile::from_path(&git_dir.join("config"), ConfigScope::Local)
         .expect("read")
         .expect("exists");

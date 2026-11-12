@@ -11,6 +11,7 @@ use std::collections::BTreeMap;
 
 /// Options for [`apply_patch_to_index`].
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct IndexApplyOptions {
     /// When true, validate and report paths without writing the index or objects.
     pub dry_run: bool,
@@ -18,6 +19,29 @@ pub struct IndexApplyOptions {
     pub reverse: bool,
     /// When reversing, compare results to this tree to drop index entries that match `HEAD`.
     pub head_tree_oid: Option<ObjectId>,
+}
+
+impl IndexApplyOptions {
+    /// Sets [`dry_run`](Self::dry_run).
+    #[must_use]
+    pub const fn with_dry_run(mut self, dry_run: bool) -> Self {
+        self.dry_run = dry_run;
+        self
+    }
+
+    /// Sets [`reverse`](Self::reverse).
+    #[must_use]
+    pub const fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
+
+    /// Sets [`head_tree_oid`](Self::head_tree_oid).
+    #[must_use]
+    pub const fn with_head_tree_oid(mut self, head_tree_oid: Option<ObjectId>) -> Self {
+        self.head_tree_oid = head_tree_oid;
+        self
+    }
 }
 
 /// Result of applying patches to the index.

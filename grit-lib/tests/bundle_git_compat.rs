@@ -71,10 +71,7 @@ fn grit_bundle_full_and_incremental_git_verify_clone_fsck() {
         let mut f = std::fs::File::create(&full_path).expect("create");
         repo.bundles()
             .write_to(
-                &BundleSpec {
-                    include: vec![(c2, "refs/heads/main".to_owned())],
-                    ..Default::default()
-                },
+                &BundleSpec::default().with_include(vec![(c2, "refs/heads/main".to_owned())]),
                 &mut f,
                 &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
@@ -102,11 +99,9 @@ fn grit_bundle_full_and_incremental_git_verify_clone_fsck() {
         let mut f = std::fs::File::create(&inc_path).expect("create");
         repo.bundles()
             .write_to(
-                &BundleSpec {
-                    include: vec![(c2, "refs/heads/main".to_owned())],
-                    exclude: vec![c1],
-                    ..Default::default()
-                },
+                &BundleSpec::default()
+                    .with_include(vec![(c2, "refs/heads/main".to_owned())])
+                    .with_exclude(vec![c1]),
                 &mut f,
                 &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
@@ -751,11 +746,9 @@ fn unbundle_promisor_marks_installed_pack_not_preexisting() {
         grit_repo(src)
             .bundles()
             .write_to(
-                &BundleSpec {
-                    include: vec![(tip, "refs/heads/main".to_owned())],
-                    filter: Some(FilterSpec::parse("blob:none").expect("filter")),
-                    ..Default::default()
-                },
+                &BundleSpec::default()
+                    .with_include(vec![(tip, "refs/heads/main".to_owned())])
+                    .with_filter(Some(FilterSpec::parse("blob:none").expect("filter"))),
                 &mut f,
                 &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
@@ -815,11 +808,9 @@ fn grit_write_filtered_bundle_omits_blobs_from_pack() {
         grit_repo(src)
             .bundles()
             .write_to(
-                &BundleSpec {
-                    include: vec![(tip, "refs/heads/main".to_owned())],
-                    filter: Some(FilterSpec::parse("blob:none").expect("filter")),
-                    ..Default::default()
-                },
+                &BundleSpec::default()
+                    .with_include(vec![(tip, "refs/heads/main".to_owned())])
+                    .with_filter(Some(FilterSpec::parse("blob:none").expect("filter"))),
                 &mut f,
                 &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
@@ -877,11 +868,10 @@ fn grit_write_filtered_bundle_with_prerequisites_holds_only_new_small_objects() 
         grit_repo(src)
             .bundles()
             .write_to(
-                &BundleSpec {
-                    include: vec![(tip, "refs/heads/main".to_owned())],
-                    exclude: vec![base],
-                    filter: Some(FilterSpec::parse("blob:limit=1024").expect("filter")),
-                },
+                &BundleSpec::default()
+                    .with_include(vec![(tip, "refs/heads/main".to_owned())])
+                    .with_exclude(vec![base])
+                    .with_filter(Some(FilterSpec::parse("blob:limit=1024").expect("filter"))),
                 &mut f,
                 &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
@@ -954,11 +944,9 @@ fn grit_write_filtered_bundle_in_partial_clone_skips_promised_blobs() {
         let mut f = std::fs::File::create(&bundle_path).expect("create");
         repo.bundles()
             .write_to(
-                &BundleSpec {
-                    include: vec![(tip, "refs/heads/main".to_owned())],
-                    filter: Some(FilterSpec::parse("blob:limit=1024").expect("filter")),
-                    ..Default::default()
-                },
+                &BundleSpec::default()
+                    .with_include(vec![(tip, "refs/heads/main".to_owned())])
+                    .with_filter(Some(FilterSpec::parse("blob:limit=1024").expect("filter"))),
                 &mut f,
                 &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
@@ -999,10 +987,7 @@ fn bundle_create_all_matches_git_list_heads() {
     grit_repo(src)
         .bundles()
         .write_from_revs(
-            &BundleCreateOptions {
-                all_refs: true,
-                rev_tokens: Vec::new(),
-            },
+            &BundleCreateOptions::default().with_all_refs(true),
             &grit_bundle,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
@@ -1178,10 +1163,7 @@ fn assert_packed_all_bundle_keeps_deltas_and_round_trips(object_format: &str) {
     grit_repo(&src)
         .bundles()
         .write_from_revs(
-            &BundleCreateOptions {
-                all_refs: true,
-                rev_tokens: Vec::new(),
-            },
+            &BundleCreateOptions::default().with_all_refs(true),
             &bundle_path,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
@@ -1274,10 +1256,7 @@ fn write_bundle_streams_pack_into_writer() {
     let mut out = WriteRecorder::default();
     repo.bundles()
         .write_to(
-            &BundleSpec {
-                include: vec![(tip, "refs/heads/main".to_owned())],
-                ..Default::default()
-            },
+            &BundleSpec::default().with_include(vec![(tip, "refs/heads/main".to_owned())]),
             &mut out,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
@@ -1314,10 +1293,7 @@ fn bundle_all_with_packed_and_loose_objects_round_trips_with_git() {
     grit_repo(&src)
         .bundles()
         .write_from_revs(
-            &BundleCreateOptions {
-                all_refs: true,
-                rev_tokens: Vec::new(),
-            },
+            &BundleCreateOptions::default().with_all_refs(true),
             &bundle_path,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
@@ -1382,11 +1358,9 @@ fn incremental_bundle_reuses_delta_against_prerequisite_blob() {
         grit_repo(&src)
             .bundles()
             .write_to(
-                &BundleSpec {
-                    include: vec![(tip, "refs/heads/main".to_owned())],
-                    exclude: vec![base],
-                    ..Default::default()
-                },
+                &BundleSpec::default()
+                    .with_include(vec![(tip, "refs/heads/main".to_owned())])
+                    .with_exclude(vec![base]),
                 &mut out,
                 &mut grit_lib::progress::NullProgress,
                 grit_lib::progress::CancelToken::never_ref(),
@@ -1531,10 +1505,7 @@ fn bundles_create_failure_preserves_existing_bundle_and_object_not_found_error()
     let bundle_path = src.join("precious.bundle");
     repo.bundles()
         .write(
-            &BundleSpec {
-                include: vec![(c2, "refs/heads/main".to_owned())],
-                ..Default::default()
-            },
+            &BundleSpec::default().with_include(vec![(c2, "refs/heads/main".to_owned())]),
             &bundle_path,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
@@ -1549,10 +1520,7 @@ fn bundles_create_failure_preserves_existing_bundle_and_object_not_found_error()
     let err = repo
         .bundles()
         .write(
-            &BundleSpec {
-                include: vec![(bad, "refs/heads/nope".into())],
-                ..Default::default()
-            },
+            &BundleSpec::default().with_include(vec![(bad, "refs/heads/nope".into())]),
             &bundle_path,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
@@ -1584,10 +1552,7 @@ fn bundles_create_replaces_existing_destination_on_success() {
 
     repo.bundles()
         .write(
-            &BundleSpec {
-                include: vec![(c2, "refs/heads/main".to_owned())],
-                ..Default::default()
-            },
+            &BundleSpec::default().with_include(vec![(c2, "refs/heads/main".to_owned())]),
             &bundle_path,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),
@@ -1620,10 +1585,7 @@ fn bundles_create_cancelled_preserves_destination_and_removes_part_file() {
     let err = repo
         .bundles()
         .write(
-            &BundleSpec {
-                include: vec![(c2, "refs/heads/main".to_owned())],
-                ..Default::default()
-            },
+            &BundleSpec::default().with_include(vec![(c2, "refs/heads/main".to_owned())]),
             &bundle_path,
             &mut NullProgress,
             &flag,

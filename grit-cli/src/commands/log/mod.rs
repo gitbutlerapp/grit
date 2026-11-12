@@ -765,11 +765,10 @@ pub(crate) fn load_commits_with_format_for_oids(
         let mut diff_options = DiffOptions::from_config(config.as_ref());
         format.apply_context(&mut diff_options);
         diff_options.word_level_inline = false;
-        let opts = CommitFilesManyOptions {
-            diff_options,
-            detail,
-            skip_merge_patches: true,
-        };
+        let opts = CommitFilesManyOptions::default()
+            .with_diff_options(diff_options)
+            .with_detail(detail)
+            .with_skip_merge_patches(true);
         Some((
             detail,
             repo.diff()

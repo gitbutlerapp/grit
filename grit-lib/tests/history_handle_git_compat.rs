@@ -79,16 +79,7 @@ fn fixup_through_the_handle_round_trips_with_git() {
     let staged = history.staged_paths().expect("staged");
     assert_eq!(staged, vec!["b.txt".to_owned()]);
     let plan = history
-        .fixup(
-            target,
-            &FixupOptions {
-                message: None,
-                empty: EmptyPolicy::Drop,
-                rewrite: rewrite_opts(),
-                selection: None,
-                pathspecs: Vec::new(),
-            },
-        )
+        .fixup(target, &FixupOptions::new(rewrite_opts()))
         .expect("plan");
     history.verify_plan(&plan).expect("verify");
     history
@@ -148,12 +139,11 @@ fn start_opts(repo: &Repository, upstream: ObjectId) -> StartRebaseOptions {
         .history()
         .rebase_run_request(branch_tip, upstream, None, Some("main"), false, None)
         .expect("request");
-    StartRebaseOptions {
+    StartRebaseOptions::new(
         request,
-        rebase: RebaseOntoOptions::new(rewrite_opts()),
-        apply: apply_opts("rebase"),
-        exec: None,
-    }
+        RebaseOntoOptions::new(rewrite_opts()),
+        apply_opts("rebase"),
+    )
 }
 
 #[test]
@@ -218,9 +208,7 @@ fn start_rebase_runs_the_exec_option_through_the_given_runner() {
     let (main, _, _) = diverged(wt);
     let grit = open(wt);
     let mut opts = start_opts(&grit, main);
-    opts.exec = Some(ExecSpec {
-        commands: vec!["true".into()],
-    });
+    opts.exec = Some(ExecSpec::default().with_commands(vec!["true".into()]));
     let outcome = grit
         .history()
         .start_rebase(
@@ -258,11 +246,7 @@ fn plan_rebase_runs_pre_rebase_from_the_options_and_check_does_not() {
     }
     let grit = open(wt);
     let history = grit.history();
-    let request = RebaseRequest {
-        upstream: main,
-        onto: None,
-        branch_tip: topic,
-    };
+    let request = RebaseRequest::new(main, topic);
     let mut opts = RebaseOntoOptions::new(rewrite_opts());
     assert_eq!(opts.pre_rebase, PreRebase::Skip);
     opts.pre_rebase = PreRebase::Run {
@@ -374,14 +358,7 @@ fn journal_absorb_base_and_fetch_request_helpers_on_the_handle() {
     let request = history
         .rebase_request_after_fetch(topic, main, "refs/heads/main", None, false)
         .expect("request");
-    assert_eq!(
-        request,
-        RebaseRequest {
-            upstream: main,
-            onto: None,
-            branch_tip: topic,
-        }
-    );
+    assert_eq!(request, RebaseRequest::new(main, topic));
 }
 
 #[test]
@@ -415,13 +392,7 @@ fn fixup_hunks_through_the_handle_fold_only_the_selected_hunk() {
     let plan = history
         .fixup(
             target,
-            &FixupOptions {
-                message: None,
-                empty: EmptyPolicy::Drop,
-                rewrite: rewrite_opts(),
-                selection: Some(selection.clone()),
-                pathspecs: Vec::new(),
-            },
+            &FixupOptions::new(rewrite_opts()).with_selection(Some(selection.clone())),
         )
         .expect("plan");
     history

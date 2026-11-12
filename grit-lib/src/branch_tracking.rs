@@ -343,6 +343,7 @@ pub struct TargetSpec(pub String);
 
 /// Options for `compare_with_target`.
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct TargetComparisonOptions {
     /// When set, compare against this ref or revision instead of discovering a target branch.
     pub target: Option<TargetSpec>,
@@ -350,6 +351,43 @@ pub struct TargetComparisonOptions {
     pub list_limit: usize,
     /// When true, retain up to [`Self::list_limit`] newest behind commits as well as ahead.
     pub include_behind: bool,
+}
+
+impl TargetComparisonOptions {
+    /// Creates a [`TargetComparisonOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `list_limit`: maximum number of newest ahead commit oids to retain.
+    #[must_use]
+    pub fn new(list_limit: usize) -> Self {
+        Self {
+            list_limit,
+            target: None,
+            include_behind: false,
+        }
+    }
+
+    /// Sets [`target`](Self::target).
+    #[must_use]
+    pub fn with_target(mut self, target: Option<TargetSpec>) -> Self {
+        self.target = target;
+        self
+    }
+
+    /// Sets [`list_limit`](Self::list_limit).
+    #[must_use]
+    pub const fn with_list_limit(mut self, list_limit: usize) -> Self {
+        self.list_limit = list_limit;
+        self
+    }
+
+    /// Sets [`include_behind`](Self::include_behind).
+    #[must_use]
+    pub const fn with_include_behind(mut self, include_behind: bool) -> Self {
+        self.include_behind = include_behind;
+        self
+    }
 }
 
 /// Ahead-of-target view of the current branch (`grit shortlog` / `grit ahead`).
@@ -748,12 +786,44 @@ pub(crate) fn comparison_base(
 
 /// Options for [`BranchStanding::compute`].
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StandingOptions {
     /// Maximum number of newest ahead commits to retain on each [`TrackedComparison`].
     pub newest_ahead_limit: usize,
     /// When `false`, only tip oids are compared; [`TrackedComparison::ahead`] and
     /// [`TrackedComparison::behind`] stay `None` and no rev-list walk runs.
     pub counts: bool,
+}
+
+impl StandingOptions {
+    /// Creates options that keep up to `newest_ahead_limit` newest ahead commits and compute
+    /// ahead/behind counts ([`counts`](Self::counts) is `true`).
+    ///
+    /// # Parameters
+    ///
+    /// - `newest_ahead_limit`: maximum number of newest ahead commits to retain on each
+    ///   [`TrackedComparison`].
+    #[must_use]
+    pub const fn new(newest_ahead_limit: usize) -> Self {
+        Self {
+            newest_ahead_limit,
+            counts: true,
+        }
+    }
+
+    /// Sets [`newest_ahead_limit`](Self::newest_ahead_limit).
+    #[must_use]
+    pub const fn with_newest_ahead_limit(mut self, newest_ahead_limit: usize) -> Self {
+        self.newest_ahead_limit = newest_ahead_limit;
+        self
+    }
+
+    /// Sets [`counts`](Self::counts).
+    #[must_use]
+    pub const fn with_counts(mut self, counts: bool) -> Self {
+        self.counts = counts;
+        self
+    }
 }
 
 /// Symmetric comparison of the current branch tip against one tracked ref (target or upstream).

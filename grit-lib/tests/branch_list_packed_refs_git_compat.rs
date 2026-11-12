@@ -108,7 +108,10 @@ fn open(dir: &Path) -> Repository {
 
 fn list(repo: &Repository, scope: BranchScope, refs: RefQuery) -> Vec<BranchSummary> {
     repo.branches()
-        .list(&BranchListQuery { scope, refs }, BranchDetail::Full)
+        .list(
+            &BranchListQuery::default().with_scope(scope).with_refs(refs),
+            BranchDetail::Full,
+        )
         .expect("list")
 }
 

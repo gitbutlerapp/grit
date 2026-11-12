@@ -487,10 +487,7 @@ fn a_promisor_tree_no_commit_reaches_still_promises_its_blobs() {
     install_pack_bytes(
         pack,
         repo.odb(),
-        &IngestPackOptions {
-            mark_promisor_pack: true,
-            ..IngestPackOptions::default()
-        },
+        &IngestPackOptions::default().with_mark_promisor_pack(true),
     )
     .unwrap();
     let hex = tree.to_hex();
@@ -821,10 +818,7 @@ fn copy_into_kept(from: &Path, to: &Path, oids: &[ObjectId], message: &str) {
     install_pack_bytes(
         pack,
         to.odb(),
-        &IngestPackOptions {
-            keep_message: Some(message.to_owned()),
-            ..IngestPackOptions::default()
-        },
+        &IngestPackOptions::default().with_keep_message(Some(message.to_owned())),
     )
     .unwrap();
     clear_pack_cache();

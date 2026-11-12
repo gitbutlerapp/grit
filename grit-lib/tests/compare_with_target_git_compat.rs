@@ -63,11 +63,7 @@ fn git_ahead_list(dir: &Path, target: &str, limit: usize) -> Vec<ObjectId> {
 
 fn assert_matches_git(dir: &Path, target: &str, limit: usize) {
     let repo = open(dir);
-    let opts = TargetComparisonOptions {
-        target: Some(TargetSpec(target.to_owned())),
-        list_limit: limit,
-        include_behind: false,
-    };
+    let opts = TargetComparisonOptions::new(limit).with_target(Some(TargetSpec(target.to_owned())));
     let cmp = compare_with_target(&repo, &opts).expect("compare");
     assert_eq!(
         compare_with_target_optional(&repo, &opts).expect("optional compare"),
@@ -131,11 +127,8 @@ fn compare_with_target_raw_oid() {
 fn compare_with_target_unknown_errors() {
     let dir = topic_ahead_fixture("unknown");
     let repo = open(&dir);
-    let opts = TargetComparisonOptions {
-        target: Some(TargetSpec("no-such-ref".into())),
-        list_limit: 100,
-        include_behind: false,
-    };
+    let opts =
+        TargetComparisonOptions::new(100).with_target(Some(TargetSpec("no-such-ref".into())));
     let err = compare_with_target(&repo, &opts).unwrap_err();
     assert!(
         matches!(err, Error::Object(ObjectError::NotFound { .. }))
@@ -164,11 +157,7 @@ fn compare_with_target_optional_none_without_candidates() {
     git(&root, &["init", "-q", "-b", "trunk"]);
     commit(&root, "f", "only");
     let repo = open(&root);
-    let opts = TargetComparisonOptions {
-        target: None,
-        list_limit: 100,
-        include_behind: false,
-    };
+    let opts = TargetComparisonOptions::new(100);
     assert!(compare_with_target_optional(&repo, &opts)
         .expect("optional")
         .is_none());
@@ -184,11 +173,9 @@ fn both_target_comparisons_keep_exact_counts_with_bounded_lists() {
     for target in [None, Some(TargetSpec("main".into()))] {
         for list_limit in [0, 1, 100] {
             for include_behind in [false, true] {
-                let opts = TargetComparisonOptions {
-                    target: target.clone(),
-                    list_limit,
-                    include_behind,
-                };
+                let opts = TargetComparisonOptions::new(list_limit)
+                    .with_target(target.clone())
+                    .with_include_behind(include_behind);
                 let cmp = compare_with_target(&repo, &opts).expect("compare");
                 assert_eq!(
                     compare_with_target_optional(&repo, &opts).expect("optional compare"),

@@ -475,11 +475,9 @@ pub fn blame_porcelain_with_range(
         .diff()
         .blame(
             path,
-            &BlameOptions {
-                start: Some(start),
-                line_range,
-                ..Default::default()
-            },
+            &BlameOptions::default()
+                .with_start(Some(start))
+                .with_line_range(line_range),
             &mut NullProgress,
             &CancelToken::never(),
         )

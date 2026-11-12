@@ -195,10 +195,7 @@ use grit_lib::progress::{CancelToken, NullProgress};
 # fn editor(repo: &grit_lib::repo::Repository, buffer: Vec<u8>) -> grit_lib::error::Result<()> {
 let result = repo.diff().blame(
     "src/main.rs",
-    &BlameOptions {
-        final_source: BlameFinalSource::Contents(buffer),
-        ..BlameOptions::default()
-    },
+    &BlameOptions::default().with_final_source(BlameFinalSource::Contents(buffer)),
     &mut NullProgress,
     &CancelToken::never(),
 )?;

@@ -28,10 +28,10 @@ fn committer(seq: i64) -> String {
 }
 
 fn squash_opts(scope: RefScope) -> SquashOptions {
-    SquashOptions {
-        message: SquashMessage::Oldest,
-        rewrite: RewriteOptions::new(committer(1).parse().expect("signature")).with_scope(scope),
-    }
+    SquashOptions::new(
+        SquashMessage::Oldest,
+        RewriteOptions::new(committer(1).parse().expect("signature")).with_scope(scope),
+    )
 }
 
 fn apply_plan(repo: &Repository, plan: &RewritePlan) {
@@ -436,10 +436,7 @@ fn squash_refuses_mixed_range_outside_target_with_combine() {
         .history()
         .squash(
             &[&format!("{}..HEAD", alpha.to_hex())],
-            &SquashOptions {
-                message: SquashMessage::Combine,
-                rewrite: squash_opts(RefScope::Head).rewrite,
-            },
+            &SquashOptions::new(SquashMessage::Combine, squash_opts(RefScope::Head).rewrite),
         )
         .unwrap_err();
     assert!(
@@ -464,10 +461,10 @@ fn squash_refuses_mixed_range_outside_target_with_custom_message() {
         .history()
         .squash(
             &[&format!("{}..HEAD", alpha.to_hex())],
-            &SquashOptions {
-                message: SquashMessage::Custom("replacement\n".into()),
-                rewrite: squash_opts(RefScope::Head).rewrite,
-            },
+            &SquashOptions::new(
+                SquashMessage::Custom("replacement\n".into()),
+                squash_opts(RefScope::Head).rewrite,
+            ),
         )
         .unwrap_err();
     assert!(
@@ -491,10 +488,7 @@ fn squash_all_markers_for_one_target_allowed() {
     grit.history()
         .squash(
             &[&format!("{}..HEAD", alpha.to_hex())],
-            &SquashOptions {
-                message: SquashMessage::Combine,
-                rewrite: squash_opts(RefScope::Head).rewrite,
-            },
+            &SquashOptions::new(SquashMessage::Combine, squash_opts(RefScope::Head).rewrite),
         )
         .expect("all-marker outside target squash");
 }

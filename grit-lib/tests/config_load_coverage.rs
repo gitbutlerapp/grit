@@ -61,10 +61,7 @@ fn load_cascade_system_global_xdg_local_and_git_config_override() {
     env.git_config = Some(override_cfg.display().to_string());
     env.cwd = repo.clone();
 
-    let opts = LoadConfigOptions {
-        include_system: true,
-        ..default_load_opts(&git_dir, &env)
-    };
+    let opts = default_load_opts(&git_dir, &env).with_include_system(true);
     let set = ConfigSet::load(&env, Some(&git_dir), &opts).expect("load");
     assert_eq!(
         set.get("override.k").unwrap().as_deref(),
@@ -167,26 +164,19 @@ fn load_with_command_includes_and_no_process_includes() {
     ));
     env.cwd = dir.path().to_path_buf();
 
-    let opts = LoadConfigOptions {
-        include_system: false,
-        process_includes: false,
-        command_includes: true,
-        ..Default::default()
-    };
+    let opts = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_process_includes(false);
     let without = ConfigSet::load(&env, None, &opts).expect("load");
     assert!(without.get("frominc.k").unwrap().is_none());
 
-    let opts_proc = LoadConfigOptions {
-        process_includes: true,
-        command_includes: true,
-        include_system: false,
-        include_ctx: grit_lib::config::IncludeContext {
-            cwd: dir.path().to_path_buf(),
-            env: std::sync::Arc::new(env.clone()),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let opts_proc = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_include_ctx(
+            grit_lib::config::IncludeContext::default()
+                .with_cwd(dir.path().to_path_buf())
+                .with_env(std::sync::Arc::new(env.clone())),
+        );
     let with = ConfigSet::load(&env, None, &opts_proc).expect("load proc");
     assert_eq!(with.get("frominc.k").unwrap().as_deref(), Some("yes"));
 }
@@ -229,11 +219,9 @@ fn diagnostics_on_ignored_git_dir() {
 
     let sink = Arc::new(CollectingDiagnostics::new());
     let env = Environment::empty();
-    let opts = LoadConfigOptions {
-        include_system: false,
-        diagnostics: Some(sink.clone()),
-        ..Default::default()
-    };
+    let opts = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_diagnostics(Some(sink.clone()));
     let set = ConfigSet::load(&env, Some(&fake_git), &opts).expect("load");
     assert!(set.get("core.bare").unwrap().is_none());
     let _warnings = sink.warnings();
@@ -336,18 +324,14 @@ fn command_relative_include_errors_when_configured() {
     let mut env = Environment::empty();
     env.git_config_parameters = Some("'include.path=inc.conf'".into());
     env.cwd = dir.path().to_path_buf();
-    let opts = LoadConfigOptions {
-        include_system: false,
-        process_includes: true,
-        command_includes: true,
-        include_ctx: grit_lib::config::IncludeContext {
-            cwd: dir.path().to_path_buf(),
-            command_line_relative_include_is_error: true,
-            env: std::sync::Arc::new(env.clone()),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let opts = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_include_ctx(
+            grit_lib::config::IncludeContext::default()
+                .with_cwd(dir.path().to_path_buf())
+                .with_command_line_relative_include_is_error(true)
+                .with_env(std::sync::Arc::new(env.clone())),
+        );
     let err = ConfigSet::load(&env, None, &opts).expect_err("relative cmd include");
     assert!(matches!(err, Error::Config(_)));
 }
@@ -426,11 +410,9 @@ fn optional_includeif_and_git_config_override_file() {
     set.merge_file(
         &file,
         &grit_lib::config::IncludeOptions::default().with_context(
-            grit_lib::config::IncludeContext {
-                cwd: dir.path().to_path_buf(),
-                env: std::sync::Arc::new(env.clone()),
-                ..Default::default()
-            },
+            grit_lib::config::IncludeContext::default()
+                .with_cwd(dir.path().to_path_buf())
+                .with_env(std::sync::Arc::new(env.clone())),
         ),
     )
     .expect("optional include");

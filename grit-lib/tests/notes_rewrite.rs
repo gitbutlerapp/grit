@@ -111,16 +111,11 @@ fn rebase_feat_onto_main(root: &std::path::Path, repo: &Repository, feat_tip: Ob
     let outcome = repo
         .history()
         .start_rebase(
-            &StartRebaseOptions {
-                request: RebaseRequest {
-                    upstream: main,
-                    onto: None,
-                    branch_tip: feat_tip,
-                },
-                rebase: RebaseOntoOptions::new(rewrite_options()),
-                apply: apply_options(),
-                exec: None,
-            },
+            &StartRebaseOptions::new(
+                RebaseRequest::new(main, feat_tip),
+                RebaseOntoOptions::new(rewrite_options()),
+                apply_options(),
+            ),
             repo.command_runner().as_ref(),
             &mut NullProgress,
             &CancelToken::never(),
@@ -197,10 +192,7 @@ fn squash_concatenates_notes_on_survivor() {
         .history()
         .squash(
             &["main..HEAD"],
-            &SquashOptions {
-                message: SquashMessage::Combine,
-                rewrite: rewrite_options(),
-            },
+            &SquashOptions::new(SquashMessage::Combine, rewrite_options()),
         )
         .expect("squash plan");
     repo.history()

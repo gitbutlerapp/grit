@@ -38,15 +38,8 @@ fn model_and_standing(repo: &Repository) -> (StatusModel, BranchStanding) {
             &CancelToken::never(),
         )
         .expect("status");
-    let standing = BranchStanding::compute(
-        repo,
-        &model.head,
-        StandingOptions {
-            newest_ahead_limit: 10,
-            counts: true,
-        },
-    )
-    .expect("standing");
+    let standing =
+        BranchStanding::compute(repo, &model.head, StandingOptions::new(10)).expect("standing");
     (model, standing)
 }
 

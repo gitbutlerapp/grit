@@ -333,13 +333,11 @@ pub fn run_fixup(
         .history()
         .fixup(
             commit_oid,
-            &FixupOptions {
-                message,
-                empty,
-                rewrite: rewrite.options.clone(),
-                selection: hunk_selection.clone(),
-                pathspecs: pathspec_list.clone(),
-            },
+            &FixupOptions::new(rewrite.options.clone())
+                .with_message(message)
+                .with_empty(empty)
+                .with_selection(hunk_selection.clone())
+                .with_pathspecs(pathspec_list.clone()),
         )
         .map_err(map_fixup_error)?;
     if !shared.dry_run {
@@ -415,10 +413,7 @@ pub fn run_squash(
         .history()
         .squash(
             &range_refs,
-            &SquashOptions {
-                message,
-                rewrite: rewrite.options.clone(),
-            },
+            &SquashOptions::new(message, rewrite.options.clone()),
         )
         .map_err(on_err)?;
     rewrite.repo.history().verify_plan(&plan).map_err(on_err)?;
@@ -467,7 +462,7 @@ pub fn run_split(
             commit_oid,
             resolved.specs(),
             split_message,
-            &SplitOptions { rest_message },
+            &SplitOptions::default().with_rest_message(rest_message),
             &rewrite.options,
         )
         .map_err(on_err)?;
@@ -544,9 +539,7 @@ fn run_rebase_with_exec(
     // Do not install InterruptCancel here: while `--exec` runs a child command, SIGINT
     // must reach the process (or the exec runner) so the rebase can stop mid-exec.
     let mut start = start.clone();
-    start.exec = Some(ExecSpec {
-        commands: exec.to_vec(),
-    });
+    start.exec = Some(ExecSpec::default().with_commands(exec.to_vec()));
     let runner = system_command_runner();
     let outcome = match repo.history().start_rebase(
         &start,
@@ -633,16 +626,11 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     if opts.continue_rebase || opts.skip {
         let _interrupt = crate::interrupt::InterruptCancel::install();
         let head_oid = resolve_commit(&rewrite.repo, "HEAD", "HEAD")?;
-        let resume_opts = StartRebaseOptions {
-            request: RebaseRequest {
-                upstream: head_oid,
-                onto: None,
-                branch_tip: head_oid,
-            },
-            rebase: RebaseOntoOptions::new(rewrite.options.clone()),
-            apply: resume_apply,
-            exec: None,
-        };
+        let resume_opts = StartRebaseOptions::new(
+            RebaseRequest::new(head_oid, head_oid),
+            RebaseOntoOptions::new(rewrite.options.clone()),
+            resume_apply,
+        );
         let outcome = if opts.continue_rebase {
             rewrite.repo.history().continue_rebase(
                 &resume_opts,
@@ -738,12 +726,11 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
 
     let effective_onto = onto_oid.unwrap_or(upstream_oid);
     let apply_message = format!("rebase: onto {}", effective_onto.to_short_hex());
-    let mut start_opts = StartRebaseOptions {
+    let mut start_opts = StartRebaseOptions::new(
         request,
-        rebase: rebase_opts.clone(),
-        apply: rewrite.apply_options("rebase", apply_message)?,
-        exec: None,
-    };
+        rebase_opts.clone(),
+        rewrite.apply_options("rebase", apply_message)?,
+    );
     start_opts.rebase.pre_rebase = flags.pre_rebase(opts.upstream.as_deref());
 
     if !flags.exec.is_empty() {
@@ -997,10 +984,7 @@ pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<His
     let absorb_plan = rewrite
         .repo
         .history()
-        .absorb(&AbsorbOptions {
-            base,
-            rewrite: rewrite.options.clone(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite.options.clone()).with_base(base))
         .map_err(on_err)?;
     if !shared.dry_run && !absorb_plan.plan.commits.is_empty() {
         let _interrupt = crate::interrupt::InterruptCancel::install();

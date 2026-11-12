@@ -150,6 +150,7 @@ pub enum ShellInvocation {
 
 /// Typed description of a subprocess to spawn.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct CommandSpec {
     /// Executable when not using [`Self::shell`], or `sh` for shell modes.
     ///
@@ -175,6 +176,27 @@ pub struct CommandSpec {
 }
 
 impl CommandSpec {
+    /// Creates a [`CommandSpec`] that runs `program` with no arguments, in the current
+    /// directory, with this process's environment and inherited stdin, stdout and stderr.
+    /// Adjust it with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `program`: executable to spawn (looked up on `PATH` when it has no directory part).
+    #[must_use]
+    pub fn new(program: impl Into<PathBuf>) -> Self {
+        Self {
+            program: program.into(),
+            args: Vec::new(),
+            shell: None,
+            cwd: None,
+            env: CommandEnvironment::inherit_process_only(),
+            stdin: CommandStdin::Inherit,
+            stdout: CommandStdio::Inherit,
+            stderr: CommandStdio::Inherit,
+        }
+    }
+
     /// `sh -c expanded` with piped stdin/stdout (one-shot clean/smudge filter).
     #[must_use]
     pub fn sh_dash_c_filter(script: impl Into<String>) -> Self {
@@ -192,6 +214,62 @@ impl CommandSpec {
             stdout: CommandStdio::Pipe,
             stderr: CommandStdio::Inherit,
         }
+    }
+
+    /// Sets [`program`](Self::program).
+    #[must_use]
+    pub fn with_program(mut self, program: PathBuf) -> Self {
+        self.program = program;
+        self
+    }
+
+    /// Sets [`args`](Self::args).
+    #[must_use]
+    pub fn with_args(mut self, args: Vec<OsString>) -> Self {
+        self.args = args;
+        self
+    }
+
+    /// Sets [`shell`](Self::shell).
+    #[must_use]
+    pub fn with_shell(mut self, shell: Option<ShellInvocation>) -> Self {
+        self.shell = shell;
+        self
+    }
+
+    /// Sets [`cwd`](Self::cwd).
+    #[must_use]
+    pub fn with_cwd(mut self, cwd: Option<PathBuf>) -> Self {
+        self.cwd = cwd;
+        self
+    }
+
+    /// Sets [`env`](Self::env).
+    #[must_use]
+    pub fn with_env(mut self, env: CommandEnvironment) -> Self {
+        self.env = env;
+        self
+    }
+
+    /// Sets [`stdin`](Self::stdin).
+    #[must_use]
+    pub fn with_stdin(mut self, stdin: CommandStdin) -> Self {
+        self.stdin = stdin;
+        self
+    }
+
+    /// Sets [`stdout`](Self::stdout).
+    #[must_use]
+    pub fn with_stdout(mut self, stdout: CommandStdio) -> Self {
+        self.stdout = stdout;
+        self
+    }
+
+    /// Sets [`stderr`](Self::stderr).
+    #[must_use]
+    pub fn with_stderr(mut self, stderr: CommandStdio) -> Self {
+        self.stderr = stderr;
+        self
     }
 }
 

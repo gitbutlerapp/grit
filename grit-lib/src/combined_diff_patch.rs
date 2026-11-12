@@ -8,6 +8,7 @@ use similar::{capture_diff_slices, Algorithm, DiffOp};
 
 /// Whitespace handling for combined diffs (Git `xdl_opts` subset).
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct CombinedDiffWsOptions {
     /// `ignore_all_space` field.
     pub ignore_all_space: bool,
@@ -27,6 +28,34 @@ impl CombinedDiffWsOptions {
             || self.ignore_space_change
             || self.ignore_space_at_eol
             || self.ignore_cr_at_eol
+    }
+
+    /// Sets [`ignore_all_space`](Self::ignore_all_space).
+    #[must_use]
+    pub const fn with_ignore_all_space(mut self, ignore_all_space: bool) -> Self {
+        self.ignore_all_space = ignore_all_space;
+        self
+    }
+
+    /// Sets [`ignore_space_change`](Self::ignore_space_change).
+    #[must_use]
+    pub const fn with_ignore_space_change(mut self, ignore_space_change: bool) -> Self {
+        self.ignore_space_change = ignore_space_change;
+        self
+    }
+
+    /// Sets [`ignore_space_at_eol`](Self::ignore_space_at_eol).
+    #[must_use]
+    pub const fn with_ignore_space_at_eol(mut self, ignore_space_at_eol: bool) -> Self {
+        self.ignore_space_at_eol = ignore_space_at_eol;
+        self
+    }
+
+    /// Sets [`ignore_cr_at_eol`](Self::ignore_cr_at_eol).
+    #[must_use]
+    pub const fn with_ignore_cr_at_eol(mut self, ignore_cr_at_eol: bool) -> Self {
+        self.ignore_cr_at_eol = ignore_cr_at_eol;
+        self
     }
 }
 

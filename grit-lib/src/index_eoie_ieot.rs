@@ -60,6 +60,7 @@ pub(crate) struct ParsedIndexExtensions {
 
 /// Context for index parse/load threading and config.
 #[derive(Debug, Clone, Copy, Default)]
+#[non_exhaustive]
 pub struct IndexParseContext {
     /// `thread_policy` field.
     pub thread_policy: ThreadPolicy,
@@ -72,6 +73,13 @@ impl IndexParseContext {
         Self {
             thread_policy: policy,
         }
+    }
+
+    /// Sets [`thread_policy`](Self::thread_policy).
+    #[must_use]
+    pub const fn with_thread_policy(mut self, thread_policy: ThreadPolicy) -> Self {
+        self.thread_policy = thread_policy;
+        self
     }
 }
 

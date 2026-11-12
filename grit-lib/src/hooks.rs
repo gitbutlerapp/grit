@@ -1000,6 +1000,7 @@ impl HookResult {
 
 /// Options for [`run_hook_opts`].
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct RunHookOptions<'a> {
     /// Capture hook output or let hooks write to this process's stderr (see [`HookStdio`]).
     ///
@@ -1018,6 +1019,57 @@ pub struct RunHookOptions<'a> {
     pub cwd: Option<&'a Path>,
     /// Commit-style env (`GIT_INDEX_FILE`, `GIT_PREFIX`, author exports, …) merged after `env_vars`.
     pub commit_env: Option<&'a CommitHookEnv<'a>>,
+}
+
+impl<'a> RunHookOptions<'a> {
+    /// Sets [`stdio`](Self::stdio).
+    #[must_use]
+    pub const fn with_stdio(mut self, stdio: HookStdio) -> Self {
+        self.stdio = stdio;
+        self
+    }
+
+    /// Sets [`stdout_to_stderr`](Self::stdout_to_stderr).
+    #[must_use]
+    pub const fn with_stdout_to_stderr(mut self, stdout_to_stderr: bool) -> Self {
+        self.stdout_to_stderr = stdout_to_stderr;
+        self
+    }
+
+    /// Sets [`path_to_stdin`](Self::path_to_stdin).
+    #[must_use]
+    pub const fn with_path_to_stdin(mut self, path_to_stdin: Option<&'a Path>) -> Self {
+        self.path_to_stdin = path_to_stdin;
+        self
+    }
+
+    /// Sets [`stdin_data`](Self::stdin_data).
+    #[must_use]
+    pub const fn with_stdin_data(mut self, stdin_data: Option<&'a [u8]>) -> Self {
+        self.stdin_data = stdin_data;
+        self
+    }
+
+    /// Sets [`env_vars`](Self::env_vars).
+    #[must_use]
+    pub const fn with_env_vars(mut self, env_vars: &'a [(&'a str, &'a str)]) -> Self {
+        self.env_vars = env_vars;
+        self
+    }
+
+    /// Sets [`cwd`](Self::cwd).
+    #[must_use]
+    pub const fn with_cwd(mut self, cwd: Option<&'a Path>) -> Self {
+        self.cwd = cwd;
+        self
+    }
+
+    /// Sets [`commit_env`](Self::commit_env).
+    #[must_use]
+    pub const fn with_commit_env(mut self, commit_env: Option<&'a CommitHookEnv<'a>>) -> Self {
+        self.commit_env = commit_env;
+        self
+    }
 }
 
 /// Run all hooks for `hook_name` in Git order; return first non-zero exit or success.

@@ -644,9 +644,7 @@ fn rebase_exec_flushes_before_head_ref_update() {
         .history()
         .verify_rebase(
             &mut plan,
-            &ExecSpec {
-                commands: vec!["test -f f2".into()],
-            },
+            &ExecSpec::default().with_commands(vec!["test -f f2".into()]),
             &rewrite_options(),
             system_command_runner().as_ref(),
         )

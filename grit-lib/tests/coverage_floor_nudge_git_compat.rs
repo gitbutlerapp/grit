@@ -123,11 +123,9 @@ fn deep_history_revwalk_blame_and_merge_bases_nudge() -> grit_lib::error::Result
         for path in ["deep/layer40.txt", "wide/w40.txt", "fork/f5.txt"] {
             let blame = repo.diff().blame(
                 path,
-                &BlameOptions {
-                    start,
-                    line_range: Some(1..=2),
-                    ..Default::default()
-                },
+                &BlameOptions::default()
+                    .with_start(start)
+                    .with_line_range(Some(1..=2)),
                 &mut NullProgress,
                 &CancelToken::never(),
             )?;

@@ -37,27 +37,21 @@ fn committer(seq: i64) -> String {
 }
 
 fn fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
-    FixupOptions {
-        message: None,
-        empty,
-        rewrite: RewriteOptions::new(committer(1).parse().expect("signature"))
+    FixupOptions::new(
+        RewriteOptions::new(committer(1).parse().expect("signature"))
             .with_scope(scope)
             .with_empty(empty),
-        selection: None,
-        pathspecs: Vec::new(),
-    }
+    )
+    .with_empty(empty)
 }
 
 fn harness_fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
-    FixupOptions {
-        message: None,
-        empty,
-        rewrite: RewriteOptions::new(harness_committer_line().parse().expect("signature"))
+    FixupOptions::new(
+        RewriteOptions::new(harness_committer_line().parse().expect("signature"))
             .with_scope(scope)
             .with_empty(empty),
-        selection: None,
-        pathspecs: Vec::new(),
-    }
+    )
+    .with_empty(empty)
 }
 
 fn apply_opts() -> ApplyOptions {
@@ -610,15 +604,13 @@ fn fixup_opts_with_selection(
     empty: EmptyPolicy,
     selection: HunkSelection,
 ) -> FixupOptions {
-    FixupOptions {
-        message: None,
-        empty,
-        rewrite: RewriteOptions::new(committer(1).parse().expect("signature"))
+    FixupOptions::new(
+        RewriteOptions::new(committer(1).parse().expect("signature"))
             .with_scope(scope)
             .with_empty(empty),
-        selection: Some(selection),
-        pathspecs: Vec::new(),
-    }
+    )
+    .with_empty(empty)
+    .with_selection(Some(selection))
 }
 
 fn plan_and_apply_hunks(

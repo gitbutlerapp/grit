@@ -262,6 +262,7 @@ impl BundleError {
 
 /// Input for [`write_bundle`].
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct BundleSpec {
     /// Tips to include (`oid` + ref name for the header).
     pub include: Vec<(ObjectId, String)>,
@@ -269,6 +270,29 @@ pub struct BundleSpec {
     pub exclude: Vec<ObjectId>,
     /// Optional partial-clone filter (forces v3).
     pub filter: Option<FilterSpec>,
+}
+
+impl BundleSpec {
+    /// Sets [`include`](Self::include).
+    #[must_use]
+    pub fn with_include(mut self, include: Vec<(ObjectId, String)>) -> Self {
+        self.include = include;
+        self
+    }
+
+    /// Sets [`exclude`](Self::exclude).
+    #[must_use]
+    pub fn with_exclude(mut self, exclude: Vec<ObjectId>) -> Self {
+        self.exclude = exclude;
+        self
+    }
+
+    /// Sets [`filter`](Self::filter).
+    #[must_use]
+    pub fn with_filter(mut self, filter: Option<FilterSpec>) -> Self {
+        self.filter = filter;
+        self
+    }
 }
 
 /// One ref tip that would appear in a bundle header.

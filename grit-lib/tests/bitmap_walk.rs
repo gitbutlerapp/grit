@@ -135,11 +135,7 @@ fn bitmap_query(
 ) -> grit_lib::error::Result<ReachableSet> {
     index.reachability(
         repo,
-        ReachabilityQuery {
-            wants,
-            haves,
-            filter,
-        },
+        ReachabilityQuery::new(wants, haves).with_filter(filter),
         MissingAction::Error,
     )
 }

@@ -510,12 +510,12 @@ pub(crate) fn format_absorb_unassigned_reason(row: &UnassignedHunkOut) -> String
 }
 
 fn format_absorb_hunk_header(range: &HunkRangeOut) -> String {
-    format_hunk_range_header(&HunkRange {
-        old_start: range.old_start,
-        old_lines: range.old_lines,
-        new_start: range.new_start,
-        new_lines: range.new_lines,
-    })
+    format_hunk_range_header(&HunkRange::new(
+        range.old_start,
+        range.old_lines,
+        range.new_start,
+        range.new_lines,
+    ))
 }
 
 fn print_history_absorb_outcome(w: &mut dyn Write, outcome: &HistoryAbsorbOutcome) -> Result<()> {

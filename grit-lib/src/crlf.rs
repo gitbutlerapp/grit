@@ -190,6 +190,7 @@ pub enum DiffAttr {
 
 /// Per-file attributes relevant to conversion.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct FileAttrs {
     /// `text` field.
     pub text: TextAttr,
@@ -261,10 +262,116 @@ impl FileAttrs {
             Some(n) => n,
         }
     }
+
+    /// Sets [`text`](Self::text).
+    #[must_use]
+    pub fn with_text(mut self, text: TextAttr) -> Self {
+        self.text = text;
+        self
+    }
+
+    /// Sets [`eol`](Self::eol).
+    #[must_use]
+    pub fn with_eol(mut self, eol: EolAttr) -> Self {
+        self.eol = eol;
+        self
+    }
+
+    /// Sets [`diff_attr`](Self::diff_attr).
+    #[must_use]
+    pub fn with_diff_attr(mut self, diff_attr: DiffAttr) -> Self {
+        self.diff_attr = diff_attr;
+        self
+    }
+
+    /// Sets [`filter_clean`](Self::filter_clean).
+    #[must_use]
+    pub fn with_filter_clean(mut self, filter_clean: Option<String>) -> Self {
+        self.filter_clean = filter_clean;
+        self
+    }
+
+    /// Sets [`filter_smudge`](Self::filter_smudge).
+    #[must_use]
+    pub fn with_filter_smudge(mut self, filter_smudge: Option<String>) -> Self {
+        self.filter_smudge = filter_smudge;
+        self
+    }
+
+    /// Sets [`filter_process`](Self::filter_process).
+    #[must_use]
+    pub fn with_filter_process(mut self, filter_process: Option<String>) -> Self {
+        self.filter_process = filter_process;
+        self
+    }
+
+    /// Sets [`filter_driver_name`](Self::filter_driver_name).
+    #[must_use]
+    pub fn with_filter_driver_name(mut self, filter_driver_name: Option<String>) -> Self {
+        self.filter_driver_name = filter_driver_name;
+        self
+    }
+
+    /// Sets [`filter_smudge_required`](Self::filter_smudge_required).
+    #[must_use]
+    pub const fn with_filter_smudge_required(mut self, filter_smudge_required: bool) -> Self {
+        self.filter_smudge_required = filter_smudge_required;
+        self
+    }
+
+    /// Sets [`filter_clean_required`](Self::filter_clean_required).
+    #[must_use]
+    pub const fn with_filter_clean_required(mut self, filter_clean_required: bool) -> Self {
+        self.filter_clean_required = filter_clean_required;
+        self
+    }
+
+    /// Sets [`ident`](Self::ident).
+    #[must_use]
+    pub const fn with_ident(mut self, ident: bool) -> Self {
+        self.ident = ident;
+        self
+    }
+
+    /// Sets [`merge`](Self::merge).
+    #[must_use]
+    pub fn with_merge(mut self, merge: MergeAttr) -> Self {
+        self.merge = merge;
+        self
+    }
+
+    /// Sets [`conflict_marker_size`](Self::conflict_marker_size).
+    #[must_use]
+    pub fn with_conflict_marker_size(mut self, conflict_marker_size: Option<String>) -> Self {
+        self.conflict_marker_size = conflict_marker_size;
+        self
+    }
+
+    /// Sets [`working_tree_encoding`](Self::working_tree_encoding).
+    #[must_use]
+    pub fn with_working_tree_encoding(mut self, working_tree_encoding: Option<String>) -> Self {
+        self.working_tree_encoding = working_tree_encoding;
+        self
+    }
+
+    /// Sets [`crlf_legacy`](Self::crlf_legacy).
+    #[must_use]
+    pub fn with_crlf_legacy(mut self, crlf_legacy: CrlfLegacyAttr) -> Self {
+        self.crlf_legacy = crlf_legacy;
+        self
+    }
+
+    /// Sets [`whitespace`](Self::whitespace).
+    #[must_use]
+    pub fn with_whitespace(mut self, whitespace: Option<String>) -> Self {
+        self.whitespace = whitespace;
+        self
+    }
 }
 
 /// Global conversion settings derived from config.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct ConversionConfig {
     /// `autocrlf` field.
     pub autocrlf: AutoCrlf,
@@ -316,15 +423,32 @@ impl ConversionConfig {
         }
     }
 
-    /// Like [`Self::from_config`] with an explicit filter/hook subprocess runner.
+    /// Sets [`autocrlf`](Self::autocrlf).
     #[must_use]
-    pub fn from_config_with_runner(
-        config: &ConfigSet,
-        command_runner: Arc<dyn CommandRunner>,
-    ) -> Self {
-        let mut cfg = Self::from_config(config);
-        cfg.command_runner = command_runner;
-        cfg
+    pub fn with_autocrlf(mut self, autocrlf: AutoCrlf) -> Self {
+        self.autocrlf = autocrlf;
+        self
+    }
+
+    /// Sets [`eol`](Self::eol).
+    #[must_use]
+    pub fn with_eol(mut self, eol: CoreEol) -> Self {
+        self.eol = eol;
+        self
+    }
+
+    /// Sets [`safecrlf`](Self::safecrlf).
+    #[must_use]
+    pub fn with_safecrlf(mut self, safecrlf: SafeCrlf) -> Self {
+        self.safecrlf = safecrlf;
+        self
+    }
+
+    /// Sets [`command_runner`](Self::command_runner).
+    #[must_use]
+    pub fn with_command_runner(mut self, command_runner: Arc<dyn CommandRunner>) -> Self {
+        self.command_runner = command_runner;
+        self
     }
 }
 
@@ -908,6 +1032,7 @@ pub fn clean_uses_autocrlf_index_guard(attrs: &FileAttrs, conv: &ConversionConfi
 
 /// Optional inputs for `convert_to_git_with_opts` (Git `CONV_EOL_RENORMALIZE` / index blob).
 #[derive(Clone, Copy)]
+#[non_exhaustive]
 pub struct ConvertToGitOpts<'a> {
     /// Stage-0 blob bytes for this path before the current add (for safer-autocrlf).
     pub index_blob: Option<&'a [u8]>,
@@ -930,6 +1055,49 @@ impl Default for ConvertToGitOpts<'_> {
             filter_process: None,
             command_runner: None,
         }
+    }
+}
+
+impl<'a> ConvertToGitOpts<'a> {
+    /// Sets [`index_blob`](Self::index_blob).
+    #[must_use]
+    pub const fn with_index_blob(mut self, index_blob: Option<&'a [u8]>) -> Self {
+        self.index_blob = index_blob;
+        self
+    }
+
+    /// Sets [`renormalize`](Self::renormalize).
+    #[must_use]
+    pub const fn with_renormalize(mut self, renormalize: bool) -> Self {
+        self.renormalize = renormalize;
+        self
+    }
+
+    /// Sets [`check_safecrlf`](Self::check_safecrlf).
+    #[must_use]
+    pub const fn with_check_safecrlf(mut self, check_safecrlf: bool) -> Self {
+        self.check_safecrlf = check_safecrlf;
+        self
+    }
+
+    /// Sets [`filter_process`](Self::filter_process).
+    #[must_use]
+    pub const fn with_filter_process(
+        mut self,
+        filter_process: Option<&'a FilterProcessState>,
+    ) -> Self {
+        self.filter_process = filter_process;
+        self
+    }
+
+    /// Sets [`command_runner`](Self::command_runner).
+    #[must_use]
+    pub const fn with_command_runner(
+        mut self,
+        command_runner: Option<&'a dyn CommandRunner>,
+    ) -> Self {
+        self.command_runner = command_runner;
+        self
     }
 }
 

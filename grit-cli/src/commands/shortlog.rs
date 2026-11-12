@@ -102,11 +102,9 @@ pub fn run(args: &ShortlogCliArgs, md_ctx: &RenderContext) -> Result<ShortlogOut
     let format = args.format.to_diff_format();
     let repo = context::discover()?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let opts = TargetComparisonOptions {
-        target: args.target.as_ref().map(|t| TargetSpec(t.clone())),
-        list_limit: args.max_count,
-        include_behind: args.behind,
-    };
+    let opts = TargetComparisonOptions::new(args.max_count)
+        .with_target(args.target.as_ref().map(|t| TargetSpec(t.clone())))
+        .with_include_behind(args.behind);
     let Some(comparison) = repo
         .branches()
         .compare_with_target(&opts)

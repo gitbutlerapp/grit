@@ -245,14 +245,11 @@ pub fn build(
     let created = now.unix_timestamp();
     let file = format!("{created}-{}.bundle", &digest[..12]);
     let tmp = dir.join(format!(".{file}.tmp"));
-    let spec = BundleSpec {
-        include: refs
-            .iter()
+    let spec = BundleSpec::default().with_include(
+        refs.iter()
             .map(|(name, oid)| (*oid, name.clone()))
             .collect(),
-        exclude: Vec::new(),
-        filter: None,
-    };
+    );
     {
         let mut out = std::io::BufWriter::new(std::fs::File::create(&tmp)?);
         repo.bundles().write_to(

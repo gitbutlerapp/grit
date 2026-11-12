@@ -375,13 +375,7 @@ fn undo_old_commits_remain_in_reflog() {
 }
 
 fn fixup_opts(selection: Option<HunkSelection>) -> FixupOptions {
-    FixupOptions {
-        message: None,
-        empty: EmptyPolicy::Drop,
-        rewrite: rewrite_opts(),
-        selection,
-        pathspecs: Vec::new(),
-    }
+    FixupOptions::new(rewrite_opts()).with_selection(selection)
 }
 
 fn fixup_staged_into(grit: &Repository, target: ObjectId) {
@@ -571,10 +565,7 @@ fn undo_after_absorb_restores_assigned_hunks_and_keeps_unassigned_staged() {
     let grit = open_grit(wt);
     let plan = grit
         .history()
-        .absorb(&AbsorbOptions {
-            base: Some(base),
-            rewrite: rewrite_opts(),
-        })
+        .absorb(&AbsorbOptions::new(rewrite_opts()).with_base(Some(base)))
         .expect("absorb plan");
     assert_eq!(plan.assignments.len(), 1);
     assert_eq!(plan.unassigned.len(), 1);

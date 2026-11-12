@@ -126,22 +126,17 @@ fn run_rebase(
     topic: grit_lib::objects::ObjectId,
     cancel_at_checkout: bool,
 ) -> grit_lib::error::Result<Duration> {
-    let opts = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream: side,
-            onto: None,
-            branch_tip: topic,
-        },
-        rebase: RebaseOntoOptions::new(
+    let opts = StartRebaseOptions::new(
+        RebaseRequest::new(side, topic),
+        RebaseOntoOptions::new(
             RewriteOptions::new("T <t@t> 0 +0000".parse().expect("sig"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         )
         .with_skip_applied(false),
-        apply: ApplyOptions::new("T <t@t> 0 +0000".parse().expect("sig"), "rebase")
+        ApplyOptions::new("T <t@t> 0 +0000".parse().expect("sig"), "rebase")
             .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
-        exec: None,
-    };
+    );
     let start = Instant::now();
     let result = if cancel_at_checkout {
         let mut sink = CancelAfterCheckoutUnits::new();

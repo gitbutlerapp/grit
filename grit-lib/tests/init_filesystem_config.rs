@@ -14,10 +14,10 @@ fn init_sets_precomposeunicode_when_options_force_probe() {
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
             .with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Files)
-            .with_init_filesystem(InitFilesystemConfigOptions {
-                precompose_detection: PrecomposeDetection::Always,
-                ..InitFilesystemConfigOptions::default()
-            }),
+            .with_init_filesystem(
+                InitFilesystemConfigOptions::default()
+                    .with_precompose_detection(PrecomposeDetection::Always),
+            ),
     )
     .expect("init");
     let config = fs::read_to_string(td.path().join(".git/config")).expect("config");

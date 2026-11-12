@@ -22,8 +22,8 @@ use grit_lib::diff::{
     sort_entries_by_path, write_commit_log_patch, write_commits_log_patch, write_patch,
     write_patch_resolved, DiffArguments, DiffDetail, DiffEntry, DiffFilesOutput, DiffMerges,
     DiffOptions, DiffRequest, DiffSide, DiffTarget, FileChange, LineStat, ListedFileDiff,
-    LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions,
-    ResolveDiffArgumentsError, UncommittedDiff,
+    LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions, ResolveDiffArgumentsError,
+    UncommittedDiff,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::worktree::pathspec::pathdiff;
@@ -381,14 +381,10 @@ pub fn log_patch_options_for_patch_text(
     let mut diff_options = DiffOptions::from_config(config.as_ref());
     diff_options.context_lines = CONTEXT_LINES;
     format.apply_context(&mut diff_options);
-    Ok(LogPatchOptions {
-        diff: diff_options,
-        abbrev_len: 7,
-        commit_header: LogPatchCommitHeader::Full,
-        binary_format: grit_lib::diff::LogPatchBinaryFormat::GitApplyBinaryPatch,
-        pathspec: pathspec.clone(),
-        diff_merges,
-    })
+    Ok(LogPatchOptions::new(diff_options)
+        .with_binary_format(grit_lib::diff::LogPatchBinaryFormat::GitApplyBinaryPatch)
+        .with_pathspec(pathspec.clone())
+        .with_diff_merges(diff_merges))
 }
 
 fn map_log_patch_error(err: grit_lib::error::Error) -> anyhow::Error {
@@ -644,14 +640,13 @@ fn resolve_diff_target(
     repo: &grit_lib::repo::Repository,
     opts: &DiffRunOptions,
 ) -> Result<DiffArguments> {
-    let request = DiffRequest {
-        staged: opts.staged,
-        unstaged: opts.unstaged,
-        against: opts.against.clone(),
-        positionals: opts.commits.clone(),
-        paths: opts.pathspecs.paths.clone(),
-        pathspec_file: opts.pathspecs.pathspec_file_entries()?,
-    };
+    let request = DiffRequest::default()
+        .with_staged(opts.staged)
+        .with_unstaged(opts.unstaged)
+        .with_against(opts.against.clone())
+        .with_positionals(opts.commits.clone())
+        .with_paths(opts.pathspecs.paths.clone())
+        .with_pathspec_file(opts.pathspecs.pathspec_file_entries()?);
     let cwd_prefix = pathspec_prefix_for_repo(repo)?;
     repo.diff()
         .resolve_request(cwd_prefix.as_deref(), &request)

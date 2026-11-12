@@ -230,11 +230,28 @@ impl CombinedParentSide {
 
 /// Options for the multitree walk.
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct CombinedTreeDiffOptions {
     /// Recurse into sub-trees (`diff_options.flags.recursive`).
     pub recursive: bool,
     /// Emit tree directory lines when recursing (`tree_in_recursive`, e.g. `--find-object`).
     pub tree_in_recursive: bool,
+}
+
+impl CombinedTreeDiffOptions {
+    /// Sets [`recursive`](Self::recursive).
+    #[must_use]
+    pub const fn with_recursive(mut self, recursive: bool) -> Self {
+        self.recursive = recursive;
+        self
+    }
+
+    /// Sets [`tree_in_recursive`](Self::tree_in_recursive).
+    #[must_use]
+    pub const fn with_tree_in_recursive(mut self, tree_in_recursive: bool) -> Self {
+        self.tree_in_recursive = tree_in_recursive;
+        self
+    }
 }
 
 fn is_tree_mode(mode: u32) -> bool {

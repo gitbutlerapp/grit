@@ -11,6 +11,7 @@ use std::ops::ControlFlow;
 
 /// Repository hash width for object-id fields in commit, tag, and tree headers.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct FsckObjectOptions {
     /// Expected hex width for `tree`, `parent`, `object`, and tree entry oids.
     pub hash_algo: HashAlgo,
@@ -21,6 +22,13 @@ impl FsckObjectOptions {
     #[must_use]
     pub const fn new(hash_algo: HashAlgo) -> Self {
         Self { hash_algo }
+    }
+
+    /// Sets [`hash_algo`](Self::hash_algo).
+    #[must_use]
+    pub const fn with_hash_algo(mut self, hash_algo: HashAlgo) -> Self {
+        self.hash_algo = hash_algo;
+        self
     }
 }
 

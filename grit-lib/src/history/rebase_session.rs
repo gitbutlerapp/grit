@@ -50,6 +50,7 @@ use crate::operation::Conflict;
 /// [`History::continue_rebase`](super::History::continue_rebase) and
 /// [`History::skip_rebase`](super::History::skip_rebase).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StartRebaseOptions {
     /// Upstream, optional onto, and branch tip to rebase.
     pub request: RebaseRequest,
@@ -62,6 +63,53 @@ pub struct StartRebaseOptions {
     /// `None` replays without running anything. Read when the rebase starts; a stop saves the
     /// commands, so continuing or skipping uses the saved ones.
     pub exec: Option<super::ExecSpec>,
+}
+
+impl StartRebaseOptions {
+    /// Creates a [`StartRebaseOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `request`: upstream, optional onto, and branch tip to rebase.
+    /// - `rebase`: replay and cherry-detection options, and whether starting the rebase runs `pre-rebase` ([`RebaseOntoOptions::pre_rebase`]; continuing or skipping never runs it).
+    /// - `apply`: reflog identity and message used when the rebase finishes and its plan is applied.
+    #[must_use]
+    pub fn new(request: RebaseRequest, rebase: RebaseOntoOptions, apply: ApplyOptions) -> Self {
+        Self {
+            request,
+            rebase,
+            apply,
+            exec: None,
+        }
+    }
+
+    /// Sets [`request`](Self::request).
+    #[must_use]
+    pub fn with_request(mut self, request: RebaseRequest) -> Self {
+        self.request = request;
+        self
+    }
+
+    /// Sets [`rebase`](Self::rebase).
+    #[must_use]
+    pub fn with_rebase(mut self, rebase: RebaseOntoOptions) -> Self {
+        self.rebase = rebase;
+        self
+    }
+
+    /// Sets [`apply`](Self::apply).
+    #[must_use]
+    pub fn with_apply(mut self, apply: ApplyOptions) -> Self {
+        self.apply = apply;
+        self
+    }
+
+    /// Sets [`exec`](Self::exec).
+    #[must_use]
+    pub fn with_exec(mut self, exec: Option<super::ExecSpec>) -> Self {
+        self.exec = exec;
+        self
+    }
 }
 
 /// Snapshot when a resumable rebase stops on conflicts.

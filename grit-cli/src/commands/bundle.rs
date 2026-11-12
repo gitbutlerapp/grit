@@ -25,10 +25,9 @@ pub fn run_create(
     if revs.is_empty() && !all {
         bail!("at least one revision is required (use `--all` to bundle every ref)");
     }
-    let options = BundleCreateOptions {
-        all_refs: all,
-        rev_tokens: revs,
-    };
+    let options = BundleCreateOptions::default()
+        .with_all_refs(all)
+        .with_rev_tokens(revs);
     if dry_run {
         let plan = repo
             .bundles()

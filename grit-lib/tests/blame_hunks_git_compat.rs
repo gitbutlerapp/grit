@@ -148,11 +148,9 @@ fn grit_blame_hunks(
         .diff()
         .blame(
             file,
-            &BlameOptions {
-                start,
-                line_range,
-                ..Default::default()
-            },
+            &BlameOptions::default()
+                .with_start(start)
+                .with_line_range(line_range),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -319,10 +317,7 @@ fn blame_hunks_match_git_across_rename_edit_and_subtree_move() {
             .diff()
             .blame(
                 "vendor/final",
-                &BlameOptions {
-                    line_range: range.map(|(a, b)| a..=b),
-                    ..Default::default()
-                },
+                &BlameOptions::default().with_line_range(range.map(|(a, b)| a..=b)),
                 &mut NullProgress,
                 &CancelToken::never(),
             )

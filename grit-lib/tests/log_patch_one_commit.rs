@@ -53,11 +53,9 @@ fn log_patch_one_commit_env() {
         .snapshot()
         .map(|c| (*c).clone())
         .unwrap_or_default();
-    let patch_opts = LogPatchOptions {
-        diff: DiffOptions::default(),
-        commit_header: LogPatchCommitHeader::FormatPercentH,
-        ..LogPatchOptions::git_default(&config)
-    };
+    let patch_opts = LogPatchOptions::git_default(&config)
+        .with_diff(DiffOptions::default())
+        .with_commit_header(LogPatchCommitHeader::FormatPercentH);
     let mut out = Cursor::new(Vec::new());
     repo.odb()
         .with_pack_read_context(|| write_commit_log_patch(&repo, &mut out, &oid, &patch_opts))

@@ -217,11 +217,7 @@ fn bundle_pack_odb_and_midx_paths() {
 }
 
 fn write_bundle_header_and_pack(repo: &Repository, tip: ObjectId, w: &mut dyn Write) {
-    let spec = BundleSpec {
-        include: vec![(tip, "refs/heads/main".to_owned())],
-        exclude: Vec::new(),
-        filter: None,
-    };
+    let spec = BundleSpec::default().with_include(vec![(tip, "refs/heads/main".to_owned())]);
     repo.bundles()
         .write_to(&spec, w, &mut NullProgress, &CancelToken::never())
         .expect("bundle write");

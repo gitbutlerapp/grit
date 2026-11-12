@@ -19,6 +19,7 @@ use crate::rev_list::{shallow_boundary_oids, FilterObjectKind, MissingAction, Ob
 
 /// Query parameters for a bitmap reachability walk.
 #[derive(Debug, Clone, Copy)]
+#[non_exhaustive]
 pub struct ReachabilityQuery<'a> {
     /// Tips whose reachable objects are included in the result (after subtracting [`Self::haves`]).
     pub wants: &'a [ObjectId],
@@ -26,6 +27,44 @@ pub struct ReachabilityQuery<'a> {
     pub haves: &'a [ObjectId],
     /// Optional object filter (see [`ObjectFilter`]); unsupported specs yield [`BitmapWalkError::Unsupported`].
     pub filter: Option<&'a ObjectFilter>,
+}
+
+impl<'a> ReachabilityQuery<'a> {
+    /// Creates a [`ReachabilityQuery`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `wants`: tips whose reachable objects are included in the result (after subtracting [`Self::haves`]).
+    /// - `haves`: tips whose reachable objects are excluded from the result.
+    #[must_use]
+    pub const fn new(wants: &'a [ObjectId], haves: &'a [ObjectId]) -> Self {
+        Self {
+            wants,
+            haves,
+            filter: None,
+        }
+    }
+
+    /// Sets [`wants`](Self::wants).
+    #[must_use]
+    pub const fn with_wants(mut self, wants: &'a [ObjectId]) -> Self {
+        self.wants = wants;
+        self
+    }
+
+    /// Sets [`haves`](Self::haves).
+    #[must_use]
+    pub const fn with_haves(mut self, haves: &'a [ObjectId]) -> Self {
+        self.haves = haves;
+        self
+    }
+
+    /// Sets [`filter`](Self::filter).
+    #[must_use]
+    pub const fn with_filter(mut self, filter: Option<&'a ObjectFilter>) -> Self {
+        self.filter = filter;
+        self
+    }
 }
 
 /// Bitmap walk could not run (unsupported filter or shallow repo); use a non-bitmap walk instead.

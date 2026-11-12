@@ -67,11 +67,9 @@ fn blame_crlf_apply_and_pathspec_deep_sweep() -> grit_lib::error::Result<()> {
         ] {
             let blame = repo.diff().blame(
                 "file.txt",
-                &BlameOptions {
-                    start,
-                    line_range: range,
-                    ..Default::default()
-                },
+                &BlameOptions::default()
+                    .with_start(start)
+                    .with_line_range(range),
                 &mut NullProgress,
                 &CancelToken::never(),
             )?;

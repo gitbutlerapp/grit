@@ -92,6 +92,9 @@ pub enum CommitEdit {
         rest_message: Option<String>,
     },
     /// Replay this commit onto `parent` instead of its mapped first parent (rebase range root).
+    ///
+    /// Build it with [`CommitEdit::reparent`].
+    #[non_exhaustive]
     Reparent {
         /// Replacement first parent for the replay.
         parent: ObjectId,
@@ -153,6 +156,17 @@ impl CommitEdit {
         }
     }
 
+    /// Creates a [`CommitEdit::Reparent`] that replays the commit onto `parent` instead of
+    /// its mapped first parent.
+    ///
+    /// # Parameters
+    ///
+    /// - `parent`: replacement first parent for the replay.
+    #[must_use]
+    pub const fn reparent(parent: ObjectId) -> Self {
+        Self::Reparent { parent }
+    }
+
     /// Creates a [`CommitEdit::Reuse`] that skips the commit because `existing` already
     /// carries its patch.
     ///
@@ -171,9 +185,19 @@ pub type Pathspec<'a> = &'a [String];
 
 /// Options for [`History::split`](super::History::split).
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct SplitOptions {
     /// When set, replaces the remaining commit's message after the split.
     pub rest_message: Option<String>,
+}
+
+impl SplitOptions {
+    /// Sets [`rest_message`](Self::rest_message).
+    #[must_use]
+    pub fn with_rest_message(mut self, rest_message: Option<String>) -> Self {
+        self.rest_message = rest_message;
+        self
+    }
 }
 
 /// Map from original commit OID to the edit applied at that commit.

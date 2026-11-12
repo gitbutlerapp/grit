@@ -52,54 +52,22 @@ const GIT_ENV: &[(&str, &str)] = &[
 
 fn ingest_variants() -> [IngestPackOptions; 8] {
     [
-        IngestPackOptions {
-            fix_thin: false,
-            threads: Some(1),
-            skip_post_index_verify: false,
-            ..Default::default()
-        },
-        IngestPackOptions {
-            fix_thin: false,
-            threads: Some(8),
-            skip_post_index_verify: false,
-            ..Default::default()
-        },
-        IngestPackOptions {
-            fix_thin: false,
-            threads: None,
-            skip_post_index_verify: false,
-            ..Default::default()
-        },
-        IngestPackOptions {
-            fix_thin: true,
-            threads: Some(1),
-            skip_post_index_verify: false,
-            ..Default::default()
-        },
-        IngestPackOptions {
-            fix_thin: true,
-            threads: Some(8),
-            skip_post_index_verify: false,
-            ..Default::default()
-        },
-        IngestPackOptions {
-            fix_thin: true,
-            threads: None,
-            skip_post_index_verify: false,
-            ..Default::default()
-        },
-        IngestPackOptions {
-            fix_thin: false,
-            threads: Some(1),
-            skip_post_index_verify: true,
-            ..Default::default()
-        },
-        IngestPackOptions {
-            fix_thin: false,
-            threads: Some(8),
-            skip_post_index_verify: true,
-            ..Default::default()
-        },
+        IngestPackOptions::default().with_threads(Some(1)),
+        IngestPackOptions::default().with_threads(Some(8)),
+        IngestPackOptions::default(),
+        IngestPackOptions::default()
+            .with_fix_thin(true)
+            .with_threads(Some(1)),
+        IngestPackOptions::default()
+            .with_fix_thin(true)
+            .with_threads(Some(8)),
+        IngestPackOptions::default().with_fix_thin(true),
+        IngestPackOptions::default()
+            .with_threads(Some(1))
+            .with_skip_post_index_verify(true),
+        IngestPackOptions::default()
+            .with_threads(Some(8))
+            .with_skip_post_index_verify(true),
     ]
 }
 
@@ -713,12 +681,9 @@ fn install_rejects_corrupt_trailer_with_skip_post_index_verify() {
     let git_dir = tmp.path().join(".git");
     std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
     let odb = Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir);
-    let opts = IngestPackOptions {
-        fix_thin: false,
-        threads: Some(4),
-        skip_post_index_verify: true,
-        ..Default::default()
-    };
+    let opts = IngestPackOptions::default()
+        .with_threads(Some(4))
+        .with_skip_post_index_verify(true);
     let err = install_pack_bytes(corrupt, &odb, &opts).expect_err("corrupt pack trailer");
     let msg = err.to_string();
     assert!(
@@ -1318,11 +1283,9 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
     let installed = install_pack_bytes(
         thin,
         &odb,
-        &IngestPackOptions {
-            fix_thin: true,
-            threads: Some(4),
-            ..Default::default()
-        },
+        &IngestPackOptions::default()
+            .with_fix_thin(true)
+            .with_threads(Some(4)),
     )
     .expect("fix thin install");
     assert_installed_pack_consistent(
@@ -1448,11 +1411,9 @@ fn fetched_thin_pack_installs_with_matching_idx_and_name() {
         let installed = ingest_received_pack(
             thin,
             &odb,
-            &IngestPackOptions {
-                fix_thin: true,
-                skip_post_index_verify,
-                ..Default::default()
-            },
+            &IngestPackOptions::default()
+                .with_fix_thin(true)
+                .with_skip_post_index_verify(skip_post_index_verify),
         )
         .expect("ingest thin pack");
         let installed_count = pack_object_count(
@@ -1537,12 +1498,10 @@ fn fix_thin_install_rewrites_pack_and_index_that_git_accepts() {
         let ingested = install_pack_bytes(
             thin.clone(),
             &odb,
-            &IngestPackOptions {
-                fix_thin: true,
-                threads: Some(threads),
-                skip_post_index_verify: true,
-                ..Default::default()
-            },
+            &IngestPackOptions::default()
+                .with_fix_thin(true)
+                .with_threads(Some(threads))
+                .with_skip_post_index_verify(true),
         )
         .unwrap_or_else(|e| panic!("threads={threads}: fix-thin install: {e}"));
         let idx = ingested
@@ -1642,12 +1601,10 @@ fn rss_harness_install_pack_path() {
     install_pack_path(
         &staging,
         &odb,
-        &IngestPackOptions {
-            fix_thin,
-            threads,
-            skip_post_index_verify: skip_verify,
-            ..Default::default()
-        },
+        &IngestPackOptions::default()
+            .with_fix_thin(fix_thin)
+            .with_threads(threads)
+            .with_skip_post_index_verify(skip_verify),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::CancelToken::never(),
     )

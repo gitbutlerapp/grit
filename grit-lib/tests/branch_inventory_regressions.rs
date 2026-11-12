@@ -80,10 +80,9 @@ fn upstream_uses_custom_fetch_refspec_mapping() {
     let rows = repo
         .branches()
         .list(
-            &BranchListQuery {
-                scope: BranchScope::Local,
-                refs: RefQuery::default(),
-            },
+            &BranchListQuery::default()
+                .with_scope(BranchScope::Local)
+                .with_refs(RefQuery::default()),
             BranchDetail::Full,
         )
         .expect("list");
@@ -126,10 +125,9 @@ fn subject_preserves_whitespace_like_git() {
     let rows = repo
         .branches()
         .list(
-            &BranchListQuery {
-                scope: BranchScope::Local,
-                refs: RefQuery::default(),
-            },
+            &BranchListQuery::default()
+                .with_scope(BranchScope::Local)
+                .with_refs(RefQuery::default()),
             BranchDetail::Full,
         )
         .expect("list");
@@ -164,10 +162,9 @@ fn empty_commit_message_subject_is_empty() {
     let rows = repo
         .branches()
         .list(
-            &BranchListQuery {
-                scope: BranchScope::Local,
-                refs: RefQuery::default(),
-            },
+            &BranchListQuery::default()
+                .with_scope(BranchScope::Local)
+                .with_refs(RefQuery::default()),
             BranchDetail::Full,
         )
         .expect("list");
@@ -205,10 +202,9 @@ fn multiline_subject_matches_git_contents_subject() {
     let rows = repo
         .branches()
         .list(
-            &BranchListQuery {
-                scope: BranchScope::Local,
-                refs: RefQuery::default(),
-            },
+            &BranchListQuery::default()
+                .with_scope(BranchScope::Local)
+                .with_refs(RefQuery::default()),
             BranchDetail::Full,
         )
         .expect("list");
@@ -236,18 +232,16 @@ fn names_detail_rejects_date_sort_without_reading_objects() {
     std::fs::remove_file(&loose).expect("remove loose object");
 
     let repo = open(dir.path());
-    let name_query = BranchListQuery {
-        scope: BranchScope::Local,
-        refs: RefQuery::default(),
-    };
+    let name_query = BranchListQuery::default()
+        .with_scope(BranchScope::Local)
+        .with_refs(RefQuery::default());
     repo.branches()
         .list(&name_query, BranchDetail::Names)
         .expect("name sort lists ref");
 
-    let date_query = BranchListQuery {
-        scope: BranchScope::Local,
-        refs: RefQuery::default().with_sort(RefSort::default().with_key(SortKey::Date)),
-    };
+    let date_query = BranchListQuery::default()
+        .with_scope(BranchScope::Local)
+        .with_refs(RefQuery::default().with_sort(RefSort::default().with_key(SortKey::Date)));
     let err = repo
         .branches()
         .list(&date_query, BranchDetail::Names)

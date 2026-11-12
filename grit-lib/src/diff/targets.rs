@@ -121,6 +121,7 @@ pub struct DiffArguments {
 ///
 /// [`Diff::resolve_request`](crate::diff::Diff::resolve_request) turns this into a [`DiffArguments`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct DiffRequest {
     /// Compare the index with `HEAD` (`--staged`).
     pub staged: bool,
@@ -137,6 +138,50 @@ pub struct DiffRequest {
     /// `Some` means a file was supplied, even when it held no entries: the combined pathspec
     /// list must then be non-empty.
     pub pathspec_file: Option<Vec<String>>,
+}
+
+impl DiffRequest {
+    /// Sets [`staged`](Self::staged).
+    #[must_use]
+    pub const fn with_staged(mut self, staged: bool) -> Self {
+        self.staged = staged;
+        self
+    }
+
+    /// Sets [`unstaged`](Self::unstaged).
+    #[must_use]
+    pub const fn with_unstaged(mut self, unstaged: bool) -> Self {
+        self.unstaged = unstaged;
+        self
+    }
+
+    /// Sets [`against`](Self::against).
+    #[must_use]
+    pub fn with_against(mut self, against: Option<String>) -> Self {
+        self.against = against;
+        self
+    }
+
+    /// Sets [`positionals`](Self::positionals).
+    #[must_use]
+    pub fn with_positionals(mut self, positionals: Vec<String>) -> Self {
+        self.positionals = positionals;
+        self
+    }
+
+    /// Sets [`paths`](Self::paths).
+    #[must_use]
+    pub fn with_paths(mut self, paths: Vec<String>) -> Self {
+        self.paths = paths;
+        self
+    }
+
+    /// Sets [`pathspec_file`](Self::pathspec_file).
+    #[must_use]
+    pub fn with_pathspec_file(mut self, pathspec_file: Option<Vec<String>>) -> Self {
+        self.pathspec_file = pathspec_file;
+        self
+    }
 }
 
 /// Invalid `grit diff` argument combinations or revision parsing failures.

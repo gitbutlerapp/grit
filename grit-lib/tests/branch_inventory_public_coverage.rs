@@ -10,20 +10,18 @@ use grit_lib::repo::{InitOptions, Repository};
 fn branch_inventory_public_api_smoke() {
     let dir = tempfile::tempdir().unwrap();
     let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
-    let query = BranchListQuery {
-        scope: BranchScope::Local,
-        refs: RefQuery::default(),
-    };
+    let query = BranchListQuery::default()
+        .with_scope(BranchScope::Local)
+        .with_refs(RefQuery::default());
     let names = repo.branches().list(&query, BranchDetail::Names).unwrap();
     assert!(names.iter().all(|b| b.subject.is_none()));
     assert!(repo.branches().upstream_status("main").unwrap().is_none());
     let _ = repo
         .branches()
         .list(
-            &BranchListQuery {
-                scope: BranchScope::All,
-                refs: RefQuery::default(),
-            },
+            &BranchListQuery::default()
+                .with_scope(BranchScope::All)
+                .with_refs(RefQuery::default()),
             BranchDetail::Full,
         )
         .unwrap();
@@ -31,10 +29,11 @@ fn branch_inventory_public_api_smoke() {
     let date_sorted_names = repo
         .branches()
         .list(
-            &BranchListQuery {
-                scope: BranchScope::Local,
-                refs: RefQuery::default().with_sort(RefSort::default().with_key(SortKey::Date)),
-            },
+            &BranchListQuery::default()
+                .with_scope(BranchScope::Local)
+                .with_refs(
+                    RefQuery::default().with_sort(RefSort::default().with_key(SortKey::Date)),
+                ),
             BranchDetail::Names,
         )
         .unwrap();

@@ -57,6 +57,7 @@ pub enum LogPatchBinaryFormat {
 
 /// Options for [`write_commit_log_patch`].
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct LogPatchOptions {
     /// Unified diff hunk settings.
     pub diff: DiffOptions,
@@ -73,11 +74,17 @@ pub struct LogPatchOptions {
 }
 
 impl LogPatchOptions {
-    /// Defaults matching `git log -p` on a typical repository.
+    /// Creates options that render patches with `diff`, using `git log -p` defaults for the
+    /// rest: 7-hex-digit abbreviations, a full commit header, the default binary format, the
+    /// whole tree, and combined diffs for merges.
+    ///
+    /// # Parameters
+    ///
+    /// - `diff`: unified diff hunk settings (algorithm, context, whitespace, renames).
     #[must_use]
-    pub fn git_default(config: &ConfigSet) -> Self {
+    pub fn new(diff: DiffOptions) -> Self {
         Self {
-            diff: DiffOptions::from_config(config),
+            diff,
             abbrev_len: 7,
             commit_header: LogPatchCommitHeader::Full,
             binary_format: LogPatchBinaryFormat::default(),
@@ -87,10 +94,60 @@ impl LogPatchOptions {
             diff_merges: DiffMerges::Combined,
         }
     }
+
+    /// Defaults matching `git log -p` on a typical repository: [`LogPatchOptions::new`]
+    /// with diff settings read from `config`.
+    #[must_use]
+    pub fn git_default(config: &ConfigSet) -> Self {
+        Self::new(DiffOptions::from_config(config))
+    }
+
+    /// Sets [`diff`](Self::diff).
+    #[must_use]
+    pub fn with_diff(mut self, diff: DiffOptions) -> Self {
+        self.diff = diff;
+        self
+    }
+
+    /// Sets [`abbrev_len`](Self::abbrev_len).
+    #[must_use]
+    pub const fn with_abbrev_len(mut self, abbrev_len: usize) -> Self {
+        self.abbrev_len = abbrev_len;
+        self
+    }
+
+    /// Sets [`commit_header`](Self::commit_header).
+    #[must_use]
+    pub fn with_commit_header(mut self, commit_header: LogPatchCommitHeader) -> Self {
+        self.commit_header = commit_header;
+        self
+    }
+
+    /// Sets [`binary_format`](Self::binary_format).
+    #[must_use]
+    pub fn with_binary_format(mut self, binary_format: LogPatchBinaryFormat) -> Self {
+        self.binary_format = binary_format;
+        self
+    }
+
+    /// Sets [`pathspec`](Self::pathspec).
+    #[must_use]
+    pub fn with_pathspec(mut self, pathspec: crate::pathspec::Pathspec) -> Self {
+        self.pathspec = pathspec;
+        self
+    }
+
+    /// Sets [`diff_merges`](Self::diff_merges).
+    #[must_use]
+    pub fn with_diff_merges(mut self, diff_merges: DiffMerges) -> Self {
+        self.diff_merges = diff_merges;
+        self
+    }
 }
 
 /// Options for [`write_patch`] (`git diff --binary`-compatible output for `git apply`).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct PatchTextOptions {
     /// Unified diff hunk settings (algorithm, context, whitespace, renames).
     pub diff: DiffOptions,
@@ -110,6 +167,31 @@ impl PatchTextOptions {
             diff,
             abbrev_len: resolve_core_abbrev_len(&config, repo.odb())?,
         })
+    }
+
+    /// Creates a [`PatchTextOptions`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `diff`: unified diff hunk settings (algorithm, context, whitespace, renames).
+    /// - `abbrev_len`: minimum abbreviated oid length on `index` lines for text files (`core.abbrev`).
+    #[must_use]
+    pub fn new(diff: DiffOptions, abbrev_len: usize) -> Self {
+        Self { diff, abbrev_len }
+    }
+
+    /// Sets [`diff`](Self::diff).
+    #[must_use]
+    pub fn with_diff(mut self, diff: DiffOptions) -> Self {
+        self.diff = diff;
+        self
+    }
+
+    /// Sets [`abbrev_len`](Self::abbrev_len).
+    #[must_use]
+    pub const fn with_abbrev_len(mut self, abbrev_len: usize) -> Self {
+        self.abbrev_len = abbrev_len;
+        self
     }
 }
 

@@ -468,21 +468,16 @@ fn pull_rebase_conflict_stops_like_git_and_continues() {
         write_file(dir, "conflict.txt", "resolved\n");
         git(dir, &["add", "conflict.txt"]);
     }
-    let resume = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream: local_tip,
-            onto: None,
-            branch_tip: local_tip,
-        },
-        rebase: RebaseOntoOptions::new(
+    let resume = StartRebaseOptions::new(
+        RebaseRequest::new(local_tip, local_tip),
+        RebaseOntoOptions::new(
             RewriteOptions::new("T <t@example.com> 1700000000 +0000".parse().expect("sig"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         ),
-        apply: ApplyOptions::new(test_sig(), "rebase: continue")
+        ApplyOptions::new(test_sig(), "rebase: continue")
             .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
-        exec: None,
-    };
+    );
     let done = open(&grit_dir)
         .history()
         .continue_rebase(

@@ -33,6 +33,7 @@ pub fn is_bundle_path(path: &Path) -> bool {
 /// Ref tips and revision tokens for
 /// [`RepositoryBundles::write_from_revs`](crate::repo_handles::RepositoryBundles::write_from_revs).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BundleCreateOptions {
     /// When true, list `HEAD` and every ref under `refs/` in the bundle header (like `git bundle create --all`).
     pub all_refs: bool,
@@ -48,6 +49,20 @@ impl BundleCreateOptions {
             all_refs: false,
             rev_tokens,
         }
+    }
+
+    /// Sets [`all_refs`](Self::all_refs).
+    #[must_use]
+    pub const fn with_all_refs(mut self, all_refs: bool) -> Self {
+        self.all_refs = all_refs;
+        self
+    }
+
+    /// Sets [`rev_tokens`](Self::rev_tokens).
+    #[must_use]
+    pub fn with_rev_tokens(mut self, rev_tokens: Vec<String>) -> Self {
+        self.rev_tokens = rev_tokens;
+        self
     }
 }
 

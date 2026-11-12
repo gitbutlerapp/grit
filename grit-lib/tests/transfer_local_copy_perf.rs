@@ -204,10 +204,7 @@ fn cargo_mirror_bundle_all_within_budget_when_fixture_present() {
     let t0 = Instant::now();
     repo.bundles()
         .write_from_revs(
-            &BundleCreateOptions {
-                all_refs: true,
-                rev_tokens: Vec::new(),
-            },
+            &BundleCreateOptions::default().with_all_refs(true),
             &bundle_path,
             &mut grit_lib::progress::NullProgress,
             grit_lib::progress::CancelToken::never_ref(),

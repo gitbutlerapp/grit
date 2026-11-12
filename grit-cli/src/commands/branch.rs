@@ -267,10 +267,9 @@ fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
     } else {
         BranchScope::Local
     };
-    let query = BranchListQuery {
-        scope,
-        refs: build_ref_query(repo, list)?,
-    };
+    let query = BranchListQuery::default()
+        .with_scope(scope)
+        .with_refs(build_ref_query(repo, list)?);
     let detail = if opts.list_full_detail {
         BranchDetail::Full
     } else {

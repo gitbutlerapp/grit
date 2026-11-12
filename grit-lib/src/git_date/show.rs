@@ -6,7 +6,6 @@ use super::tm::{
     time_to_tm, time_to_tm_local, tm_to_time_t, TzHhmm,
 };
 use std::ffi::CString;
-use std::io::IsTerminal;
 
 const MONTH_NAME_08: &str = match core::str::from_utf8(&[65, 117, 103, 117, 115, 116]) {
     Ok(name) => name,
@@ -112,15 +111,28 @@ impl DateMode {
     }
 }
 
-/// `parse_date_format` function.
-pub fn parse_date_format(format: &str) -> Result<DateMode, &'static str> {
+/// Parses a `--date=<format>` value into a [`DateMode`].
+///
+/// An `auto:<format>` value means `<format>` when the output goes to a terminal and
+/// `default` otherwise. The library does not inspect the process's streams itself: the
+/// caller decides and passes the answer in `output_is_terminal` (for example
+/// `std::io::stdout().is_terminal()` in a command-line front end).
+///
+/// # Parameters
+///
+/// - `format`: the date format name, such as `iso`, `relative`, `short-local` or
+///   `format:%Y-%m-%d`.
+/// - `output_is_terminal`: whether the formatted dates will be written to a terminal;
+///   only consulted for `auto:` values.
+///
+/// # Errors
+///
+/// Returns a short description when the format name is unknown, has trailing text, or is
+/// `format` without the `:` separator.
+pub fn parse_date_format(format: &str, output_is_terminal: bool) -> Result<DateMode, &'static str> {
     let mut s = format;
     if let Some(rest) = s.strip_prefix("auto:") {
-        s = if std::io::stdout().is_terminal() {
-            rest
-        } else {
-            "default"
-        };
+        s = if output_is_terminal { rest } else { "default" };
     }
     if s == "local" {
         s = "default-local";
@@ -549,5 +561,15 @@ mod public_helper_coverage {
         t.tm_mon = 0;
         t.tm_mday = 1;
         let _ = strbuf_addftime(&t, 0, "%Y", true);
+    }
+
+    #[test]
+    fn auto_format_follows_the_callers_terminal_flag() {
+        let iso = DateMode::from_type(DateModeType::Iso8601);
+        let normal = DateMode::from_type(DateModeType::Normal);
+        assert_eq!(parse_date_format("auto:iso", true), Ok(iso.clone()));
+        assert_eq!(parse_date_format("auto:iso", false), Ok(normal));
+        assert_eq!(parse_date_format("iso", false), Ok(iso));
+        assert!(parse_date_format("auto:bogus", true).is_err());
     }
 }

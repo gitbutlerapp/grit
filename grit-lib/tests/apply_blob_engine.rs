@@ -247,7 +247,7 @@ fn apply_reverse_roundtrip_impl() -> TestResult {
     let forward = hunks_from_git_diff(old, new)?;
     let mid = grit_apply_bytes(old, &forward)?;
     assert_eq!(mid, new);
-    let back = apply_hunks_to_blob(&mid, &forward, &ApplyOptions { reverse: true })
+    let back = apply_hunks_to_blob(&mid, &forward, &ApplyOptions::default().with_reverse(true))
         .map_err(|e| format!("reverse apply: {e}"))?;
     assert_eq!(back, old);
     Ok(())
@@ -277,7 +277,7 @@ fn apply_reverse_whole_file_deletion_recreates_blob_impl() -> TestResult {
     let hunks = hunks_from_git_diff(old, new)?;
     assert_eq!(grit_apply_bytes(old, &hunks)?, new);
     assert_eq!(
-        apply_hunks_to_blob(new, &hunks, &ApplyOptions { reverse: true })
+        apply_hunks_to_blob(new, &hunks, &ApplyOptions::default().with_reverse(true))
             .map_err(|e| format!("grit reverse: {e}"))?,
         old,
     );
@@ -405,8 +405,12 @@ fn structured_roundtrip(old: &str, new: &str) -> TestResult {
             "forward mismatch old={old:?} new={new:?} got={got:?}"
         ));
     }
-    let rev = apply_hunks_to_blob(new.as_bytes(), &hunks, &ApplyOptions { reverse: true })
-        .map_err(|e| format!("reverse apply: {e}"))?;
+    let rev = apply_hunks_to_blob(
+        new.as_bytes(),
+        &hunks,
+        &ApplyOptions::default().with_reverse(true),
+    )
+    .map_err(|e| format!("reverse apply: {e}"))?;
     if rev != old.as_bytes() {
         return Err(format!(
             "reverse mismatch old={old:?} new={new:?} rev={rev:?}"

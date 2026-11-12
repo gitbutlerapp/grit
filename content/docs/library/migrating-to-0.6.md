@@ -195,10 +195,10 @@ Input structs that grow with new flags are `#[non_exhaustive]`, so struct litera
 | [`RestoreOptions`](rustdoc:grit_lib::porcelain::restore::RestoreOptions) | `new(pathspecs)` |
 | [`MergeOptions`](rustdoc:grit_lib::merge::MergeOptions), [`StatusOptions`](rustdoc:grit_lib::status::StatusOptions), [`OwnershipContext`](rustdoc:grit_lib::ownership_check::OwnershipContext) | `default()` |
 | [`CommandEnvironment`](rustdoc:grit_lib::command_runner::CommandEnvironment), [`CommitHookEnv`](rustdoc:grit_lib::command_runner::hooks::CommitHookEnv), [`ProtocolPolicyInputs`](rustdoc:grit_lib::remote::protocol::ProtocolPolicyInputs), [`GitDaemonTransport`](rustdoc:grit_lib::remote::transport::GitDaemonTransport) | `default()` |
-| [`Credential`](rustdoc:grit_lib::remote::credentials::Credential) | `default()` (its `Debug` output redacts the password) |
+| [`Credential`](rustdoc:grit_lib::remote::credentials::Credential) | `default()` (its `Debug` output redacts the password, including one embedded in `url`) |
 | [`RefSort`](rustdoc:grit_lib::refs::listing::RefSort), [`RefQueryOptions`](rustdoc:grit_lib::refs::listing::RefQueryOptions), [`IgnoreRevsSources`](rustdoc:grit_lib::blame::IgnoreRevsSources), [`ReachableWalkCommitterCutoffs`](rustdoc:grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) | `default()` |
 | [`TreeMergeConflictPresentation`](rustdoc:grit_lib::merge::merge_trees::TreeMergeConflictPresentation), [`RenameDetection`](rustdoc:grit_lib::status::RenameDetection) (status) | `default()` |
-| [`DateMode`](rustdoc:grit_lib::config::git_date::DateMode) | `from_type(ty)` or `parse_date_format` |
+| [`DateMode`](rustdoc:grit_lib::config::git_date::DateMode) | `from_type(ty)` or `parse_date_format(format, output_is_terminal)` (the caller now says whether output is a terminal for `auto:` formats) |
 | [`GraphCharset`](rustdoc:grit_lib::revwalk::GraphCharset) | `GraphCharset::ASCII` or `GraphCharset::UNICODE` |
 | [`PathspecFile`](rustdoc:grit_lib::worktree::pathspec::PathspecFile) | `new(data, nul_terminated)` |
 | [`StartPoint`](rustdoc:grit_lib::porcelain::branch::StartPoint) | `new(oid, label)` |
@@ -214,10 +214,26 @@ Input structs that grow with new flags are `#[non_exhaustive]`, so struct litera
 | [`PrePushRef`](rustdoc:grit_lib::command_runner::hooks::PrePushRef) | `new(local_ref, local_oid, remote_ref, remote_oid)` |
 | [`ReflogSelector`](rustdoc:grit_lib::refs::reflog::ReflogSelector) | `new(ref_name, index)` or `str::parse` |
 | [`MergeSource`](rustdoc:grit_lib::merge::MergeSource) | `new(oid, kind)` |
+| [`ApplyOptions`](rustdoc:grit_lib::apply::ApplyOptions) (apply), [`IndexApplyOptions`](rustdoc:grit_lib::apply::IndexApplyOptions), [`BlameOptions`](rustdoc:grit_lib::blame::BlameOptions), [`BundleSpec`](rustdoc:grit_lib::bundle::BundleSpec), [`BundleCreateOptions`](rustdoc:grit_lib::bundle::bundle_remote::BundleCreateOptions), [`RunHookOptions`](rustdoc:grit_lib::command_runner::hooks::RunHookOptions), [`ProcessTrailerOptions`](rustdoc:grit_lib::commit::trailers::interpret::ProcessTrailerOptions), [`IncludeContext`](rustdoc:grit_lib::config::IncludeContext), [`LoadConfigOptions`](rustdoc:grit_lib::config::LoadConfigOptions), [`InitFilesystemConfigOptions`](rustdoc:grit_lib::config::init_filesystem::InitFilesystemConfigOptions), [`CommitFilesManyOptions`](rustdoc:grit_lib::diff::CommitFilesManyOptions), [`DiffRequest`](rustdoc:grit_lib::diff::DiffRequest), [`CombinedDiffWsOptions`](rustdoc:grit_lib::diff::combined_diff_patch::CombinedDiffWsOptions), [`CombinedTreeDiffOptions`](rustdoc:grit_lib::diff::combined_tree_diff::CombinedTreeDiffOptions), [`FmtMergeMsgOptions`](rustdoc:grit_lib::diff::fmt_merge_msg::FmtMergeMsgOptions), [`IndexParseContext`](rustdoc:grit_lib::index::IndexParseContext), [`StatMatchPolicy`](rustdoc:grit_lib::index::StatMatchPolicy), [`WorktreeModePolicy`](rustdoc:grit_lib::index::WorktreeModePolicy), [`FsckObjectOptions`](rustdoc:grit_lib::maintenance::fsck::FsckObjectOptions), [`IngestPackOptions`](rustdoc:grit_lib::objects::index_pack::IngestPackOptions), [`BranchListQuery`](rustdoc:grit_lib::refs::branch_tracking::BranchListQuery), [`ExecSpec`](rustdoc:grit_lib::revwalk::history::ExecSpec), [`SplitOptions`](rustdoc:grit_lib::revwalk::history::SplitOptions), [`LogWalkQuery`](rustdoc:grit_lib::revwalk::log_walk::LogWalkQuery), [`ConvertToGitOpts`](rustdoc:grit_lib::worktree::crlf::ConvertToGitOpts), [`FileAttrs`](rustdoc:grit_lib::worktree::crlf::FileAttrs) | `default()` |
+| [`CommandSpec`](rustdoc:grit_lib::command_runner::CommandSpec) | `new(program)` |
+| [`CommitFilesManyInput`](rustdoc:grit_lib::diff::CommitFilesManyInput) | `new(oid, parents, tree)` |
+| [`LogPatchOptions`](rustdoc:grit_lib::diff::LogPatchOptions) | `new(diff)` or `git_default(config)` |
+| [`PatchTextOptions`](rustdoc:grit_lib::diff::PatchTextOptions) | `new(diff, abbrev_len)` or `from_repo(repo, diff)` |
+| [`ReachabilityQuery`](rustdoc:grit_lib::objects::bitmap::ReachabilityQuery) | `new(wants, haves)` |
+| [`StandingOptions`](rustdoc:grit_lib::refs::branch_tracking::StandingOptions) | `new(newest_ahead_limit)` |
+| [`TargetComparisonOptions`](rustdoc:grit_lib::refs::branch_tracking::TargetComparisonOptions) | `new(list_limit)` |
+| [`FetchInvocation`](rustdoc:grit_lib::remote::fetch_request::FetchInvocation) | `new(remote)` |
+| [`AbsorbOptions`](rustdoc:grit_lib::revwalk::history::AbsorbOptions) | `new(rewrite)` |
+| [`FixupOptions`](rustdoc:grit_lib::revwalk::history::FixupOptions) | `new(rewrite)` |
+| [`HunkRange`](rustdoc:grit_lib::revwalk::history::HunkRange) | `new(old_start, old_lines, new_start, new_lines)` |
+| [`RebaseRequest`](rustdoc:grit_lib::revwalk::history::RebaseRequest) | `new(upstream, branch_tip)` |
+| [`SquashOptions`](rustdoc:grit_lib::revwalk::history::SquashOptions) | `new(message, rewrite)` |
+| [`StartRebaseOptions`](rustdoc:grit_lib::revwalk::history::StartRebaseOptions) | `new(request, rebase, apply)` |
+| [`ConversionConfig`](rustdoc:grit_lib::worktree::crlf::ConversionConfig) | `from_config(config)` (`from_config_with_runner` is gone: chain `with_command_runner`) |
 
 `OwnershipContext` is no longer `Copy`; clone it where you need a second copy.
 
-The struct-like variants of [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) that carry several fields are `#[non_exhaustive]` too. Build them with [`CommitEdit::rewrite`](rustdoc:grit_lib::revwalk::history::CommitEdit::rewrite), [`CommitEdit::split_before`](rustdoc:grit_lib::revwalk::history::CommitEdit::split_before) and [`CommitEdit::reuse`](rustdoc:grit_lib::revwalk::history::CommitEdit::reuse), and end patterns on them with `..`.
+The struct-like variants of [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) are `#[non_exhaustive]` too. Build them with [`CommitEdit::rewrite`](rustdoc:grit_lib::revwalk::history::CommitEdit::rewrite), [`CommitEdit::split_before`](rustdoc:grit_lib::revwalk::history::CommitEdit::split_before), [`CommitEdit::reparent`](rustdoc:grit_lib::revwalk::history::CommitEdit::reparent) and [`CommitEdit::reuse`](rustdoc:grit_lib::revwalk::history::CommitEdit::reuse), and end patterns on them with `..`.
 
 ```rust
 // 0.5.x
@@ -1641,6 +1657,7 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::worktree::crlf::AttrRule::pattern` | `grit_lib::worktree::attributes::AttrRule::pattern` |  |
 | `grit_lib::worktree::crlf::AttrRule::pattern_flags` | `grit_lib::worktree::attributes::AttrRule::pattern_flags` |  |
 | `grit_lib::worktree::crlf::AttrRule::skip` | `grit_lib::worktree::attributes::AttrRule::skip` |  |
+| `grit_lib::worktree::crlf::ConversionConfig::from_config_with_runner` | `grit_lib::worktree::crlf::ConversionConfig::with_command_runner (chain it after from_config)` |  |
 | `grit_lib::worktree::crlf::GitAttributes` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::worktree::crlf::WorkTreeEncodingError` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::worktree::crlf::WorkTreeEncodingError::UnsupportedEncoding` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |

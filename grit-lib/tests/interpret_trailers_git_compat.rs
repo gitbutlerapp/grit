@@ -39,13 +39,10 @@ fn git_interpret_trailers(repo: &Path, extra_args: &[&str], input: &str) -> Stri
 }
 
 fn grit_parse(git_dir: Option<&Path>, input: &str, new_args: &[NewTrailerArg]) -> String {
-    let opts = ProcessTrailerOptions {
-        trim_empty: false,
-        only_trailers: true,
-        only_input: new_args.is_empty(),
-        unfold: false,
-        no_divider: true,
-    };
+    let opts = ProcessTrailerOptions::default()
+        .with_only_trailers(true)
+        .with_only_input(new_args.is_empty())
+        .with_no_divider(true);
     process_trailers(input, &opts, new_args, git_dir)
         .trim_end()
         .to_string()
@@ -87,13 +84,7 @@ fn interpret_trailers_trailer_arg_matches_git() {
     let git_dir = dir.path().join(".git");
     let input = "Subject\n\n";
     let git_out = git_interpret_trailers(dir.path(), &["--trailer", "Acked-by: Maintainer"], input);
-    let opts = ProcessTrailerOptions {
-        trim_empty: false,
-        only_trailers: false,
-        only_input: false,
-        unfold: false,
-        no_divider: false,
-    };
+    let opts = ProcessTrailerOptions::default();
     let args = [NewTrailerArg::new("Acked-by: Maintainer")];
     let grit_out = process_trailers(input, &opts, &args, Some(git_dir.as_path()));
     assert_eq!(grit_out.trim_end(), git_out.trim_end());
@@ -330,13 +321,12 @@ fn trailer_output_options_match_git() {
     let git_dir = dir.path().join(".git");
     for input in MATRIX_MESSAGES {
         for bits in 0u8..32 {
-            let opts = ProcessTrailerOptions {
-                trim_empty: bits & 1 != 0,
-                only_trailers: bits & 2 != 0,
-                only_input: bits & 4 != 0,
-                unfold: bits & 8 != 0,
-                no_divider: bits & 16 != 0,
-            };
+            let opts = ProcessTrailerOptions::default()
+                .with_trim_empty(bits & 1 != 0)
+                .with_only_trailers(bits & 2 != 0)
+                .with_only_input(bits & 4 != 0)
+                .with_unfold(bits & 8 != 0)
+                .with_no_divider(bits & 16 != 0);
             let mut git_args: Vec<String> = [
                 (opts.trim_empty, "--trim-empty"),
                 (opts.only_trailers, "--only-trailers"),

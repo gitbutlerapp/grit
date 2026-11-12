@@ -142,6 +142,7 @@ impl From<IngestedObjects> for IngestedPack {
 
 /// Options controlling how a received pack is ingested.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct IngestPackOptions {
     /// When true, append missing ref-delta bases from `odb` before indexing
     /// (matches `git index-pack --fix-thin`).
@@ -242,6 +243,65 @@ impl IngestPackOptions {
                 .map_err(Error::Config);
         }
         Ok(Parallelism::resolve(None))
+    }
+
+    /// Sets [`fix_thin`](Self::fix_thin).
+    #[must_use]
+    pub const fn with_fix_thin(mut self, fix_thin: bool) -> Self {
+        self.fix_thin = fix_thin;
+        self
+    }
+
+    /// Sets [`threads`](Self::threads).
+    #[must_use]
+    pub const fn with_threads(mut self, threads: Option<usize>) -> Self {
+        self.threads = threads;
+        self
+    }
+
+    /// Sets [`skip_post_index_verify`](Self::skip_post_index_verify).
+    #[must_use]
+    pub const fn with_skip_post_index_verify(mut self, skip_post_index_verify: bool) -> Self {
+        self.skip_post_index_verify = skip_post_index_verify;
+        self
+    }
+
+    /// Sets [`merged_config`](Self::merged_config).
+    #[must_use]
+    pub fn with_merged_config(mut self, merged_config: Option<crate::config::ConfigSet>) -> Self {
+        self.merged_config = merged_config;
+        self
+    }
+
+    /// Sets [`environment`](Self::environment).
+    #[must_use]
+    pub fn with_environment(mut self, environment: crate::environment::Environment) -> Self {
+        self.environment = environment;
+        self
+    }
+
+    /// Sets [`mark_promisor_pack`](Self::mark_promisor_pack).
+    #[must_use]
+    pub const fn with_mark_promisor_pack(mut self, mark_promisor_pack: bool) -> Self {
+        self.mark_promisor_pack = mark_promisor_pack;
+        self
+    }
+
+    /// Sets [`keep_message`](Self::keep_message).
+    #[must_use]
+    pub fn with_keep_message(mut self, keep_message: Option<String>) -> Self {
+        self.keep_message = keep_message;
+        self
+    }
+
+    /// Sets [`trusted_index_rows`](Self::trusted_index_rows).
+    #[must_use]
+    pub fn with_trusted_index_rows(
+        mut self,
+        trusted_index_rows: Option<Vec<(ObjectId, u64, u32)>>,
+    ) -> Self {
+        self.trusted_index_rows = trusted_index_rows;
+        self
     }
 }
 

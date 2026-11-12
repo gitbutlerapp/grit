@@ -155,10 +155,9 @@ fn build_fixture() -> TempDir {
 
 fn assert_scope_matches_git(dir: &Path, scope: BranchScope, prefix: &str) {
     let repo = open(dir);
-    let query = BranchListQuery {
-        scope,
-        refs: RefQuery::default(),
-    };
+    let query = BranchListQuery::default()
+        .with_scope(scope)
+        .with_refs(RefQuery::default());
     let rows = repo
         .branches()
         .list(&query, BranchDetail::Full)

@@ -1425,3 +1425,4 @@
 "grit_lib::worktree::sanitize_worktree_id_component" = "removed (crate-internal in 0.6: no callers outside grit-lib)"
 "grit_lib::worktree::worktree_admin_dir" = "grit_lib::repo_handles::RepositoryWorktrees::admin_dir"
 "grit_lib::worktree::worktree_path_basename" = "removed (crate-internal in 0.6: no callers outside grit-lib)"
+"grit_lib::worktree::crlf::ConversionConfig::from_config_with_runner" = "grit_lib::worktree::crlf::ConversionConfig::with_command_runner (chain it after from_config)"

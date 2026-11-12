@@ -104,10 +104,7 @@ fn git_history_fetched_into_memory_round_trips_through_an_in_memory_bundle() {
     let mut bundle = Vec::new();
     repo.bundles()
         .write_to(
-            &BundleSpec {
-                include: vec![(tip, "refs/heads/main".into())],
-                ..BundleSpec::default()
-            },
+            &BundleSpec::default().with_include(vec![(tip, "refs/heads/main".into())]),
             &mut bundle,
             &mut NullProgress,
             &CancelToken::never(),

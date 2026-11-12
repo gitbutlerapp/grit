@@ -617,16 +617,11 @@ fn apply_options(record: Option<&str>) -> ApplyOptions {
 }
 
 fn rebase_onto(upstream: ObjectId, tip: ObjectId) -> StartRebaseOptions {
-    StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: None,
-            branch_tip: tip,
-        },
-        rebase: RebaseOntoOptions::new(rewrite_options()),
-        apply: apply_options(None),
-        exec: None,
-    }
+    StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip),
+        RebaseOntoOptions::new(rewrite_options()),
+        apply_options(None),
+    )
 }
 
 #[test]

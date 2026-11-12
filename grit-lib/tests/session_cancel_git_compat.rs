@@ -214,22 +214,17 @@ fn cancelled_merge_and_rebase_keep_branches_where_git_left_them() {
     git(root, &["add", "topic.txt"]);
     git(root, &["commit", "-qm", "topic"]);
     let topic = oid(root, "HEAD");
-    let start = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream: side,
-            onto: None,
-            branch_tip: topic,
-        },
-        rebase: RebaseOntoOptions::new(
+    let start = StartRebaseOptions::new(
+        RebaseRequest::new(side, topic),
+        RebaseOntoOptions::new(
             RewriteOptions::new(IDENT.parse().expect("signature"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         )
         .with_skip_applied(false),
-        apply: ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
+        ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
             .with_hooks(grit_lib::command_runner::hooks::PostOperationHooks::Skip),
-        exec: None,
-    };
+    );
     let repo = open_grit_repo(root);
     let mut sink = CancelAfter::new(ProgressPhase::CheckingOutFiles, 5);
     let cancel = sink.flag.clone();

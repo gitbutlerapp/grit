@@ -173,7 +173,8 @@ impl WorktreeRules {
             .work_tree()
             .ok_or(RepositoryError::RequiresWorkTree)?
             .to_path_buf();
-        let conversion = ConversionConfig::from_config_with_runner(&config, repo.command_runner());
+        let conversion =
+            ConversionConfig::from_config(&config).with_command_runner(repo.command_runner());
         let ignore = RefCell::new(IgnoreMatcher::from_repository(repo)?);
         let (stack_prefix, info_rules) = load_attribute_stack_prefix_and_info(
             repo,

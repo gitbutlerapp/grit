@@ -5,7 +5,7 @@ use crate::support;
 use std::fs;
 
 use grit_lib::config::environment::Environment;
-use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet, LoadConfigOptions};
+use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::repo::{InitOptions, Repository};
 use support::{default_load_opts, isolated_env};
 use tempfile::tempdir;
@@ -88,10 +88,7 @@ fn load_with_env_pairs_and_global_override() {
     let set = ConfigSet::load(
         &env,
         Some(&git_dir),
-        &LoadConfigOptions {
-            include_system: false,
-            ..default_load_opts(&git_dir, &env)
-        },
+        &default_load_opts(&git_dir, &env).with_include_system(false),
     )
     .expect("load");
     assert_eq!(set.get("fromenv.k").unwrap().as_deref(), Some("e"));

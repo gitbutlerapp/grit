@@ -458,19 +458,15 @@ pub fn write_layered_repo(home: &Path, global: &str, local: &str) -> PathBuf {
 }
 
 pub fn default_load_opts(git_dir: &Path, env: &Environment) -> LoadConfigOptions {
-    LoadConfigOptions {
-        include_system: false,
-        process_includes: true,
-        command_includes: true,
-        include_ctx: IncludeContext {
-            git_dir: Some(git_dir.to_path_buf()),
-            cwd: env.cwd.clone(),
-            pwd: env.pwd.clone(),
-            env: std::sync::Arc::new(env.clone()),
-            ..Default::default()
-        },
-        ..Default::default()
-    }
+    LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_include_ctx(
+            IncludeContext::default()
+                .with_git_dir(Some(git_dir.to_path_buf()))
+                .with_cwd(env.cwd.clone())
+                .with_pwd(env.pwd.clone())
+                .with_env(std::sync::Arc::new(env.clone())),
+        )
 }
 
 pub fn grit_path_value(env: &Environment, raw: &str) -> String {

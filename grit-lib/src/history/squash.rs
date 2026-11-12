@@ -37,11 +37,39 @@ pub enum SquashMessage {
 
 /// Inputs for [`History::squash`](super::History::squash).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct SquashOptions {
     /// Message mode for the folded commit.
     pub message: SquashMessage,
     /// Ref scope, empty policy, and committer for planning.
     pub rewrite: RewriteOptions,
+}
+
+impl SquashOptions {
+    /// Creates a [`SquashOptions`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `message`: message mode for the folded commit.
+    /// - `rewrite`: ref scope, empty policy, and committer for planning.
+    #[must_use]
+    pub fn new(message: SquashMessage, rewrite: RewriteOptions) -> Self {
+        Self { message, rewrite }
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: SquashMessage) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`rewrite`](Self::rewrite).
+    #[must_use]
+    pub fn with_rewrite(mut self, rewrite: RewriteOptions) -> Self {
+        self.rewrite = rewrite;
+        self
+    }
 }
 
 struct ResolvedSquashRange {

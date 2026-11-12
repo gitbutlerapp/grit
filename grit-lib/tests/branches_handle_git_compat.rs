@@ -50,10 +50,9 @@ fn branches_handle_round_trips_with_git() {
     let listed = repo
         .branches()
         .list(
-            &BranchListQuery {
-                scope: BranchScope::Local,
-                refs: RefQuery::default(),
-            },
+            &BranchListQuery::default()
+                .with_scope(BranchScope::Local)
+                .with_refs(RefQuery::default()),
             BranchDetail::Names,
         )
         .expect("list");

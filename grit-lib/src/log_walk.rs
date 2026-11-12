@@ -24,7 +24,8 @@ const MAGIC_V3: &[u8; 4] = b"GLW3";
 const NO_CUTOFF: i64 = i64::MIN;
 
 /// Tips, exclusions, and date cutoffs for a resumable date-order log walk.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct LogWalkQuery {
     /// Positive walk tips (resolved commit oids).
     pub tips: Vec<ObjectId>,
@@ -68,6 +69,27 @@ impl LogWalkQuery {
                 until: walk.until,
             },
         }))
+    }
+
+    /// Sets [`tips`](Self::tips).
+    #[must_use]
+    pub fn with_tips(mut self, tips: Vec<ObjectId>) -> Self {
+        self.tips = tips;
+        self
+    }
+
+    /// Sets [`hide`](Self::hide).
+    #[must_use]
+    pub fn with_hide(mut self, hide: Vec<ObjectId>) -> Self {
+        self.hide = hide;
+        self
+    }
+
+    /// Sets [`cutoffs`](Self::cutoffs).
+    #[must_use]
+    pub fn with_cutoffs(mut self, cutoffs: ReachableWalkCommitterCutoffs) -> Self {
+        self.cutoffs = cutoffs;
+        self
     }
 }
 

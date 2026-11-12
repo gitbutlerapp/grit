@@ -15,6 +15,7 @@ use super::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 /// Use [`WorktreeModePolicy::index_mode_for_worktree`] whenever a worktree mode is compared
 /// with or written over an index entry: staging, status and worktree diffs all share it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct WorktreeModePolicy {
     /// `core.filemode`: the worktree's executable bit is meaningful.
     pub trust_filemode: bool,
@@ -86,6 +87,20 @@ impl WorktreeModePolicy {
     #[must_use]
     pub fn worktree_mode_matches(self, worktree_mode: u32, recorded_mode: u32) -> bool {
         self.index_mode_for_worktree(worktree_mode, Some(recorded_mode)) == recorded_mode
+    }
+
+    /// Sets [`trust_filemode`](Self::trust_filemode).
+    #[must_use]
+    pub const fn with_trust_filemode(mut self, trust_filemode: bool) -> Self {
+        self.trust_filemode = trust_filemode;
+        self
+    }
+
+    /// Sets [`has_symlinks`](Self::has_symlinks).
+    #[must_use]
+    pub const fn with_has_symlinks(mut self, has_symlinks: bool) -> Self {
+        self.has_symlinks = has_symlinks;
+        self
     }
 }
 

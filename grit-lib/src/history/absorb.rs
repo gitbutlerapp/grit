@@ -36,6 +36,7 @@ const PURE_ADD_MAX_DISTANCE: usize = 3;
 
 /// Options for [`History::absorb`](super::History::absorb).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct AbsorbOptions {
     /// Oldest commit boundary (exclusive). When `None`, [`default_absorb_base`] applies.
     pub base: Option<ObjectId>,
@@ -43,8 +44,38 @@ pub struct AbsorbOptions {
     pub rewrite: RewriteOptions,
 }
 
+impl AbsorbOptions {
+    /// Creates a [`AbsorbOptions`] from its required fields. The other fields start empty; set them with the `with_` setters.
+    ///
+    /// # Parameters
+    ///
+    /// - `rewrite`: ref scope, committer, and empty policy for the combined rewrite.
+    #[must_use]
+    pub fn new(rewrite: RewriteOptions) -> Self {
+        Self {
+            rewrite,
+            base: None,
+        }
+    }
+
+    /// Sets [`base`](Self::base).
+    #[must_use]
+    pub const fn with_base(mut self, base: Option<ObjectId>) -> Self {
+        self.base = base;
+        self
+    }
+
+    /// Sets [`rewrite`](Self::rewrite).
+    #[must_use]
+    pub fn with_rewrite(mut self, rewrite: RewriteOptions) -> Self {
+        self.rewrite = rewrite;
+        self
+    }
+}
+
 /// 1-based unified-diff style coordinates for one staged hunk.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct HunkRange {
     /// Old side start line (1-based).
     pub old_start: usize,
@@ -54,6 +85,59 @@ pub struct HunkRange {
     pub new_start: usize,
     /// New side line count.
     pub new_lines: usize,
+}
+
+impl HunkRange {
+    /// Creates a [`HunkRange`] from its required fields.
+    ///
+    /// # Parameters
+    ///
+    /// - `old_start`: old side start line (1-based).
+    /// - `old_lines`: old side line count.
+    /// - `new_start`: new side start line (1-based).
+    /// - `new_lines`: new side line count.
+    #[must_use]
+    pub const fn new(
+        old_start: usize,
+        old_lines: usize,
+        new_start: usize,
+        new_lines: usize,
+    ) -> Self {
+        Self {
+            old_start,
+            old_lines,
+            new_start,
+            new_lines,
+        }
+    }
+
+    /// Sets [`old_start`](Self::old_start).
+    #[must_use]
+    pub const fn with_old_start(mut self, old_start: usize) -> Self {
+        self.old_start = old_start;
+        self
+    }
+
+    /// Sets [`old_lines`](Self::old_lines).
+    #[must_use]
+    pub const fn with_old_lines(mut self, old_lines: usize) -> Self {
+        self.old_lines = old_lines;
+        self
+    }
+
+    /// Sets [`new_start`](Self::new_start).
+    #[must_use]
+    pub const fn with_new_start(mut self, new_start: usize) -> Self {
+        self.new_start = new_start;
+        self
+    }
+
+    /// Sets [`new_lines`](Self::new_lines).
+    #[must_use]
+    pub const fn with_new_lines(mut self, new_lines: usize) -> Self {
+        self.new_lines = new_lines;
+        self
+    }
 }
 
 /// A staged hunk assigned to a historical commit.

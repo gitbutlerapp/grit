@@ -27,17 +27,11 @@ const GIT_UTF32_WIDE: &[u8] = &[
 ];
 
 fn attrs_utf16() -> FileAttrs {
-    FileAttrs {
-        working_tree_encoding: Some("UTF-16".to_owned()),
-        ..FileAttrs::default()
-    }
+    FileAttrs::default().with_working_tree_encoding(Some("UTF-16".to_owned()))
 }
 
 fn attrs_utf32() -> FileAttrs {
-    FileAttrs {
-        working_tree_encoding: Some("UTF-32".to_owned()),
-        ..FileAttrs::default()
-    }
+    FileAttrs::default().with_working_tree_encoding(Some("UTF-32".to_owned()))
 }
 
 const LATIN1_HELLO_WORKTREE: &[u8] = b"h\xe9llo\n";
@@ -46,10 +40,7 @@ const LATIN1_HELLO_UTF8_BLOB: &[u8] = b"h\xc3\xa9llo\n";
 const EURO_UTF8_BLOB: &[u8] = b"\xe2\x82\xac\n";
 
 fn attrs_latin1(label: &str) -> FileAttrs {
-    FileAttrs {
-        working_tree_encoding: Some(label.to_owned()),
-        ..FileAttrs::default()
-    }
+    FileAttrs::default().with_working_tree_encoding(Some(label.to_owned()))
 }
 
 #[test]

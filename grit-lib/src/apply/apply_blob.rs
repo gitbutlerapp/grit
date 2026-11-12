@@ -5,9 +5,19 @@ use crate::error::ApplyError;
 
 /// Options controlling blob-level hunk application.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ApplyOptions {
     /// When true, interpret the patch as reversing a forward diff (`+`/`-` swapped).
     pub reverse: bool,
+}
+
+impl ApplyOptions {
+    /// Sets [`reverse`](Self::reverse).
+    #[must_use]
+    pub const fn with_reverse(mut self, reverse: bool) -> Self {
+        self.reverse = reverse;
+        self
+    }
 }
 
 /// Mutable line-split view of blob bytes while hunks are applied in order.

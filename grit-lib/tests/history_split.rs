@@ -34,9 +34,7 @@ fn split_plan(
     committer_line: &str,
 ) -> grit_lib::revwalk::history::RewritePlan {
     let specs: Vec<String> = pathspec.iter().map(|s| (*s).to_string()).collect();
-    let opts = SplitOptions {
-        rest_message: rest_message.map(str::to_string),
-    };
+    let opts = SplitOptions::default().with_rest_message(rest_message.map(str::to_string));
     grit.history()
         .split(
             commit,

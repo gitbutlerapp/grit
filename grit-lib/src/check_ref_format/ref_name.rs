@@ -495,6 +495,12 @@ impl fmt::Display for RefName {
     }
 }
 
+impl fmt::Debug for RefNameRef {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_tuple("RefNameRef").field(&&self.0).finish()
+    }
+}
+
 impl fmt::Display for RefNameRef {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(self.as_str())

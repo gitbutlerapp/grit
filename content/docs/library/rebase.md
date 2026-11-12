@@ -47,7 +47,8 @@ use grit_lib::revwalk::history::ExecSpec;
 
 // `plan` comes from `repo.history().plan_rebase(&request, &options)`.
 let history = repo.history();
-let spec = ExecSpec { commands: vec!["cargo fmt && git commit -qa --amend --no-edit".into()] };
+let spec = ExecSpec::default()
+    .with_commands(vec!["cargo fmt && git commit -qa --amend --no-edit".into()]);
 let report = history.verify_rebase(&mut plan, &spec, &options.rewrite, runner.as_ref())?;
 history.apply(&plan, &apply, &mut NullProgress, &CancelToken::never())?;
 ```

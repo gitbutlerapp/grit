@@ -54,12 +54,11 @@ fn bench_list_branches_full(c: &mut Criterion) {
                 &RepositoryOptions::empty().with_work_tree(&git_dir),
             )
             .expect("open");
-            let query = BranchListQuery {
-                scope: BranchScope::Local,
-                refs: RefQuery::default()
-                    .with_limit(Some(10_000))
-                    .with_sort(grit_lib::refs::listing::RefSort::default().with_key(SortKey::Name)),
-            };
+            let query = BranchListQuery::default()
+                .with_scope(BranchScope::Local)
+                .with_refs(RefQuery::default().with_limit(Some(10_000)).with_sort(
+                    grit_lib::refs::listing::RefSort::default().with_key(SortKey::Name),
+                ));
             let rows = list_branches(black_box(&repo), black_box(&query), BranchDetail::Full)
                 .expect("list");
             black_box(rows.len())

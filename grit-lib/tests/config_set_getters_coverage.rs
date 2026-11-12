@@ -6,7 +6,7 @@ use std::fs;
 use std::path::Path;
 
 use grit_lib::config::environment::Environment;
-use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet, LoadConfigOptions};
+use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
 
@@ -130,10 +130,7 @@ fn load_cascade_hits_local_and_global_layers() {
     let mut env = support::isolated_env(&home);
     env.git_config_global = Some(home.join(".gitconfig").display().to_string());
     env.cwd = repo.clone();
-    let opts = LoadConfigOptions {
-        include_system: false,
-        ..support::default_load_opts(&git_dir, &env)
-    };
+    let opts = support::default_load_opts(&git_dir, &env).with_include_system(false);
     let set = ConfigSet::load(&env, Some(&git_dir), &opts).expect("load");
     assert_eq!(
         set.get("user.email").unwrap().as_deref(),

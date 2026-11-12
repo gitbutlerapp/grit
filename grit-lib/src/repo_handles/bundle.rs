@@ -105,10 +105,8 @@ impl<'repo> RepositoryBundles<'repo> {
     /// # use std::path::Path;
     /// # fn demo() -> Result<(), Box<dyn std::error::Error>> {
     /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
-    /// let spec = BundleSpec {
-    ///     include: vec![(ObjectId::zero(), "refs/heads/main".into())],
-    ///     ..Default::default()
-    /// };
+    /// let spec = BundleSpec::default()
+    ///     .with_include(vec![(ObjectId::zero(), "refs/heads/main".into())]);
     /// let _ = repo.bundles().write(
     ///     &spec,
     ///     Path::new("/tmp/x.bundle"),

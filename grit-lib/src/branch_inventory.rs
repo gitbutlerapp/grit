@@ -43,11 +43,28 @@ pub enum BranchDetail {
 
 /// Query for [`list_branches`]: scope plus shared ref patterns, sort, and limit.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
 pub struct BranchListQuery {
     /// Local, remote, or both.
     pub scope: BranchScope,
     /// Pattern, sort, and limit (namespaces come from [`Self::scope`]).
     pub refs: RefQuery,
+}
+
+impl BranchListQuery {
+    /// Sets [`scope`](Self::scope).
+    #[must_use]
+    pub fn with_scope(mut self, scope: BranchScope) -> Self {
+        self.scope = scope;
+        self
+    }
+
+    /// Sets [`refs`](Self::refs).
+    #[must_use]
+    pub fn with_refs(mut self, refs: RefQuery) -> Self {
+        self.refs = refs;
+        self
+    }
 }
 
 /// Upstream of a local branch when `branch.<name>.merge` / `.remote` is set.

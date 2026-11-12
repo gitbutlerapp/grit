@@ -605,22 +605,17 @@ fn fast_forward_and_conflicts_run_no_commit_hooks() {
 }
 
 fn rebase_opts(upstream: ObjectId, tip: ObjectId, pre_rebase: PreRebase) -> StartRebaseOptions {
-    StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto: None,
-            branch_tip: tip,
-        },
-        rebase: (RebaseOntoOptions::new(
+    StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip),
+        (RebaseOntoOptions::new(
             RewriteOptions::new(IDENT.parse().expect("signature"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         ))
         .with_pre_rebase(pre_rebase),
-        apply: ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
+        ApplyOptions::new(IDENT.parse().expect("signature"), "rebase")
             .with_hooks(PostOperationHooks::Skip),
-        exec: None,
-    }
+    )
 }
 
 fn rebase(repo: &Repository, opts: &StartRebaseOptions) -> grit_lib::error::Result<RebaseOutcome> {
@@ -677,11 +672,7 @@ fn refused_pre_rebase_wins_over_a_replay_conflict_like_git() {
     assert!(!fx.git_dir().join("rebase-merge").exists());
     assert_eq!(fx.oid("HEAD"), topic);
 
-    let request = RebaseRequest {
-        upstream: main,
-        onto: None,
-        branch_tip: topic,
-    };
+    let request = RebaseRequest::new(main, topic);
     let hooked = rebase_opts(main, topic, hook).rebase;
     let err = repo
         .history()

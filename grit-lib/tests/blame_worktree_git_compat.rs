@@ -85,10 +85,7 @@ fn open_repo(dir: &Path) -> Repository {
 }
 
 fn worktree_options() -> BlameOptions {
-    BlameOptions {
-        final_source: BlameFinalSource::Worktree,
-        ..BlameOptions::default()
-    }
+    BlameOptions::default().with_final_source(BlameFinalSource::Worktree)
 }
 
 fn blame(repo: &Repository, path: &str, options: &BlameOptions) -> BlameResult {
@@ -216,10 +213,8 @@ fn contents_buffer_matches_git_contents() {
     let result = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            final_source: BlameFinalSource::Contents(buffer.as_bytes().to_vec()),
-            ..BlameOptions::default()
-        },
+        &BlameOptions::default()
+            .with_final_source(BlameFinalSource::Contents(buffer.as_bytes().to_vec())),
     );
     assert_eq!(
         attributions(&result),
@@ -239,11 +234,9 @@ fn contents_buffer_matches_git_contents() {
     let on_older = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            start: Some(older),
-            final_source: BlameFinalSource::Contents(buffer.as_bytes().to_vec()),
-            ..BlameOptions::default()
-        },
+        &BlameOptions::default()
+            .with_start(Some(older))
+            .with_final_source(BlameFinalSource::Contents(buffer.as_bytes().to_vec())),
     );
     assert_eq!(
         attributions(&on_older),
@@ -262,10 +255,7 @@ fn revision_source_ignores_dirty_worktree() {
     let explicit = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            start: Some(head),
-            ..BlameOptions::default()
-        },
+        &BlameOptions::default().with_start(Some(head)),
     );
     assert_eq!(
         attributions(&explicit),
@@ -430,10 +420,7 @@ fn first_parent_ignores_merge_head_for_uncommitted_content() {
     let result = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            first_parent_only: true,
-            ..worktree_options()
-        },
+        &worktree_options().with_first_parent_only(true),
     );
     assert_eq!(
         attributions(&result),
@@ -470,10 +457,8 @@ fn uncommitted_blame_writes_no_objects() {
     blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            final_source: BlameFinalSource::Contents(b"another buffer\n".to_vec()),
-            ..BlameOptions::default()
-        },
+        &BlameOptions::default()
+            .with_final_source(BlameFinalSource::Contents(b"another buffer\n".to_vec())),
     );
     assert_eq!(git(root, &["count-objects", "-v"]), before);
     git(root, &["fsck", "--strict"]);
@@ -487,14 +472,7 @@ fn uncommitted_commit_info_carries_the_given_time() {
     std::fs::write(root.join("f.txt"), "new\nzero\n").unwrap();
     let repo = open_repo(root);
     let now = time::OffsetDateTime::from_unix_timestamp(1_800_000_000).unwrap();
-    let result = blame(
-        &repo,
-        "f.txt",
-        &BlameOptions {
-            now: Some(now),
-            ..worktree_options()
-        },
-    );
+    let result = blame(&repo, "f.txt", &worktree_options().with_now(Some(now)));
     let info = &result.commits[&ObjectId::zero()];
     assert_eq!(info.author_time, 1_800_000_000);
     assert_eq!(
@@ -520,10 +498,8 @@ fn contents_commit_info_uses_the_external_file_identity() {
     let result = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            final_source: BlameFinalSource::Contents(b"buffer only\n".to_vec()),
-            ..worktree_options()
-        },
+        &worktree_options()
+            .with_final_source(BlameFinalSource::Contents(b"buffer only\n".to_vec())),
     );
     let info = &result.commits[&ObjectId::zero()];
     assert_eq!(
@@ -577,10 +553,7 @@ fn uncommitted_author_name_matches_git_porcelain() {
     let mut contents = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            final_source: source.clone(),
-            ..BlameOptions::default()
-        },
+        &BlameOptions::default().with_final_source(source.clone()),
     );
     contents.name_uncommitted_author(&source);
     assert_eq!(
@@ -643,10 +616,7 @@ fn ignore_whitespace_applies_to_uncommitted_lines() {
     let result = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            whitespace: WhitespaceMode::ignore_all_space(),
-            ..worktree_options()
-        },
+        &worktree_options().with_whitespace(WhitespaceMode::ignore_all_space()),
     );
     assert_eq!(
         attributions(&result),
@@ -677,10 +647,7 @@ fn copy_detection_finds_uncommitted_lines_in_other_files() {
     let result = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            copy_detection: CopyDetection::FromAnyCommit,
-            ..worktree_options()
-        },
+        &worktree_options().with_copy_detection(CopyDetection::FromAnyCommit),
     );
     assert_eq!(
         attributions(&result),
@@ -734,10 +701,8 @@ fn bare_repository_rejects_worktree_but_accepts_contents() {
     let result = blame(
         &repo,
         "f.txt",
-        &BlameOptions {
-            final_source: BlameFinalSource::Contents(b"zero\nnew\none\n".to_vec()),
-            ..BlameOptions::default()
-        },
+        &BlameOptions::default()
+            .with_final_source(BlameFinalSource::Contents(b"zero\nnew\none\n".to_vec())),
     );
     let flags: Vec<bool> = result.lines.iter().map(|l| l.not_committed).collect();
     assert_eq!(flags, [false, true, false]);

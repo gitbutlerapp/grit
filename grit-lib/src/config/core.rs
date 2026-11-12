@@ -251,6 +251,7 @@ pub struct ConfigSet {
 
 /// Context for evaluating `[includeIf]` conditions (`gitdir:`, `onbranch:`, `hasconfig:`).
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct IncludeContext {
     /// Git directory path used for `gitdir:` matching (may contain unresolved symlinks).
     pub git_dir: Option<PathBuf>,
@@ -273,6 +274,46 @@ impl Default for IncludeContext {
             pwd: None,
             env: std::sync::Arc::new(Environment::empty()),
         }
+    }
+}
+
+impl IncludeContext {
+    /// Sets [`git_dir`](Self::git_dir).
+    #[must_use]
+    pub fn with_git_dir(mut self, git_dir: Option<PathBuf>) -> Self {
+        self.git_dir = git_dir;
+        self
+    }
+
+    /// Sets [`command_line_relative_include_is_error`](Self::command_line_relative_include_is_error).
+    #[must_use]
+    pub const fn with_command_line_relative_include_is_error(
+        mut self,
+        command_line_relative_include_is_error: bool,
+    ) -> Self {
+        self.command_line_relative_include_is_error = command_line_relative_include_is_error;
+        self
+    }
+
+    /// Sets [`cwd`](Self::cwd).
+    #[must_use]
+    pub fn with_cwd(mut self, cwd: PathBuf) -> Self {
+        self.cwd = cwd;
+        self
+    }
+
+    /// Sets [`pwd`](Self::pwd).
+    #[must_use]
+    pub fn with_pwd(mut self, pwd: Option<String>) -> Self {
+        self.pwd = pwd;
+        self
+    }
+
+    /// Sets [`env`](Self::env).
+    #[must_use]
+    pub fn with_env(mut self, env: std::sync::Arc<Environment>) -> Self {
+        self.env = env;
+        self
     }
 }
 
@@ -315,6 +356,7 @@ impl IncludeOptions {
 
 /// Options controlling how [`ConfigSet::load`] merges files and includes.
 #[derive(Clone)]
+#[non_exhaustive]
 pub struct LoadConfigOptions {
     /// Load `/etc/gitconfig` (unless `GIT_CONFIG_NOSYSTEM` is enabled).
     pub include_system: bool,
@@ -431,6 +473,68 @@ impl LoadConfigOptions {
             repo_caches,
             ..Self::default()
         }
+    }
+
+    /// Sets [`include_system`](Self::include_system).
+    #[must_use]
+    pub const fn with_include_system(mut self, include_system: bool) -> Self {
+        self.include_system = include_system;
+        self
+    }
+
+    /// Sets [`repo_local_only`](Self::repo_local_only).
+    #[must_use]
+    pub const fn with_repo_local_only(mut self, repo_local_only: bool) -> Self {
+        self.repo_local_only = repo_local_only;
+        self
+    }
+
+    /// Sets [`protected_only`](Self::protected_only).
+    #[must_use]
+    pub const fn with_protected_only(mut self, protected_only: bool) -> Self {
+        self.protected_only = protected_only;
+        self
+    }
+
+    /// Sets [`process_includes`](Self::process_includes).
+    #[must_use]
+    pub const fn with_process_includes(mut self, process_includes: bool) -> Self {
+        self.process_includes = process_includes;
+        self
+    }
+
+    /// Sets [`command_includes`](Self::command_includes).
+    #[must_use]
+    pub const fn with_command_includes(mut self, command_includes: bool) -> Self {
+        self.command_includes = command_includes;
+        self
+    }
+
+    /// Sets [`include_ctx`](Self::include_ctx).
+    #[must_use]
+    pub fn with_include_ctx(mut self, include_ctx: IncludeContext) -> Self {
+        self.include_ctx = include_ctx;
+        self
+    }
+
+    /// Sets [`diagnostics`](Self::diagnostics).
+    #[must_use]
+    pub fn with_diagnostics(
+        mut self,
+        diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+    ) -> Self {
+        self.diagnostics = diagnostics;
+        self
+    }
+
+    /// Sets [`repo_caches`](Self::repo_caches).
+    #[must_use]
+    pub fn with_repo_caches(
+        mut self,
+        repo_caches: Option<std::sync::Arc<crate::repo_caches::RepoCaches>>,
+    ) -> Self {
+        self.repo_caches = repo_caches;
+        self
     }
 }
 

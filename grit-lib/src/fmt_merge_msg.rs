@@ -26,12 +26,29 @@
 
 /// Options for [`fmt_merge_msg`].
 #[derive(Debug, Clone, Default)]
+#[non_exhaustive]
 pub struct FmtMergeMsgOptions {
     /// Override the first line of the message with this text.
     /// When set, the branch-name title is suppressed.
     pub message: Option<String>,
     /// Override the target branch name shown in `into <branch>`.
     pub into_name: Option<String>,
+}
+
+impl FmtMergeMsgOptions {
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: Option<String>) -> Self {
+        self.message = message;
+        self
+    }
+
+    /// Sets [`into_name`](Self::into_name).
+    #[must_use]
+    pub fn with_into_name(mut self, into_name: Option<String>) -> Self {
+        self.into_name = into_name;
+        self
+    }
 }
 
 /// Format a merge commit message from FETCH_HEAD-style input.

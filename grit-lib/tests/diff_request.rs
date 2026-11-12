@@ -52,10 +52,7 @@ fn pathspec_specs(pathspec: &Pathspec) -> Vec<String> {
 }
 
 fn positionals(items: &[&str]) -> DiffRequest {
-    DiffRequest {
-        positionals: strings(items),
-        ..DiffRequest::default()
-    }
+    DiffRequest::default().with_positionals(strings(items))
 }
 
 fn resolve(repo: &Repository, request: &DiffRequest) -> DiffArguments {
@@ -111,11 +108,9 @@ fn trailing_path_operands_after_two_revisions_become_pathspecs() {
 #[test]
 fn explicit_paths_are_never_reinterpreted() {
     let (dir, repo) = two_commit_repo();
-    let request = DiffRequest {
-        positionals: strings(&["HEAD"]),
-        paths: strings(&["b.txt"]),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default()
+        .with_positionals(strings(&["HEAD"]))
+        .with_paths(strings(&["b.txt"]));
     let args = resolve(&repo, &request);
     assert_eq!(args.target, DiffTarget::Commit(rev(dir.path(), "HEAD")));
     assert_eq!(pathspec_specs(&args.pathspec), strings(&["b.txt"]));
@@ -134,11 +129,9 @@ fn unknown_lone_operand_is_reported_as_a_path_matching_nothing() {
 #[test]
 fn unknown_revision_with_paths_reports_the_revision_and_keeps_the_cause() {
     let (_dir, repo) = two_commit_repo();
-    let request = DiffRequest {
-        positionals: strings(&["no-such-rev"]),
-        paths: strings(&["a.txt"]),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default()
+        .with_positionals(strings(&["no-such-rev"]))
+        .with_paths(strings(&["a.txt"]));
     let err = resolve_err(&repo, &request);
     assert!(
         matches!(&err, ResolveDiffArgumentsError::UnresolvedRevision { spec, .. } if spec == "no-such-rev"),
@@ -152,11 +145,9 @@ fn unknown_revision_with_paths_reports_the_revision_and_keeps_the_cause() {
 fn unknown_revision_with_pathspec_file_reports_the_revision() {
     let (_dir, repo) = two_commit_repo();
     for path in ["a.txt", "missing.txt"] {
-        let request = DiffRequest {
-            positionals: strings(&["no-such-rev"]),
-            pathspec_file: Some(strings(&[path])),
-            ..DiffRequest::default()
-        };
+        let request = DiffRequest::default()
+            .with_positionals(strings(&["no-such-rev"]))
+            .with_pathspec_file(Some(strings(&[path])));
         let err = resolve_err(&repo, &request);
         assert!(
             matches!(&err, ResolveDiffArgumentsError::UnresolvedRevision { spec, .. } if spec == "no-such-rev"),
@@ -182,12 +173,10 @@ fn two_dot_range_diffs_the_endpoint_trees() {
 #[test]
 fn range_then_known_path_operand_limits_the_range() {
     let (dir, repo) = two_commit_repo();
-    let request = DiffRequest {
-        positionals: strings(&["HEAD~1..HEAD", "a.txt"]),
-        paths: strings(&["b.txt"]),
-        pathspec_file: Some(strings(&["from-file.txt"])),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default()
+        .with_positionals(strings(&["HEAD~1..HEAD", "a.txt"]))
+        .with_paths(strings(&["b.txt"]))
+        .with_pathspec_file(Some(strings(&["from-file.txt"])));
     let args = resolve(&repo, &request);
     assert_eq!(
         args.target,
@@ -205,11 +194,9 @@ fn range_then_known_path_operand_limits_the_range() {
 #[test]
 fn range_then_revision_operand_is_rejected() {
     let (_dir, repo) = two_commit_repo();
-    let request = DiffRequest {
-        positionals: strings(&["HEAD~1..HEAD", "HEAD"]),
-        paths: strings(&["b.txt"]),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default()
+        .with_positionals(strings(&["HEAD~1..HEAD", "HEAD"]))
+        .with_paths(strings(&["b.txt"]));
     let err = resolve_err(&repo, &request);
     assert!(
         matches!(err, ResolveDiffArgumentsError::RangeWithSecondRevision),
@@ -268,10 +255,7 @@ fn three_dot_range_over_criss_cross_history_uses_gits_first_merge_base() {
 #[test]
 fn against_compares_the_worktree_with_that_revisions_tree() {
     let (dir, repo) = two_commit_repo();
-    let request = DiffRequest {
-        against: Some("HEAD~1".into()),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default().with_against(Some("HEAD~1".into()));
     let args = resolve(&repo, &request);
     assert_eq!(
         args.target,
@@ -287,10 +271,7 @@ fn against_a_tag_of_a_blob_is_not_a_commit() {
         dir.path(),
         &["tag", "-a", "-m", "blob", "blob-tag", &blob.to_hex()],
     );
-    let request = DiffRequest {
-        against: Some("blob-tag".into()),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default().with_against(Some("blob-tag".into()));
     let err = resolve_err(&repo, &request);
     assert!(
         matches!(err, ResolveDiffArgumentsError::NotACommit { oid } if oid == blob),
@@ -301,20 +282,16 @@ fn against_a_tag_of_a_blob_is_not_a_commit() {
 #[test]
 fn flag_conflicts_are_typed() {
     let (_dir, repo) = two_commit_repo();
-    let staged = DiffRequest {
-        staged: true,
-        positionals: strings(&["HEAD"]),
-        ..DiffRequest::default()
-    };
+    let staged = DiffRequest::default()
+        .with_staged(true)
+        .with_positionals(strings(&["HEAD"]));
     assert!(matches!(
         resolve_err(&repo, &staged),
         ResolveDiffArgumentsError::StagedWithRevisions
     ));
-    let unstaged = DiffRequest {
-        unstaged: true,
-        against: Some("HEAD".into()),
-        ..DiffRequest::default()
-    };
+    let unstaged = DiffRequest::default()
+        .with_unstaged(true)
+        .with_against(Some("HEAD".into()));
     assert!(matches!(
         resolve_err(&repo, &unstaged),
         ResolveDiffArgumentsError::UnstagedWithRevisions
@@ -324,18 +301,13 @@ fn flag_conflicts_are_typed() {
 #[test]
 fn staged_and_unstaged_resolve_worktree_pathspecs() {
     let (_dir, repo) = two_commit_repo();
-    let staged = DiffRequest {
-        staged: true,
-        positionals: strings(&["a.txt"]),
-        ..DiffRequest::default()
-    };
+    let staged = DiffRequest::default()
+        .with_staged(true)
+        .with_positionals(strings(&["a.txt"]));
     let args = resolve(&repo, &staged);
     assert_eq!(args.target, DiffTarget::IndexVsHead);
     assert_eq!(pathspec_specs(&args.pathspec), strings(&["a.txt"]));
-    let unstaged = DiffRequest {
-        unstaged: true,
-        ..DiffRequest::default()
-    };
+    let unstaged = DiffRequest::default().with_unstaged(true);
     assert_eq!(
         resolve(&repo, &unstaged).target,
         DiffTarget::WorktreeVsIndex
@@ -345,20 +317,15 @@ fn staged_and_unstaged_resolve_worktree_pathspecs() {
 #[test]
 fn pathspec_file_entries_come_first_and_must_not_be_empty() {
     let (_dir, repo) = two_commit_repo();
-    let request = DiffRequest {
-        paths: strings(&["a.txt"]),
-        pathspec_file: Some(strings(&["b.txt"])),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default()
+        .with_paths(strings(&["a.txt"]))
+        .with_pathspec_file(Some(strings(&["b.txt"])));
     assert_eq!(
         pathspec_specs(&resolve(&repo, &request).pathspec),
         strings(&["b.txt", "a.txt"])
     );
 
-    let empty_file = DiffRequest {
-        pathspec_file: Some(Vec::new()),
-        ..DiffRequest::default()
-    };
+    let empty_file = DiffRequest::default().with_pathspec_file(Some(Vec::new()));
     let err = resolve_err(&repo, &empty_file);
     assert!(
         matches!(
@@ -367,10 +334,7 @@ fn pathspec_file_entries_come_first_and_must_not_be_empty() {
         ),
         "{err:?}"
     );
-    let empty_entry = DiffRequest {
-        paths: strings(&[""]),
-        ..DiffRequest::default()
-    };
+    let empty_entry = DiffRequest::default().with_paths(strings(&[""]));
     assert!(matches!(
         resolve_err(&repo, &empty_entry),
         ResolveDiffArgumentsError::Pathspec(PathspecResolveError::EmptyPathspec)
@@ -383,11 +347,9 @@ fn worktree_pathspecs_in_a_bare_repository_need_a_work_tree() {
     git(dir.path(), &["init", "-q", "--bare", "repo.git"]);
     let repo = Repository::open(&dir.path().join("repo.git"), &RepositoryOptions::empty())
         .expect("open bare");
-    let request = DiffRequest {
-        staged: true,
-        paths: strings(&["a.txt"]),
-        ..DiffRequest::default()
-    };
+    let request = DiffRequest::default()
+        .with_staged(true)
+        .with_paths(strings(&["a.txt"]));
     let err = resolve_err(&repo, &request);
     assert!(
         matches!(err, ResolveDiffArgumentsError::NoWorkTree),

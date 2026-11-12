@@ -50,17 +50,13 @@ fn load_merges_parameters_with_include_expansion() {
         "'include.path={}' 'layer.k=top'",
         inc.display().to_string().replace('\\', "\\\\")
     ));
-    let opts = LoadConfigOptions {
-        include_system: false,
-        process_includes: true,
-        command_includes: true,
-        include_ctx: grit_lib::config::IncludeContext {
-            cwd: dir.path().to_path_buf(),
-            env: std::sync::Arc::new(env.clone()),
-            ..Default::default()
-        },
-        ..Default::default()
-    };
+    let opts = LoadConfigOptions::default()
+        .with_include_system(false)
+        .with_include_ctx(
+            grit_lib::config::IncludeContext::default()
+                .with_cwd(dir.path().to_path_buf())
+                .with_env(std::sync::Arc::new(env.clone())),
+        );
     let set = ConfigSet::load(&env, None, &opts).expect("load");
     assert_eq!(set.get("layer.k").unwrap().as_deref(), Some("top"));
     assert_eq!(set.get("frominc.k").unwrap().as_deref(), Some("1"));

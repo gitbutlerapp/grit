@@ -397,12 +397,7 @@ fn install_pack_path_matches_git_index() {
     install_pack_bytes(
         pack.clone(),
         &odb,
-        &IngestPackOptions {
-            fix_thin: false,
-            threads: Some(8),
-            skip_post_index_verify: false,
-            ..Default::default()
-        },
+        &IngestPackOptions::default().with_threads(Some(8)),
     )
     .expect("install");
     let pack_dir = tmp.path().join("objects").join("pack");
@@ -434,11 +429,7 @@ fn concurrent_installs_of_one_pack_into_one_repo_all_succeed() {
                     install_pack_bytes(
                         fx.pack.clone(),
                         &odb,
-                        &IngestPackOptions {
-                            fix_thin: false,
-                            threads: Some(2),
-                            ..Default::default()
-                        },
+                        &IngestPackOptions::default().with_threads(Some(2)),
                     )
                 })
             })

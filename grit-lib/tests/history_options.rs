@@ -132,12 +132,12 @@ fn squash_empty_abort_at_head_fast_path() {
     let range = format!("{}..{}", a.to_hex(), c.to_hex());
     match grit.history().squash(
         &[&range],
-        &SquashOptions {
-            message: SquashMessage::Oldest,
-            rewrite: RewriteOptions::new(committer(3).parse().expect("signature"))
+        &SquashOptions::new(
+            SquashMessage::Oldest,
+            RewriteOptions::new(committer(3).parse().expect("signature"))
                 .with_scope(RefScope::Head)
                 .with_empty(EmptyPolicy::Abort),
-        },
+        ),
     ) {
         Err(HistoryError::BecameEmpty { .. }) => {}
         Err(other) => panic!("expected BecameEmpty, got {other:?}"),
@@ -164,12 +164,12 @@ fn squash_keep_committer_at_head_fast_path() {
         .history()
         .squash(
             &[&range],
-            &SquashOptions {
-                message: SquashMessage::Oldest,
-                rewrite: RewriteOptions::new(committer(1800).parse().expect("signature"))
+            &SquashOptions::new(
+                SquashMessage::Oldest,
+                RewriteOptions::new(committer(1800).parse().expect("signature"))
                     .with_scope(RefScope::Head)
                     .with_preserve_committer(true),
-            },
+            ),
         )
         .expect("squash at head");
     let new_b = plan.replacement(b).expect("squashed");
@@ -201,12 +201,12 @@ fn squash_empty_abort_returns_became_empty() {
     let range = format!("{}..{}", a.to_hex(), c.to_hex());
     match grit.history().squash(
         &[&range],
-        &SquashOptions {
-            message: SquashMessage::Oldest,
-            rewrite: RewriteOptions::new(committer(2).parse().expect("signature"))
+        &SquashOptions::new(
+            SquashMessage::Oldest,
+            RewriteOptions::new(committer(2).parse().expect("signature"))
                 .with_scope(RefScope::Head)
                 .with_empty(EmptyPolicy::Abort),
-        },
+        ),
     ) {
         Err(HistoryError::BecameEmpty { .. }) => {}
         Err(other) => panic!("expected BecameEmpty, got {other:?}"),

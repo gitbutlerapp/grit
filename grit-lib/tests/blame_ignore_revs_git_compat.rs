@@ -150,10 +150,7 @@ fn grit_blame(repo: &Repository, file: &str, ignore: &IgnoreParams<'_>) -> Vec<P
         .diff()
         .blame(
             file,
-            &BlameOptions {
-                ignore: loaded,
-                ..Default::default()
-            },
+            &BlameOptions::default().with_ignore(loaded),
             &mut NullProgress,
             &CancelToken::never(),
         )
@@ -464,11 +461,9 @@ fn line_range_through_ignored_commit() {
         .diff()
         .blame(
             "file",
-            &BlameOptions {
-                line_range: Some(1..=2),
-                ignore: grit_loaded,
-                ..Default::default()
-            },
+            &BlameOptions::default()
+                .with_line_range(Some(1..=2))
+                .with_ignore(grit_loaded),
             &mut NullProgress,
             &CancelToken::never(),
         )

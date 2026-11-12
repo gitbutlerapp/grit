@@ -100,21 +100,16 @@ fn assert_one_model(root: &Path, from_operation: &[Conflict]) {
 fn rebase_stop_and_status_report_the_same_conflict() {
     let fx = modify_delete_repo("feat");
     let repo = open(&fx.root);
-    let opts = StartRebaseOptions {
-        request: RebaseRequest {
-            upstream: fx.main,
-            onto: None,
-            branch_tip: fx.feat,
-        },
-        rebase: RebaseOntoOptions::new(
+    let opts = StartRebaseOptions::new(
+        RebaseRequest::new(fx.main, fx.feat),
+        RebaseOntoOptions::new(
             RewriteOptions::new(IDENT.parse().expect("committer"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         )
         .with_skip_applied(false),
-        apply: ApplyOptions::new(IDENT.parse().expect("identity"), "rebase"),
-        exec: None,
-    };
+        ApplyOptions::new(IDENT.parse().expect("identity"), "rebase"),
+    );
     let RebaseOutcome::Stopped(stop) = repo
         .history()
         .start_rebase(

@@ -104,8 +104,9 @@ pub(crate) fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<P
 ///
 /// Build one with [`Credential::default`] and the `with_` setters, or parse it
 /// with [`Credential::parse`]. Its [`Debug`](std::fmt::Debug) output redacts the
-/// password and the secret `extra` values (`oauth_refresh_token`, `credential`),
-/// so logging a credential does not leak it.
+/// password, a password embedded in [`url`](Credential::url) (`user:<redacted>@host`)
+/// and the secret `extra` values (`oauth_refresh_token`, `credential`), so logging a
+/// credential does not leak it.
 ///
 /// ```
 /// use grit_lib::remote::credentials::Credential;
@@ -169,7 +170,7 @@ impl std::fmt::Debug for Credential {
             .field("path", &self.path)
             .field("username", &self.username)
             .field("password", &self.password.as_ref().map(|_| REDACTED))
-            .field("url", &self.url)
+            .field("url", &self.url.as_deref().map(url_with_redacted_password))
             .field("extra", &extra)
             .finish()
     }
@@ -857,6 +858,25 @@ pub(crate) fn url_without_userinfo(url: &str) -> String {
     let (authority, suffix) = split_authority_suffix(rest);
     let authority = strip_userinfo_from_authority(authority);
     format!("{scheme}://{authority}{suffix}")
+}
+
+/// `url` with the password in its userinfo (`user:password@`) replaced by
+/// [`REDACTED`]; the username, host and path are kept. URLs without a password
+/// are returned unchanged.
+fn url_with_redacted_password(url: &str) -> std::borrow::Cow<'_, str> {
+    let (scheme, rest) = match url.split_once("://") {
+        Some((scheme, rest)) => (Some(scheme), rest),
+        None => (None, url),
+    };
+    let (authority, suffix) = split_authority_suffix(rest);
+    let Some((userinfo, host_port)) = authority.rsplit_once('@') else {
+        return std::borrow::Cow::Borrowed(url);
+    };
+    let Some((user, _password)) = userinfo.split_once(':') else {
+        return std::borrow::Cow::Borrowed(url);
+    };
+    let scheme = scheme.map(|s| format!("{s}://")).unwrap_or_default();
+    std::borrow::Cow::Owned(format!("{scheme}{user}:{REDACTED}@{host_port}{suffix}"))
 }
 
 fn split_authority_suffix(url: &str) -> (&str, &str) {
@@ -1714,6 +1734,29 @@ mod tests {
         )
         .expect("helper");
         assert!(response.wants_quit());
+    }
+
+    #[test]
+    fn debug_redacts_password_in_url_userinfo() {
+        let cred =
+            Credential::default().with_url(Some("https://ada:hunter2@example.com/repo.git".into()));
+        let shown = format!("{cred:?}");
+        assert!(!shown.contains("hunter2"), "{shown}");
+        assert!(
+            shown.contains("https://ada:<redacted>@example.com/repo.git"),
+            "{shown}"
+        );
+
+        let user_only = Credential::default().with_url(Some("https://ada@example.com/r".into()));
+        assert!(format!("{user_only:?}").contains("https://ada@example.com/r"));
+        assert_eq!(
+            url_with_redacted_password("ssh://u:p:q@h:22/x?y=@z"),
+            "ssh://u:<redacted>@h:22/x?y=@z"
+        );
+        assert_eq!(
+            url_with_redacted_password("u:secret@host"),
+            "u:<redacted>@host"
+        );
     }
 
     #[test]

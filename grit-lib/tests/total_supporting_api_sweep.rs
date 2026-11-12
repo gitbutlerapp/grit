@@ -65,11 +65,7 @@ fn blame_apply_binary_and_trailer_sweep() -> grit_lib::error::Result<()> {
     let (_dir, repo, tip) = linear_repo(160);
     let blame = repo.diff().blame(
         "track.txt",
-        &BlameOptions {
-            start: Some(tip),
-            line_range: None,
-            ..Default::default()
-        },
+        &BlameOptions::default().with_start(Some(tip)),
         &mut NullProgress,
         &CancelToken::never(),
     )?;

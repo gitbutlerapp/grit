@@ -152,13 +152,7 @@ fn required_clean_filter_failure_is_typed_message() {
         "file.txt",
         &conv,
         &attrs,
-        ConvertToGitOpts {
-            check_safecrlf: false,
-            renormalize: false,
-            index_blob: None,
-            filter_process: None,
-            command_runner: None,
-        },
+        ConvertToGitOpts::default().with_check_safecrlf(false),
     )
     .unwrap_err();
     assert_eq!(
@@ -200,13 +194,7 @@ fn bom_filter_error_has_single_fatal_prefix_on_stderr() {
         "utf-bom.txt",
         &conv,
         &attrs,
-        ConvertToGitOpts {
-            check_safecrlf: true,
-            renormalize: false,
-            index_blob: None,
-            filter_process: None,
-            command_runner: None,
-        },
+        ConvertToGitOpts::default(),
     )
     .unwrap_err();
     assert!(matches!(

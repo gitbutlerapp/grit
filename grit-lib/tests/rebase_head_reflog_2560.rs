@@ -45,22 +45,17 @@ fn conflict_rebase_fixture() -> (HistoryRepo, ObjectId, ObjectId, ObjectId, Obje
 }
 
 fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> StartRebaseOptions {
-    StartRebaseOptions {
-        request: RebaseRequest {
-            upstream,
-            onto,
-            branch_tip: tip,
-        },
-        rebase: RebaseOntoOptions::new(
+    StartRebaseOptions::new(
+        RebaseRequest::new(upstream, tip).with_onto(onto),
+        RebaseOntoOptions::new(
             RewriteOptions::new(COMMITTER.parse().expect("signature"))
                 .with_scope(RefScope::Head)
                 .with_sign(false),
         )
         .with_skip_applied(false),
-        apply: grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase: onto")
+        grit_lib::revwalk::history::ApplyOptions::new(test_ident(), "rebase: onto")
             .with_record_operation(Some("rebase".into())),
-        exec: None,
-    }
+    )
 }
 
 fn assert_head_reflog_chain(wt: &std::path::Path) {

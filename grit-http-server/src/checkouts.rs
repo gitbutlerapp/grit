@@ -615,11 +615,7 @@ fn write_bundle_file(
     branch: &str,
     path: &Path,
 ) -> std::io::Result<()> {
-    let spec = BundleSpec {
-        include: vec![(commit, format!("refs/heads/{branch}"))],
-        exclude: Vec::new(),
-        filter: None,
-    };
+    let spec = BundleSpec::default().with_include(vec![(commit, format!("refs/heads/{branch}"))]);
     // Bundles are derived and may be gone (a host that rebuilds its copy of
     // the repository keeps no bundles), so their directory may be too.
     if let Some(dir) = path.parent() {

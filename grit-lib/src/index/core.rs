@@ -138,6 +138,7 @@ pub(crate) fn canon_mode(mode: u32) -> u32 {
 
 /// Git `match_stat_data` policy (`core.trustctime`, `core.checkstat`, `core.usenanosec`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct StatMatchPolicy {
     /// When true, compare ctime fields when `check_stat` is enabled.
     pub trust_ctime: bool,
@@ -194,6 +195,27 @@ impl StatMatchPolicy {
             policy.use_nanosec = use_ns;
         }
         policy
+    }
+
+    /// Sets [`trust_ctime`](Self::trust_ctime).
+    #[must_use]
+    pub const fn with_trust_ctime(mut self, trust_ctime: bool) -> Self {
+        self.trust_ctime = trust_ctime;
+        self
+    }
+
+    /// Sets [`check_stat`](Self::check_stat).
+    #[must_use]
+    pub const fn with_check_stat(mut self, check_stat: bool) -> Self {
+        self.check_stat = check_stat;
+        self
+    }
+
+    /// Sets [`use_nanosec`](Self::use_nanosec).
+    #[must_use]
+    pub const fn with_use_nanosec(mut self, use_nanosec: bool) -> Self {
+        self.use_nanosec = use_nanosec;
+        self
     }
 }
 

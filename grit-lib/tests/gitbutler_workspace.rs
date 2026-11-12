@@ -109,10 +109,7 @@ fn target_comparison(repo: &Repository, counts: bool) -> TrackedComparison {
     BranchStanding::compute(
         repo,
         &repo.references().head().expect("HEAD"),
-        StandingOptions {
-            newest_ahead_limit: 10,
-            counts,
-        },
+        StandingOptions::new(10).with_counts(counts),
     )
     .expect("standing")
     .target

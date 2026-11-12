@@ -5151,6 +5151,7 @@ impl CopyDetection {
 
 /// Options for [`blame_file`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct BlameOptions {
     /// Commit to blame at. When `None`, uses the current `HEAD` commit.
     pub start: Option<ObjectId>,
@@ -5185,6 +5186,69 @@ impl BlameOptions {
     #[must_use]
     pub fn move_detection_enabled(&self) -> bool {
         self.move_detection || self.copy_detection != CopyDetection::Off
+    }
+
+    /// Sets [`start`](Self::start).
+    #[must_use]
+    pub const fn with_start(mut self, start: Option<ObjectId>) -> Self {
+        self.start = start;
+        self
+    }
+
+    /// Sets [`line_range`](Self::line_range).
+    #[must_use]
+    pub fn with_line_range(mut self, line_range: Option<RangeInclusive<usize>>) -> Self {
+        self.line_range = line_range;
+        self
+    }
+
+    /// Sets [`first_parent_only`](Self::first_parent_only).
+    #[must_use]
+    pub const fn with_first_parent_only(mut self, first_parent_only: bool) -> Self {
+        self.first_parent_only = first_parent_only;
+        self
+    }
+
+    /// Sets [`ignore`](Self::ignore).
+    #[must_use]
+    pub fn with_ignore(mut self, ignore: IgnoreRevs) -> Self {
+        self.ignore = ignore;
+        self
+    }
+
+    /// Sets [`whitespace`](Self::whitespace).
+    #[must_use]
+    pub fn with_whitespace(mut self, whitespace: crate::diff::WhitespaceMode) -> Self {
+        self.whitespace = whitespace;
+        self
+    }
+
+    /// Sets [`copy_detection`](Self::copy_detection).
+    #[must_use]
+    pub fn with_copy_detection(mut self, copy_detection: CopyDetection) -> Self {
+        self.copy_detection = copy_detection;
+        self
+    }
+
+    /// Sets [`move_detection`](Self::move_detection).
+    #[must_use]
+    pub const fn with_move_detection(mut self, move_detection: bool) -> Self {
+        self.move_detection = move_detection;
+        self
+    }
+
+    /// Sets [`final_source`](Self::final_source).
+    #[must_use]
+    pub fn with_final_source(mut self, final_source: BlameFinalSource) -> Self {
+        self.final_source = final_source;
+        self
+    }
+
+    /// Sets [`now`](Self::now).
+    #[must_use]
+    pub fn with_now(mut self, now: Option<time::OffsetDateTime>) -> Self {
+        self.now = now;
+        self
     }
 }
 
