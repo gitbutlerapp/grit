@@ -52,7 +52,7 @@ jobs:
 
       - name: Build grit-lib rustdoc
         working-directory: .
-        run: cargo doc -p grit-lib --no-deps
+        run: cargo doc -p grit-lib --no-deps --features http-ureq
 
       - uses: actions/setup-node@v4
         with:

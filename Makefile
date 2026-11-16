@@ -137,11 +137,11 @@ site/node_modules: site/package-lock.json
 	@touch site/node_modules
 
 docs: site/node_modules
-	$(CARGO) doc -p grit-lib --no-deps
+	$(CARGO) doc -p grit-lib --no-deps --features http-ureq
 	cd site && npm run dev
 
 docs-check: site/node_modules
-	$(CARGO) doc -p grit-lib --no-deps
+	$(CARGO) doc -p grit-lib --no-deps --features http-ureq
 	cd site && GRIT_SITE_STRICT=1 npm run check && npm test && npm run typecheck && GRIT_SITE_STRICT=1 npm run build
 
 LLVM_COV_FEATURES ?= http-ureq,full-tests,test-support
