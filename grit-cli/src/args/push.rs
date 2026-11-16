@@ -50,6 +50,12 @@ pub(crate) struct PushArgs {
             conflicts_with = "force"
         )]
     pub(crate) force_with_lease: Option<Option<String>>,
+    /// With `--force-with-lease`, reject unless the remote-tracking tip is integrated locally.
+    #[arg(long = "force-if-includes")]
+    pub(crate) force_if_includes: bool,
+    /// Disable [`Self::force_if_includes`] and `push.useForceIfIncludes`.
+    #[arg(long = "no-force-if-includes", conflicts_with = "force_if_includes")]
+    pub(crate) no_force_if_includes: bool,
     /// Set `branch.<name>.remote` and `branch.<name>.merge` for each pushed branch.
     #[arg(short = 'u', long = "set-upstream")]
     pub(crate) set_upstream: bool,

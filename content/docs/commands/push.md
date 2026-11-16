@@ -14,6 +14,7 @@ grit push --tags
 grit push [<remote>] --delete <ref>...
 grit push --dry-run
 grit push --force-with-lease[=<rev>]
+grit push --force-with-lease --force-if-includes
 grit push --force
 grit push -u [--set-upstream]
 grit push --atomic
@@ -53,6 +54,8 @@ With `--tags`, pushes every local tag under `refs/tags/`.
 With `--delete`, every positional after the remote names a remote branch or tag to delete (short names map like Git), and nothing is pushed. All of them are deleted in one push, with one result per ref. They must be plain ref names: a `src:dst` refspec next to `--delete` is an error and nothing is sent, as is `--delete` with no ref. To publish one ref and delete another, run two pushes or use a `:dst` refspec without `--delete` (`grit push origin HEAD:release :old`). `--delete` cannot be combined with `--tags`.
 
 `--force-with-lease` updates a remote ref only when it still matches the local remote-tracking ref mapped from the push destination (or when the ref is absent if there is no tracking ref). Use `--force-with-lease=<rev>` when pushing exactly one ref to compare against a specific commit. `--force` overwrites the remote ref unconditionally. The two flags cannot be combined.
+
+With a tracking `--force-with-lease`, `--force-if-includes` additionally requires that the remote tip is integrated into the local branch (reachable from the branch's reflog, using the remote-tracking reflog only as a time cutoff). It is a no-op without a tracking lease, with `--force-with-lease=<rev>`, or on deletions. Set `push.useForceIfIncludes=true` to enable it by default; `--no-force-if-includes` overrides the config.
 
 A branch you [share](../share/) (`branch.<name>.shared` is `true`) is pushed with `--force-with-lease` without your asking: your head of it is yours alone, so replacing it after an amend or rebase is safe, as long as the server's head is still the one you last fetched. After the push, grit fetches the other members' heads: one that diverged from yours but goes together with it without losing anything is combined with your branch here and pushed again (`combined` in `--json`); one that needs a decision is reported with its options, and the push exits `3`.
 
@@ -100,6 +103,8 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `-f`, `--force` | Overwrite remote refs when the update is not a fast-forward. |
 | `--force-with-lease` | Push only if the remote ref matches the local remote-tracking ref (or is absent when there is no tracking ref). |
 | `--force-with-lease=<rev>` | Same check against `<rev>` (exactly one ref must be pushed). |
+| `--force-if-includes` | With a tracking lease, reject unless the remote tip appears in the local branch's reflog (no-op without a tracking lease). |
+| `--no-force-if-includes` | Disable `--force-if-includes` and `push.useForceIfIncludes`. |
 | `-u`, `--set-upstream` | Set upstream config for pushed branches. |
 | `--atomic` | All ref updates succeed or none are applied; fails before sending updates if the server does not support atomic pushes. |
 | `-o`, `--push-option` | Server-side push option (repeatable; the remote must accept push options). |
@@ -221,7 +226,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `kind` | string | `branch`, `tags`, `delete`, or `refspecs`. |
 | `branch` | string or null | Short branch name when `kind` is `branch`, or the deleted branch’s short name when `kind` is `delete` and exactly one branch is deleted. Omitted for tag and other explicit refspec pushes (`kind`: `refspecs`). |
 | `dry_run` | boolean | `true` when `--dry-run` was used (no refs or objects written). |
-| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease or a ref another push moved meanwhile, `already_exists` when another push created the new ref first, `tag_exists` when the remote already has that tag and the push did not use `--force`, `remote_ref_missing` when `--delete` targets a ref absent on the remote), optional `deleted` (`true` when the ref was removed), `old_oid`, `new_oid`, `src`, and `forced`. |
+| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease or a ref another push moved meanwhile, `remote_updated` when `--force-if-includes` blocks because the remote tip is not integrated locally, `already_exists` when another push created the new ref first, `tag_exists` when the remote already has that tag and the push did not use `--force`, `remote_ref_missing` when `--delete` targets a ref absent on the remote), optional `deleted` (`true` when the ref was removed), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 | `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
 | `origin_added` | string | URL saved as `origin` after an `<owner>/<project>` push from a repository with no remotes (omitted otherwise). |

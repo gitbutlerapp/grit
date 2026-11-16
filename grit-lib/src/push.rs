@@ -898,6 +898,20 @@ fn decide_push_wire(
         }
     }
 
+    if spec.check_if_includes && !spec.delete {
+        if let Some(tip) = remote_current {
+            if !crate::transfer::push_remote_tip_integrated(local, spec, tip)? {
+                return Ok(no_op(
+                    PushRefStatus::RejectRemoteUpdated,
+                    remote_current,
+                    spec.src,
+                    spec.delete,
+                    Some("remote commits not integrated locally".to_owned()),
+                ));
+            }
+        }
+    }
+
     if spec.delete {
         return Ok(match remote_current {
             Some(_) => PushDecision {
@@ -1624,19 +1638,169 @@ mod tests {
     }
 
     #[test]
+    fn decide_push_wire_rejects_remote_updated_when_check_set() {
+        let dir = tempfile::tempdir().unwrap();
+        let client = dir.path().join("client");
+        let bare = dir.path().join("remote.git");
+        std::fs::create_dir_all(&client).unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["init", "-q", "-b", "main"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .args(["init", "-q", "--bare", "-b", "main"])
+            .arg(&bare)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["remote", "add", "origin"])
+            .arg(&bare)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        std::fs::write(client.join("f.txt"), "1\n").unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["add", "f.txt"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["commit", "-q", "-m", "c1"])
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["push", "-q", "origin", "main"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        let remote_tip = {
+            let out = std::process::Command::new("git")
+                .current_dir(&bare)
+                .args(["rev-parse", "refs/heads/main"])
+                .output()
+                .unwrap();
+            ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).unwrap()
+        };
+        let tree = {
+            let out = std::process::Command::new("git")
+                .current_dir(&bare)
+                .args(["rev-parse", &format!("{remote_tip}^{{tree}}")])
+                .output()
+                .unwrap();
+            ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).unwrap()
+        };
+        let out = std::process::Command::new("git")
+            .current_dir(&bare)
+            .args([
+                "commit-tree",
+                &tree.to_hex(),
+                "-p",
+                &remote_tip.to_hex(),
+                "-m",
+                "other",
+            ])
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .output()
+            .unwrap();
+        let other = String::from_utf8_lossy(&out.stdout).trim().to_string();
+        assert!(std::process::Command::new("git")
+            .current_dir(&bare)
+            .args(["update-ref", "refs/heads/main", &other])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["fetch", "-q", "origin"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        std::fs::write(client.join("x.txt"), "x\n").unwrap();
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["add", "x.txt"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        assert!(std::process::Command::new("git")
+            .current_dir(&client)
+            .args(["commit", "-q", "--amend", "--no-edit"])
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .unwrap()
+            .success());
+        let repo = Repository::discover(
+            Some(&client),
+            &crate::environment::RepositoryOptions::empty(),
+        )
+        .expect("open");
+        let local_tip = {
+            let out = std::process::Command::new("git")
+                .current_dir(&client)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap();
+            ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).unwrap()
+        };
+        let remote_tip = ObjectId::from_hex(&other).unwrap();
+        let mut remote_refs = HashMap::new();
+        remote_refs.insert("refs/heads/main".to_owned(), remote_tip);
+        let spec = PushRefSpec {
+            src: Some(local_tip),
+            dst: "refs/heads/main".into(),
+            force: true,
+            expected_old: Some(remote_tip),
+            check_if_includes: true,
+            includes_tracking_ref: Some("refs/remotes/origin/main".into()),
+            ..Default::default()
+        };
+        let decision = decide_push_wire(&spec, &repo, &remote_refs).unwrap();
+        assert_eq!(decision.result.status, PushRefStatus::RejectRemoteUpdated);
+        assert!(!decision.send);
+        let spec = PushRefSpec {
+            check_if_includes: false,
+            ..spec
+        };
+        let decision = decide_push_wire(&spec, &repo, &remote_refs).unwrap();
+        assert_eq!(decision.result.status, PushRefStatus::Ok);
+    }
+
+    #[test]
     fn push_source_check_fails_on_backend_error_instead_of_missing() {
         let dir = tempfile::tempdir().unwrap();
         let (repo, flaky) = flaky_push_repo(dir.path());
         let src = repo.odb().write(ObjectKind::Blob, b"source").unwrap();
         let spec = PushRefSpec {
             src: Some(src),
-            src_ref: None,
             dst: "refs/heads/main".to_owned(),
-            force: false,
-            delete: false,
-            expected_old: None,
-            expect_absent: false,
-            hook_src_ref: None,
+            ..Default::default()
         };
         let decision = decide_push_wire(&spec, &repo, &HashMap::new()).unwrap();
         assert_eq!(decision.new_tip, Some(src));

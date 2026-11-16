@@ -52,6 +52,45 @@ fn force_with_lease_delete_stale_preserves_remote() {
 }
 
 #[test]
+fn force_if_includes_json_reason_after_fetch_amend() {
+    let fx = CliFixture::new().with_upstream();
+    let bare = fx.upstream_path();
+    let client = fx.git_clone_client("client");
+    git(&client, &["push", "-q", "origin", "main"]);
+    git(&client, &["fetch", "-q", "origin"]);
+    let stale = git(bare, &["rev-parse", "refs/heads/main"])
+        .trim()
+        .to_string();
+    let tree = git(bare, &["rev-parse", &format!("{stale}^{{tree}}")])
+        .trim()
+        .to_string();
+    let other = git(bare, &["commit-tree", &tree, "-p", &stale, "-m", "other"])
+        .trim()
+        .to_string();
+    git(bare, &["update-ref", "refs/heads/main", &other]);
+    git(&client, &["fetch", "-q", "origin"]);
+    std::fs::write(client.join("extra.txt"), "x\n").unwrap();
+    git(&client, &["add", "extra.txt"]);
+    git(&client, &["commit", "-q", "--amend", "--no-edit"]);
+    let out = grit_cmd(&[
+        "push",
+        "--force-with-lease",
+        "--force-if-includes",
+        "--json",
+    ])
+    .in_dir(&client)
+    .exec();
+    assert!(!out.ok());
+    let value: serde_json::Value = serde_json::from_str(out.stdout.trim()).expect("json");
+    assert!(
+        value["results"]
+            .as_array()
+            .is_some_and(|r| r.iter().any(|x| x["reason"] == "remote_updated")),
+        "{value}"
+    );
+}
+
+#[test]
 fn force_with_lease_stale_json_reason() {
     let fx = CliFixture::new().with_upstream();
     let bare = fx.upstream_path();

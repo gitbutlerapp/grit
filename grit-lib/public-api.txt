@@ -21753,6 +21753,7 @@ pub grit_lib::remote::push_plan::PushRequest::delete: alloc::vec::Vec<alloc::str
 pub grit_lib::remote::push_plan::PushRequest::delete_refs: bool
 pub grit_lib::remote::push_plan::PushRequest::follow_tags: bool
 pub grit_lib::remote::push_plan::PushRequest::force: grit_lib::remote::push_plan::ForceMode
+pub grit_lib::remote::push_plan::PushRequest::force_if_includes: bool
 pub grit_lib::remote::push_plan::PushRequest::mirror: bool
 pub grit_lib::remote::push_plan::PushRequest::prune: bool
 pub grit_lib::remote::push_plan::PushRequest::refspecs: alloc::vec::Vec<alloc::string::String>
@@ -21765,6 +21766,7 @@ pub fn grit_lib::remote::push_plan::PushRequest::with_delete(self, alloc::vec::V
 pub const fn grit_lib::remote::push_plan::PushRequest::with_delete_refs(self, bool) -> Self
 pub const fn grit_lib::remote::push_plan::PushRequest::with_follow_tags(self, bool) -> Self
 pub fn grit_lib::remote::push_plan::PushRequest::with_force(self, grit_lib::remote::push_plan::ForceMode) -> Self
+pub const fn grit_lib::remote::push_plan::PushRequest::with_force_if_includes(self, bool) -> Self
 pub const fn grit_lib::remote::push_plan::PushRequest::with_mirror(self, bool) -> Self
 pub const fn grit_lib::remote::push_plan::PushRequest::with_prune(self, bool) -> Self
 pub fn grit_lib::remote::push_plan::PushRequest::with_refspecs(self, alloc::vec::Vec<alloc::string::String>) -> Self
@@ -21808,6 +21810,7 @@ pub const grit_lib::remote::push_plan::DEFAULT_REMOTE: &str
 pub fn grit_lib::remote::push_plan::expand_repository_shorthand(&grit_lib::config::ConfigSet, &[alloc::string::String], &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::push_plan::open_push_destination(&grit_lib::config::ConfigSet, &str) -> grit_lib::error::Result<grit_lib::remote::Remote>
 pub fn grit_lib::remote::push_plan::push_follow_tags_config(&grit_lib::config::ConfigSet) -> bool
+pub fn grit_lib::remote::push_plan::push_use_force_if_includes_config(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::remote::push_plan::resolve_push_invocation(&grit_lib::config::ConfigSet, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<grit_lib::remote::push_plan::PushInvocation>
 pub mod grit_lib::remote::push_report
 #[non_exhaustive] pub enum grit_lib::remote::push_report::PushRefStatus
@@ -21819,6 +21822,7 @@ pub grit_lib::remote::push_report::PushRefStatus::RejectNeedsForce
 pub grit_lib::remote::push_report::PushRefStatus::RejectNonFastForward
 pub grit_lib::remote::push_report::PushRefStatus::RejectRemoteRefMissing
 pub grit_lib::remote::push_report::PushRefStatus::RejectStale
+pub grit_lib::remote::push_report::PushRefStatus::RejectRemoteUpdated
 pub grit_lib::remote::push_report::PushRefStatus::RemoteRejected
 pub grit_lib::remote::push_report::PushRefStatus::UpToDate
 impl grit_lib::remote::push_report::PushRefStatus
@@ -22797,21 +22801,25 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::transfer::PushOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transfer::PushOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transfer::PushOutcome
 #[non_exhaustive] pub struct grit_lib::remote::transfer::PushRefSpec
+pub grit_lib::remote::transfer::PushRefSpec::check_if_includes: bool
 pub grit_lib::remote::transfer::PushRefSpec::delete: bool
 pub grit_lib::remote::transfer::PushRefSpec::dst: alloc::string::String
 pub grit_lib::remote::transfer::PushRefSpec::expect_absent: bool
 pub grit_lib::remote::transfer::PushRefSpec::expected_old: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::remote::transfer::PushRefSpec::force: bool
 pub grit_lib::remote::transfer::PushRefSpec::hook_src_ref: core::option::Option<alloc::string::String>
+pub grit_lib::remote::transfer::PushRefSpec::includes_tracking_ref: core::option::Option<alloc::string::String>
 pub grit_lib::remote::transfer::PushRefSpec::src: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::remote::transfer::PushRefSpec::src_ref: core::option::Option<alloc::string::String>
 impl grit_lib::remote::transfer::PushRefSpec
+pub const fn grit_lib::remote::transfer::PushRefSpec::with_check_if_includes(self, bool) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_delete(self, bool) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_dst(self, alloc::string::String) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_expect_absent(self, bool) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_expected_old(self, core::option::Option<grit_lib::objects::ObjectId>) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_force(self, bool) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_hook_src_ref(self, core::option::Option<alloc::string::String>) -> Self
+pub fn grit_lib::remote::transfer::PushRefSpec::with_includes_tracking_ref(self, core::option::Option<alloc::string::String>) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_src(self, core::option::Option<grit_lib::objects::ObjectId>) -> Self
 pub fn grit_lib::remote::transfer::PushRefSpec::with_src_ref(self, core::option::Option<alloc::string::String>) -> Self
 impl core::clone::Clone for grit_lib::remote::transfer::PushRefSpec

@@ -28,6 +28,9 @@ pub enum PushRefStatus {
     RejectNeedsForce,
     /// Rejected because force-with-lease found stale info.
     RejectStale,
+    /// Rejected because the remote tip is not integrated into the local branch
+    /// (`--force-if-includes` with a tracking lease).
+    RejectRemoteUpdated,
     /// The remote `receive-pack` declined the update (`!`, `[remote rejected] (<reason>)`).
     RemoteRejected,
     /// Client-side rejection: a delete was requested but the ref is absent on the remote
@@ -107,6 +110,7 @@ mod tests {
             PushRefStatus::RejectFetchFirst,
             PushRefStatus::RejectNeedsForce,
             PushRefStatus::RejectStale,
+            PushRefStatus::RejectRemoteUpdated,
             PushRefStatus::RemoteRejected,
             PushRefStatus::RejectRemoteRefMissing,
             PushRefStatus::AtomicPushFailed,

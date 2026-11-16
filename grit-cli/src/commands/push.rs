@@ -6,7 +6,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::progress::CancelToken;
 use grit_lib::remote::push_plan::{
     expand_repository_shorthand, open_push_destination, push_follow_tags_config,
-    resolve_push_invocation, PushPlanKind, PushRequest,
+    push_use_force_if_includes_config, resolve_push_invocation, PushPlanKind, PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::redact_url_for_display;
@@ -70,6 +70,8 @@ pub fn run(
     dry_run: bool,
     force: bool,
     force_with_lease: Option<Option<String>>,
+    force_if_includes: bool,
+    no_force_if_includes: bool,
     set_upstream: bool,
     atomic: bool,
     push_options: &[String],
@@ -114,12 +116,21 @@ pub fn run(
 
     let follow = follow_tags || push_follow_tags_config(&config);
 
+    let use_force_if_includes = if no_force_if_includes {
+        false
+    } else if force_if_includes {
+        true
+    } else {
+        push_use_force_if_includes_config(&config)
+    };
+
     let push_request = PushRequest::default()
         .with_remote(invocation.remote)
         .with_refspecs(invocation.refspecs)
         .with_tags(tags)
         .with_delete_refs(delete_refs)
         .with_force(force_mode)
+        .with_force_if_includes(use_force_if_includes)
         .with_follow_tags(follow)
         .with_set_upstream(set_upstream)
         .with_all(all)
@@ -152,6 +163,9 @@ pub fn run(
                 plan.remote.as_str()
             };
             repo.remotes().apply_tracking_lease(tracking, spec);
+            if use_force_if_includes && !spec.delete && spec.expected_old.is_some() {
+                spec.check_if_includes = true;
+            }
         }
     }
 
@@ -242,6 +256,7 @@ pub fn run(
                         .to_owned(),
                 ),
                 PushRefStatus::RejectStale => Some("stale".to_owned()),
+                PushRefStatus::RejectRemoteUpdated => Some("remote_updated".to_owned()),
                 PushRefStatus::RejectRemoteRefMissing => Some("remote_ref_missing".to_owned()),
                 PushRefStatus::RejectAlreadyExists => {
                     if result.message.as_deref() == Some("tag already exists") {
