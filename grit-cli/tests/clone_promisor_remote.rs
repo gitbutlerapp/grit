@@ -18,7 +18,8 @@ fn fake_ssh(dir: &Path) -> PathBuf {
     std::fs::write(
         &script,
         format!(
-            "#!/bin/sh\nwhile [ \"$1\" = \"-p\" ] || [ \"$1\" = \"-o\" ]; do shift 2; done\n\
+            "#!/bin/sh\nif [ \"$1\" = \"-G\" ]; then exit 0; fi\n\
+             while [ \"$1\" = \"-p\" ] || [ \"$1\" = \"-o\" ]; do shift 2; done\n\
              shift\ncmd=$*\necho \"$cmd\" >> '{log}'\ncase \"$cmd\" in\n  \"git-upload-pack \"*) cmd=\"'{GRIT}' upload-pack ${{cmd#git-upload-pack }}\" ;;\nesac\n\
              eval \"exec $cmd\"\n"
         ),
@@ -103,6 +104,7 @@ fn run_clone(root: &Path, ssh: &Path, args: &[String]) -> String {
     grit_cmd(&args)
         .in_dir(root)
         .env("GIT_SSH_COMMAND", ssh)
+        .env("GIT_SSH_VARIANT", "ssh")
         .suc()
         .stdout
 }
