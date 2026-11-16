@@ -24,10 +24,15 @@
 //! [`UreqHttpClient::from_config`] reads the Git HTTP config that controls
 //! request shaping, lifted from the CLI's `http_client.rs`:
 //!
-//! * **Proxy** — `http.proxy` (or the `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`
-//!   environment, honored by `ureq` itself) routes requests through an HTTP(S)
-//!   proxy via [`ureq::Proxy`]. `http://user:pass@host:port` proxy auth is
-//!   forwarded by `ureq`.
+//! * **Proxy** — `http.proxy`, URL-scoped `http.<url>.proxy`, and the usual proxy
+//!   environment variables (`http_proxy` / `HTTP_PROXY`, `https_proxy` /
+//!   `HTTPS_PROXY`, `all_proxy` / `ALL_PROXY`, `NO_PROXY` / `no_proxy`) are
+//!   resolved **per request URL** and applied on each call (not on the shared
+//!   [`ureq::Agent`], so an empty `http.proxy` can disable proxying without
+//!   losing env-only settings on other requests). Supported schemes are HTTP(S)
+//!   CONNECT and SOCKS4/SOCKS4A/SOCKS5/SOCKS5H (`socks-proxy` feature). A bare
+//!   `host:port` is HTTP. `http://user:pass@host:port` proxy auth is forwarded by
+//!   `ureq`.
 //! * **Cookies** — `http.cookieFile` is parsed (Netscape and `Set-Cookie:`
 //!   formats) and a matching `Cookie:` header is sent on each request; with
 //!   `http.saveCookies=true` any `Set-Cookie` from the response is appended back
@@ -37,10 +42,9 @@
 //!   resets the accumulated list, matching Git. Lifts `extra_headers_for_url`.
 //!
 //! Deliberately omitted vs. the CLI client (and noted for parity): the
-//! absolute-form-through-proxy `HttpForward` path and the SOCKS-over-Unix tunnel
-//! (`socks*://localhost/path.sock`) — `ureq`'s built-in SOCKS support is not
-//! compiled in here, so a SOCKS proxy URL is rejected with a clear error rather
-//! than silently mishandled. Also omitted: custom CA bundles, gzip request
+//! absolute-form-through-proxy `HttpForward` path and a SOCKS URL whose path is not
+//! empty (for example `socks5h://localhost/tunnel.sock`) — those are rejected with
+//! a clear error. Also omitted: custom CA bundles, gzip request
 //! bodies, and `GIT_TRACE_CURL`. Embedders that need those should implement
 //! [`HttpClient`] over their own stack. Askpass (`GIT_ASKPASS`, `core.askPass`)
 //! is the credential provider's job; see
@@ -133,8 +137,10 @@ pub struct UreqHttpClient {
     save_cookies: bool,
     /// Configured `http.extraHeader` rules (optionally URL-scoped).
     extra_headers: Vec<ExtraHeaderRule>,
-    /// Merged Git config used for credential URL matching.
+    /// Merged Git config used for credential URL matching and proxy resolution.
     credential_config: ConfigSet,
+    /// Environment snapshot for per-request proxy resolution (`http_proxy`, `NO_PROXY`, …).
+    proxy_environment: Environment,
     /// HTTP read timeouts and low-speed abort thresholds (`http.*` config).
     transport_timeouts: HttpTransportTimeouts,
     /// Per-fetch cancel, checked during timed-out socket reads.
@@ -161,6 +167,7 @@ impl UreqHttpClient {
             save_cookies: false,
             extra_headers: Vec::new(),
             credential_config: ConfigSet::default(),
+            proxy_environment: Environment::empty(),
             transport_timeouts: HttpTransportTimeouts::default(),
             operation_cancel: Mutex::new(None),
         }
@@ -176,24 +183,21 @@ impl UreqHttpClient {
     }
 
     /// Build a client from merged Git config, honoring the request-shaping HTTP
-    /// settings: `http.proxy` (HTTP/HTTPS proxy), `http.cookieFile` +
+    /// settings: `http.proxy` / `http.<url>.proxy` (HTTP, HTTPS, or SOCKS), `http.cookieFile` +
     /// `http.saveCookies` (cookie jar), and `http.extraHeader` (custom request
     /// headers), `protocol.version` (default `Git-Protocol` header), and
     /// `http.timeout` / low-speed limits for response-body reads.
     ///
     /// # Errors
     ///
-    /// Returns an error if `http.proxy` names a proxy scheme that this client
-    /// cannot honor (e.g. a SOCKS proxy, which `ureq`'s built-in SOCKS support is
-    /// not compiled in for here), `protocol.version` is invalid, or the cookie
-    /// file cannot be read.
+    /// Returns an error if `protocol.version` is invalid or the cookie file cannot
+    /// be read. Invalid `http.proxy` values are reported when a request is made.
     ///
     /// `GIT_HTTP_LOW_SPEED_LIMIT` / `GIT_HTTP_LOW_SPEED_TIME` are read from `environment`;
     /// pass [`Environment::empty`] to use only the config.
     pub fn from_config(config: &ConfigSet, environment: &Environment) -> Result<Self> {
-        let proxy = build_proxy(config)?;
         let transport_timeouts = HttpTransportTimeouts::from_config(config, environment);
-        let agent = agent_from_timeouts(proxy, &transport_timeouts);
+        let agent = agent_from_timeouts(None, &transport_timeouts);
         let mut client = Self::with_agent(agent);
 
         if let Some(header) = client_git_protocol_header_from_config(config)? {
@@ -218,6 +222,7 @@ impl UreqHttpClient {
         // Extra headers (`http.extraHeader`, optionally URL-scoped).
         client.extra_headers = extra_header_rules_from_config(config);
         client.credential_config = config.clone();
+        client.proxy_environment = environment.clone();
 
         Ok(client)
     }
@@ -391,6 +396,22 @@ impl UreqHttpClient {
     /// Persist any `Set-Cookie` from a response back to the cookie file
     /// (`http.saveCookies`). Lifts the CLI's `save_response_cookies`: appends one
     /// `Set-Cookie: <value>` line per cookie, in Git's cookie-file format.
+    fn request_proxy(&self, request_url: &str) -> Result<Option<ureq::Proxy>> {
+        resolve_proxy_for_url(
+            &self.credential_config,
+            &self.proxy_environment,
+            request_url,
+        )
+    }
+
+    fn with_request_proxy<B>(
+        &self,
+        req: ureq::RequestBuilder<B>,
+        proxy: Option<ureq::Proxy>,
+    ) -> ureq::RequestBuilder<B> {
+        req.config().proxy(proxy).build()
+    }
+
     fn save_response_cookies(&self, set_cookies: &[String]) {
         if !self.save_cookies {
             return;
@@ -639,9 +660,9 @@ impl<R: Read> Read for LowSpeedReader<R> {
     }
 }
 
-/// Build a [`ureq::Agent`] with default Git-shaped timeouts and an optional proxy.
-fn default_agent(proxy: Option<ureq::Proxy>) -> ureq::Agent {
-    agent_from_timeouts(proxy, &HttpTransportTimeouts::default())
+/// Build a [`ureq::Agent`] with default Git-shaped timeouts (proxy is per-request).
+fn default_agent(_proxy: Option<ureq::Proxy>) -> ureq::Agent {
+    agent_from_timeouts(None, &HttpTransportTimeouts::default())
 }
 
 fn agent_tls_config() -> ureq::tls::TlsConfig {
@@ -661,7 +682,7 @@ fn agent_tls_config() -> ureq::tls::TlsConfig {
 }
 
 fn agent_from_timeouts(
-    proxy: Option<ureq::Proxy>,
+    _proxy: Option<ureq::Proxy>,
     timeouts: &HttpTransportTimeouts,
 ) -> ureq::Agent {
     let mut builder = ureq::Agent::config_builder()
@@ -681,58 +702,159 @@ fn agent_from_timeouts(
         // transport errors (ureq's default surfaces them as `Error::StatusCode`).
         .http_status_as_error(false)
         .tls_config(agent_tls_config())
-        .proxy(proxy)
+        .proxy(None)
         .build()
         .new_agent()
 }
 
-/// Resolve `http.proxy` into a [`ureq::Proxy`], or `None` for the direct path.
-///
-/// `ureq` itself honors the `HTTPS_PROXY` / `HTTP_PROXY` / `ALL_PROXY`
-/// environment when no explicit proxy is set on the agent, so we only build a
-/// proxy object for the explicit `http.proxy` config. SOCKS proxies (and the
-/// `socks*://localhost/path.sock` Unix-socket form) are rejected here: `ureq`'s
-/// SOCKS support is not compiled in for this build, so honoring them would
-/// silently fail at request time — fail loudly instead. Lifts the relevant parts
-/// of the CLI's `build_transport` / `build_transport_from_proxy`.
-fn build_proxy(config: &ConfigSet) -> Result<Option<ureq::Proxy>> {
-    let Some(raw) = config.value("http.proxy") else {
-        return Ok(None);
+fn no_proxy_expressions(environment: &Environment) -> Vec<String> {
+    let Some(raw) = environment
+        .var("NO_PROXY")
+        .or_else(|| environment.var("no_proxy"))
+    else {
+        return Vec::new();
     };
-    let raw = raw.trim();
-    if raw.is_empty() {
-        // An empty `http.proxy` disables proxying (Git's "no proxy" override);
-        // do NOT fall back to the environment.
-        return Ok(None);
-    }
-    let with_scheme = if raw.contains("://") {
+    raw.split(',')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn normalize_proxy_url(raw: &str) -> String {
+    if raw.contains("://") {
         raw.to_string()
     } else {
         format!("http://{raw}")
-    };
-    let scheme = with_scheme
+    }
+}
+
+fn proxy_scheme(raw: &str) -> String {
+    normalize_proxy_url(raw)
         .split_once("://")
-        .map(|(s, _)| s.to_ascii_lowercase())
-        .unwrap_or_default();
-    if scheme.starts_with("socks") {
+        .map(|(scheme, _)| scheme.to_ascii_lowercase())
+        .unwrap_or_default()
+}
+
+fn socks_proxy_has_unsupported_path(with_scheme: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(with_scheme) else {
+        return false;
+    };
+    let scheme = parsed.scheme().to_ascii_lowercase();
+    if !scheme.starts_with("socks") {
+        return false;
+    }
+    let path = parsed.path();
+    !path.is_empty() && path != "/"
+}
+
+fn ureq_proxy_from_raw(raw: &str, no_proxy: &[String]) -> Result<ureq::Proxy> {
+    let raw = raw.trim();
+    let with_scheme = normalize_proxy_url(raw);
+    let scheme = proxy_scheme(raw);
+    if socks_proxy_has_unsupported_path(&with_scheme) {
         return Err(Error::Remote(RemoteError::Http {
-            detail: format!(
-            "http.proxy '{raw}': SOCKS proxies are not supported by the default ureq HTTP client; \
-             implement a custom HttpClient or use an HTTP proxy"
-        ),
+            detail: format!("proxy URL '{raw}': SOCKS over a Unix socket path is not supported"),
         }));
     }
-    if scheme != "http" && scheme != "https" {
+    if scheme != "http"
+        && scheme != "https"
+        && scheme != "socks"
+        && scheme != "socks4"
+        && scheme != "socks4a"
+        && scheme != "socks5"
+        && scheme != "socks5h"
+    {
         return Err(Error::Remote(RemoteError::Http {
-            detail: format!("http.proxy '{raw}': unsupported proxy scheme '{scheme}'"),
+            detail: format!("proxy '{raw}': unsupported proxy scheme '{scheme}'"),
         }));
     }
-    let proxy = ureq::Proxy::new(&with_scheme).map_err(|e| {
+    let base = ureq::Proxy::new(&with_scheme).map_err(|e| {
         Error::Remote(RemoteError::Http {
-            detail: format!("invalid http.proxy '{raw}': {e}"),
+            detail: format!("invalid proxy '{raw}': {e}"),
         })
     })?;
-    Ok(Some(proxy))
+    let mut builder = ureq::Proxy::builder(base.protocol())
+        .host(base.host())
+        .port(base.port())
+        .resolve_target(base.resolve_target());
+    if let Some(user) = base.username() {
+        builder = builder.username(user);
+    }
+    if let Some(pass) = base.password() {
+        builder = builder.password(pass);
+    }
+    for expr in no_proxy {
+        builder = builder.no_proxy(expr);
+    }
+    builder.build().map_err(|e| {
+        Error::Remote(RemoteError::Http {
+            detail: format!("invalid proxy '{raw}': {e}"),
+        })
+    })
+}
+
+/// Config override for `http.proxy` / `http.<url>.proxy` for a single request URL.
+///
+/// * `None` — no config key applies; fall back to the environment.
+/// * `Some(None)` — empty winning value disables proxying (including env).
+/// * `Some(Some(url))` — use this proxy URL.
+fn config_proxy_override(config: &ConfigSet, request_url: &str) -> Option<Option<String>> {
+    let matches = config::get_urlmatch_entries(config.entries(), "http", "proxy", request_url);
+    let entry = matches.last()?;
+    let raw = entry.value.as_deref().unwrap_or("").trim();
+    if raw.is_empty() {
+        Some(None)
+    } else {
+        Some(Some(raw.to_owned()))
+    }
+}
+
+fn env_proxy_raw(request_url: &str, environment: &Environment) -> Option<String> {
+    let is_https = request_url
+        .split(':')
+        .next()
+        .is_some_and(|scheme| scheme.eq_ignore_ascii_case("https"));
+    let primary = if is_https {
+        ["https_proxy", "HTTPS_PROXY"]
+    } else {
+        ["http_proxy", "HTTP_PROXY"]
+    };
+    for key in primary {
+        if let Some(value) = environment.var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+    }
+    for key in ["all_proxy", "ALL_PROXY"] {
+        if let Some(value) = environment.var(key) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some(trimmed.to_owned());
+            }
+        }
+    }
+    None
+}
+
+fn resolve_proxy_for_url(
+    config: &ConfigSet,
+    environment: &Environment,
+    request_url: &str,
+) -> Result<Option<ureq::Proxy>> {
+    let no_proxy = no_proxy_expressions(environment);
+    let override_value = config_proxy_override(config, request_url);
+    let raw = match override_value {
+        Some(None) => return Ok(None),
+        Some(Some(url)) => url,
+        None => match env_proxy_raw(request_url, environment) {
+            Some(url) => url,
+            None => return Ok(None),
+        },
+    };
+    Ok(Some(ureq_proxy_from_raw(&raw, &no_proxy)?))
 }
 
 /// The target [`Credential`] for a smart-HTTP request URL.
@@ -798,6 +920,7 @@ impl UreqHttpClient {
     ) -> Result<RawResponse> {
         let cancel = self.operation_cancel_ref();
         let cancel_ref = cancel.as_deref();
+        let proxy = self.request_proxy(url)?;
         let result = retry_interrupted(true, cancel_ref, || {
             let mut req = self.agent.get(url).header("User-Agent", &self.user_agent);
             if let Some(v) = resolve_git_protocol_header(git_protocol, self.git_protocol.as_deref())
@@ -813,7 +936,7 @@ impl UreqHttpClient {
             for (name, value) in self.extra_headers_for_url(url) {
                 req = req.header(&name, &value);
             }
-            req.call()
+            self.with_request_proxy(req, proxy.clone()).call()
         });
         finish(url, result, &self.effective_timeouts())
     }
@@ -826,6 +949,7 @@ impl UreqHttpClient {
         accept: &str,
         git_protocol: Option<&str>,
         auth: Option<&str>,
+        proxy: Option<ureq::Proxy>,
     ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
         let mut req = self
             .agent
@@ -845,7 +969,7 @@ impl UreqHttpClient {
         for (name, value) in self.extra_headers_for_url(url) {
             req = req.header(&name, &value);
         }
-        req
+        self.with_request_proxy(req, proxy)
     }
 
     fn do_post_open(
@@ -860,8 +984,9 @@ impl UreqHttpClient {
         let idempotent = content_type == "application/x-git-upload-pack-request";
         let cancel = self.operation_cancel_ref();
         let cancel_ref = cancel.as_deref();
+        let proxy = self.request_proxy(url)?;
         let result = retry_interrupted(idempotent, cancel_ref, || {
-            self.post_request(url, content_type, accept, git_protocol, auth)
+            self.post_request(url, content_type, accept, git_protocol, auth, proxy.clone())
                 .send(body)
         });
         match result {
@@ -884,8 +1009,9 @@ impl UreqHttpClient {
         let idempotent = content_type == "application/x-git-upload-pack-request";
         let cancel = self.operation_cancel_ref();
         let cancel_ref = cancel.as_deref();
+        let proxy = self.request_proxy(url)?;
         let result = retry_interrupted(idempotent, cancel_ref, || {
-            self.post_request(url, content_type, accept, git_protocol, auth)
+            self.post_request(url, content_type, accept, git_protocol, auth, proxy.clone())
                 .send(body)
         });
         finish(url, result, &self.effective_timeouts())
@@ -971,6 +1097,7 @@ impl UreqHttpClient {
         mut req: ureq::RequestBuilder<B>,
         request: &HttpRequest<'_>,
         auth: Option<&str>,
+        proxy: Option<ureq::Proxy>,
     ) -> ureq::RequestBuilder<B> {
         req = req.header("User-Agent", &self.user_agent);
         if let Some(a) = auth {
@@ -988,7 +1115,7 @@ impl UreqHttpClient {
         if request.long_running {
             req = req.config().timeout_global(None).build();
         }
-        req
+        self.with_request_proxy(req, proxy)
     }
 
     fn effective_timeouts(&self) -> HttpTransportTimeouts {
@@ -1027,20 +1154,30 @@ impl UreqHttpClient {
         if request.long_running {
             timeouts.global = None;
         }
+        let proxy = self.request_proxy(url)?;
         let result = retry_interrupted(idempotent, cancel_ref, || match request.method {
-            HttpMethod::Get => self.decorate(self.agent.get(url), request, auth).call(),
-            HttpMethod::Head => self.decorate(self.agent.head(url), request, auth).call(),
+            HttpMethod::Get => self
+                .decorate(self.agent.get(url), request, auth, proxy.clone())
+                .call(),
+            HttpMethod::Head => self
+                .decorate(self.agent.head(url), request, auth, proxy.clone())
+                .call(),
             HttpMethod::Post => self
-                .decorate(self.agent.post(url), request, auth)
+                .decorate(self.agent.post(url), request, auth, proxy.clone())
                 .send(request.body),
             HttpMethod::Patch => self
-                .decorate(self.agent.patch(url), request, auth)
+                .decorate(self.agent.patch(url), request, auth, proxy.clone())
                 .send(request.body),
             HttpMethod::Put => self
-                .decorate(self.agent.put(url), request, auth)
+                .decorate(self.agent.put(url), request, auth, proxy.clone())
                 .send(request.body),
             HttpMethod::Delete => self
-                .decorate(self.agent.delete(url).force_send_body(), request, auth)
+                .decorate(
+                    self.agent.delete(url).force_send_body(),
+                    request,
+                    auth,
+                    proxy.clone(),
+                )
                 .send(request.body),
         });
         let resp = result.map_err(|e| map_ureq_transport_error(url, e, &timeouts))?;
@@ -1242,6 +1379,7 @@ impl HttpClient for UreqHttpClient {
         git_protocol: Option<&str>,
     ) -> crate::error::Result<Box<dyn Read + Send>> {
         let auth = self.auth_header_for_url(url);
+        let proxy = self.request_proxy(url)?;
         let result = self
             .post_request(
                 url,
@@ -1249,6 +1387,7 @@ impl HttpClient for UreqHttpClient {
                 accept,
                 git_protocol,
                 auth.header.as_deref(),
+                proxy,
             )
             .send(ureq::SendBody::from_reader(body));
         let (head, reader) = match result {
@@ -2052,17 +2191,105 @@ mod tests {
     }
 
     #[test]
-    fn socks_proxy_is_rejected_clearly() {
-        let mut cfg = ConfigSet::new();
-        cfg.add_command_override("http.proxy", "socks5://localhost:1080")
-            .unwrap();
-        match UreqHttpClient::from_config(&cfg, &Environment::empty()) {
-            Ok(_) => panic!("SOCKS proxy must be rejected, not silently accepted"),
-            Err(e) => {
-                let msg = format!("{e}");
-                assert!(msg.contains("SOCKS"), "expected a clear SOCKS error: {msg}");
-            }
+    fn socks_schemes_set_resolve_target_like_git() {
+        use ureq::ProxyProtocol;
+        for (raw, proto, resolve_locally) in [
+            ("socks4://127.0.0.1:1080", ProxyProtocol::Socks4, true),
+            ("socks4a://127.0.0.1:1080", ProxyProtocol::Socks4A, false),
+            ("socks5://127.0.0.1:1080", ProxyProtocol::Socks5, true),
+            ("socks5h://127.0.0.1:1080", ProxyProtocol::Socks5h, false),
+            ("socks://127.0.0.1:1080", ProxyProtocol::Socks5, true),
+        ] {
+            let proxy = ureq_proxy_from_raw(raw, &[]).expect(raw);
+            assert_eq!(proxy.protocol(), proto, "{raw}");
+            assert_eq!(proxy.resolve_target(), resolve_locally, "{raw}");
         }
+    }
+
+    #[test]
+    fn socks_proxy_with_path_is_rejected() {
+        let err =
+            ureq_proxy_from_raw("socks5h://127.0.0.1:1080/tunnel.sock", &[]).expect_err("path");
+        let msg = format!("{err}");
+        assert!(msg.contains("Unix socket path"), "{msg}");
+    }
+
+    #[test]
+    fn url_scoped_proxy_wins_over_global_config() {
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.proxy", "http://global:1")
+            .unwrap();
+        cfg.add_command_override("http.http://example.com.proxy", "http://scoped:9")
+            .unwrap();
+        let proxy = resolve_proxy_for_url(
+            &cfg,
+            &Environment::empty(),
+            "http://example.com/repo.git/info/refs",
+        )
+        .expect("resolve")
+        .expect("some proxy");
+        assert_eq!(proxy.host(), "scoped");
+        assert_eq!(proxy.port(), 9);
+    }
+
+    #[test]
+    fn empty_http_proxy_disables_env_proxy() {
+        use std::ffi::OsString;
+        use std::path::PathBuf;
+
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.proxy", "").unwrap();
+        let env = Environment::from_vars(
+            [(
+                OsString::from("http_proxy"),
+                OsString::from("http://127.0.0.1:3128"),
+            )],
+            PathBuf::from("/tmp"),
+        );
+        let resolved =
+            resolve_proxy_for_url(&cfg, &env, "http://example.com/repo.git").expect("resolve");
+        assert!(resolved.is_none());
+    }
+
+    #[test]
+    fn no_proxy_expressions_attach_to_built_proxy() {
+        let proxy =
+            ureq_proxy_from_raw("http://127.0.0.1:3128", &["localhost".to_owned()]).expect("proxy");
+        let bypass: ureq::http::Uri = "http://localhost/repo.git".parse().expect("uri");
+        let proxied: ureq::http::Uri = "http://example.com/repo.git".parse().expect("uri");
+        assert!(proxy.is_no_proxy(&bypass));
+        assert!(!proxy.is_no_proxy(&proxied));
+    }
+
+    #[test]
+    fn env_proxy_uses_scheme_specific_before_all_proxy() {
+        use std::ffi::OsString;
+        use std::path::PathBuf;
+
+        let cfg = ConfigSet::new();
+        let env = Environment::from_vars(
+            [
+                (
+                    OsString::from("http_proxy"),
+                    OsString::from("http://127.0.0.1:3128"),
+                ),
+                (
+                    OsString::from("ALL_PROXY"),
+                    OsString::from("socks5://127.0.0.1:1080"),
+                ),
+            ],
+            PathBuf::from("/tmp"),
+        );
+        let http = resolve_proxy_for_url(&cfg, &env, "http://x.test/")
+            .expect("resolve")
+            .expect("proxy");
+        assert_eq!(http.protocol(), ureq::ProxyProtocol::Http);
+        assert_eq!(http.port(), 3128);
+
+        let https = resolve_proxy_for_url(&cfg, &env, "https://secure.example/repo.git")
+            .expect("resolve")
+            .expect("proxy");
+        assert_eq!(https.protocol(), ureq::ProxyProtocol::Socks5);
     }
 
     #[test]
@@ -2079,7 +2306,8 @@ mod tests {
     fn empty_proxy_disables_proxying() {
         let mut cfg = ConfigSet::new();
         cfg.add_command_override("http.proxy", "").unwrap();
-        let proxy = build_proxy(&cfg).expect("empty proxy ok");
+        let proxy = resolve_proxy_for_url(&cfg, &Environment::empty(), "http://example.com/")
+            .expect("empty proxy ok");
         assert!(proxy.is_none(), "empty http.proxy must disable proxying");
     }
 

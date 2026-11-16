@@ -33,7 +33,7 @@ full-tests = ["test-support"]
 # Provides the default `ureq`-backed `HttpClient` for the smart-HTTP transport
 # (`transport::http::ureq_client`). Off by default so embedders can bring their
 # own HTTP stack.
-http-ureq = ["dep:ureq", "dep:base64", "ureq?/rustls"]
+http-ureq = ["dep:ureq", "dep:base64", "ureq?/rustls", "ureq?/socks-proxy"]
 # Use the platform TLS stack (Secure Transport on macOS) instead of rustls.
 http-ureq-native-tls = ["http-ureq", "ureq?/native-tls"]
 # Unstable test hooks for the workspace; outside semver — dev-dependencies and internal crates only.

@@ -12,9 +12,10 @@
 //!   the server;
 //! * **proxy** — stand up a tiny in-process forwarding HTTP proxy, point
 //!   `http.proxy` at it, and assert the fetch actually transited the proxy (the
-//!   proxy saw an absolute-form request line and forwarded a request). If the
-//!   live-proxy path is somehow unavailable it skips with a note; the proxy URL
-//!   parsing / SOCKS-rejection is unit-tested in `ureq_client.rs`.
+//!   proxy saw an absolute-form request line and forwarded a request);
+//! * **SOCKS** — in-process SOCKS5 proxies record the address type (`socks5h://`
+//!   sends a domain name; `socks5://` sends a resolved IPv4 address) and carry a
+//!   fetch through to the HTTP fixture.
 //!
 //! Each test skips gracefully when `git`, the `grit` binary, or the
 //! `grit-http-server` binary is unavailable; the happy path is real end-to-end
@@ -30,7 +31,7 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use grit_lib::config::ConfigSet;
@@ -116,7 +117,11 @@ struct Fixture {
     local_git: PathBuf,
 }
 
-fn setup(log_headers: Option<&Path>, set_cookie: Option<&str>) -> Option<Fixture> {
+fn setup(
+    log_headers: Option<&Path>,
+    set_cookie: Option<&str>,
+    remote_host: &str,
+) -> Option<Fixture> {
     let grit_bin = find_binary("grit")?;
     let server_bin = find_binary("grit-http-server")?;
 
@@ -139,7 +144,7 @@ fn setup(log_headers: Option<&Path>, set_cookie: Option<&str>) -> Option<Fixture
         return None;
     }
 
-    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let url = format!("http://{remote_host}:{port}/repo.git");
     let local = tmp.path().join("local");
     std::fs::create_dir_all(&local).ok()?;
     git(&local, &["init", "-q", "-b", "main", "."]);
@@ -188,7 +193,7 @@ fn cookie_file_sends_cookie_header_to_server() {
     };
     let log_path = headers_log.path().to_path_buf();
 
-    let Some(fx) = setup(Some(&log_path), None) else {
+    let Some(fx) = setup(Some(&log_path), None, "127.0.0.1") else {
         eprintln!("SKIP: grit / grit-http-server fixture unavailable");
         return;
     };
@@ -254,7 +259,7 @@ fn cookie_file_sends_cookie_header_to_server() {
 
 #[test]
 fn save_cookies_persists_set_cookie_to_file() {
-    let Some(fx) = setup(None, Some("WIRESET=fromserver; Path=/")) else {
+    let Some(fx) = setup(None, Some("WIRESET=fromserver; Path=/"), "127.0.0.1") else {
         eprintln!("SKIP: grit / grit-http-server fixture unavailable");
         return;
     };
@@ -306,7 +311,7 @@ fn extra_header_reaches_server() {
     let headers_log = tempfile::NamedTempFile::new().expect("temp headers log");
     let log_path = headers_log.path().to_path_buf();
 
-    let Some(fx) = setup(Some(&log_path), None) else {
+    let Some(fx) = setup(Some(&log_path), None, "127.0.0.1") else {
         eprintln!("SKIP: grit / grit-http-server fixture unavailable");
         return;
     };
@@ -427,7 +432,7 @@ fn http_proxy_routes_fetch_through_proxy() {
         return;
     };
 
-    let Some(fx) = setup(None, None) else {
+    let Some(fx) = setup(None, None, "127.0.0.1") else {
         eprintln!("SKIP: grit / grit-http-server fixture unavailable");
         return;
     };
@@ -486,5 +491,229 @@ fn http_proxy_routes_fetch_through_proxy() {
     assert!(
         absform >= 1,
         "the proxy never saw an absolute-form request line (saw {absform})"
+    );
+}
+
+const SOCKS5_ATYP_IPV4: u8 = 0x01;
+const SOCKS5_ATYP_DOMAIN: u8 = 0x03;
+
+/// Minimal SOCKS5 server: records the client CONNECT address type and pipes to the target.
+fn spawn_socks5_recording_proxy() -> Option<(u16, Arc<Mutex<Vec<u8>>>, Arc<AtomicUsize>)> {
+    let listener = TcpListener::bind(("127.0.0.1", 0)).ok()?;
+    let port = listener.local_addr().ok()?.port();
+    let atyp_log = Arc::new(Mutex::new(Vec::new()));
+    let connect_count = Arc::new(AtomicUsize::new(0));
+    let log_t = Arc::clone(&atyp_log);
+    let count_t = Arc::clone(&connect_count);
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(client) = stream else { continue };
+            let log = Arc::clone(&log_t);
+            let count = Arc::clone(&count_t);
+            std::thread::spawn(move || serve_socks5_client(client, log, count));
+        }
+    });
+    Some((port, atyp_log, connect_count))
+}
+
+fn read_exact_or_return(stream: &mut TcpStream, buf: &mut [u8]) -> bool {
+    use std::io::Read;
+    stream.read_exact(buf).is_ok()
+}
+
+fn serve_socks5_client(
+    mut client: TcpStream,
+    atyp_log: Arc<Mutex<Vec<u8>>>,
+    connect_count: Arc<AtomicUsize>,
+) {
+    use std::io::Write;
+    if client
+        .set_read_timeout(Some(Duration::from_secs(15)))
+        .is_err()
+    {
+        return;
+    }
+    let mut hdr = [0u8; 2];
+    if !read_exact_or_return(&mut client, &mut hdr) || hdr[0] != 5 {
+        return;
+    }
+    let mut methods = vec![0u8; hdr[1] as usize];
+    if !read_exact_or_return(&mut client, &mut methods) {
+        return;
+    }
+    if client.write_all(&[5, 0]).is_err() {
+        return;
+    }
+    let mut req = [0u8; 4];
+    if !read_exact_or_return(&mut client, &mut req) || req[0] != 5 || req[1] != 1 {
+        return;
+    }
+    let atyp = req[3];
+    if let Ok(mut guard) = atyp_log.lock() {
+        guard.push(atyp);
+    }
+    let target = match atyp {
+        SOCKS5_ATYP_IPV4 => {
+            let mut tail = [0u8; 6];
+            if !read_exact_or_return(&mut client, &mut tail) {
+                return;
+            }
+            format!(
+                "{}.{}.{}.{}:{}",
+                tail[0],
+                tail[1],
+                tail[2],
+                tail[3],
+                u16::from_be_bytes([tail[4], tail[5]])
+            )
+        }
+        SOCKS5_ATYP_DOMAIN => {
+            let mut len = [0u8; 1];
+            if !read_exact_or_return(&mut client, &mut len) {
+                return;
+            }
+            let mut name = vec![0u8; len[0] as usize];
+            if !read_exact_or_return(&mut client, &mut name) {
+                return;
+            }
+            let mut port = [0u8; 2];
+            if !read_exact_or_return(&mut client, &mut port) {
+                return;
+            }
+            let domain = String::from_utf8_lossy(&name);
+            format!("{domain}:{}", u16::from_be_bytes(port))
+        }
+        _ => return,
+    };
+    let Ok(mut upstream) = TcpStream::connect(&target) else {
+        let _ = client.write_all(&[5, 5, 0, 1, 0, 0, 0, 0, 0, 0]);
+        return;
+    };
+    connect_count.fetch_add(1, Ordering::SeqCst);
+    if client.write_all(&[5, 0, 0, 1, 0, 0, 0, 0, 0, 0]).is_err() {
+        return;
+    }
+    let Ok(mut up_read) = upstream.try_clone() else {
+        return;
+    };
+    let Ok(mut client_write) = client.try_clone() else {
+        return;
+    };
+    let t = std::thread::spawn(move || {
+        let _ = std::io::copy(&mut client, &mut upstream);
+    });
+    let _ = std::io::copy(&mut up_read, &mut client_write);
+    let _ = t.join();
+}
+
+#[test]
+fn socks5h_proxy_sends_domain_name_and_fetch_succeeds() {
+    let Some((proxy_port, atyp_log, connects)) = spawn_socks5_recording_proxy() else {
+        eprintln!("SKIP: could not bind SOCKS5 proxy");
+        return;
+    };
+    let Some(fx) = setup(None, None, "localhost") else {
+        eprintln!("SKIP: grit / grit-http-server fixture unavailable");
+        return;
+    };
+
+    let mut cfg = ConfigSet::new();
+    cfg.add_command_override("http.proxy", &format!("socks5h://127.0.0.1:{proxy_port}"))
+        .unwrap();
+    let client = http_client_arc(
+        UreqHttpClient::from_config(&cfg, &grit_lib::config::environment::Environment::empty())
+            .expect("from_config with socks5h"),
+    );
+
+    let mut opts = fetch_opts();
+    let outcome = grit_lib::repo::Repository::open(
+        &fx.local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &fx.url,
+        },
+        &mut opts,
+        &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("socks5h fetch");
+    assert!(
+        outcome
+            .updates
+            .iter()
+            .any(|u| u.remote_ref == "refs/heads/main"),
+        "socks5h fetch did not land main"
+    );
+    let got_main = grit_test_support::refs::at(&fx.local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
+    assert_eq!(got_main, fx.main_oid);
+    assert!(
+        connects.load(Ordering::SeqCst) >= 1,
+        "SOCKS5 proxy saw no CONNECT"
+    );
+    let atyps = atyp_log.lock().expect("log").clone();
+    assert!(
+        atyps.iter().any(|t| *t == SOCKS5_ATYP_DOMAIN),
+        "socks5h must send ATYP domain (3); saw {atyps:?}"
+    );
+}
+
+#[test]
+fn socks5_proxy_sends_ipv4_address() {
+    let Some((proxy_port, atyp_log, connects)) = spawn_socks5_recording_proxy() else {
+        eprintln!("SKIP: could not bind SOCKS5 proxy");
+        return;
+    };
+    let Some(fx) = setup(None, None, "127.0.0.1") else {
+        eprintln!("SKIP: grit / grit-http-server fixture unavailable");
+        return;
+    };
+
+    let mut cfg = ConfigSet::new();
+    cfg.add_command_override("http.proxy", &format!("socks5://127.0.0.1:{proxy_port}"))
+        .unwrap();
+    let client = http_client_arc(
+        UreqHttpClient::from_config(&cfg, &grit_lib::config::environment::Environment::empty())
+            .expect("from_config with socks5"),
+    );
+
+    let mut opts = fetch_opts();
+    grit_lib::repo::Repository::open(
+        &fx.local_git,
+        &grit_lib::config::environment::RepositoryOptions::with_environment(
+            (&mut opts).environment.clone(),
+        ),
+    )
+    .expect("open fetch target")
+    .remotes()
+    .fetch_from(
+        grit_lib::remote::transfer::TransferEndpoint::Http {
+            client: client.clone(),
+            url: &fx.url,
+        },
+        &mut opts,
+        &mut NullProgress,
+        grit_lib::progress::CancelToken::never_ref(),
+    )
+    .expect("socks5 fetch");
+
+    let _ = grit_test_support::refs::at(&fx.local_git)
+        .references()
+        .resolve("refs/remotes/origin/main")
+        .expect("origin/main");
+    assert!(connects.load(Ordering::SeqCst) >= 1);
+    let atyps = atyp_log.lock().expect("log").clone();
+    assert!(
+        atyps.iter().any(|t| *t == SOCKS5_ATYP_IPV4),
+        "socks5 must send ATYP IPv4 (1); saw {atyps:?}"
     );
 }
