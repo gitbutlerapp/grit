@@ -1298,7 +1298,9 @@ fn auth_error(message: String, url: &str, reason: &AuthFailure) -> Error {
                 "update the credentials your credential helper stores for this host (for example with {store}), then try again"
             )),
         ),
-        AuthFailure::UnsupportedScheme { .. } | AuthFailure::UrlNotDescribable => {
+        AuthFailure::UnsupportedScheme { .. }
+        | AuthFailure::UrlNotDescribable
+        | AuthFailure::MechanismFailed { .. } => {
             (ErrorKind::AuthRequired, None)
         }
         _ if github => (

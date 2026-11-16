@@ -46,6 +46,17 @@ use crate::transport::{ConnectOptions, Connection, Service, Transport};
 #[cfg(feature = "http-ureq")]
 pub mod ureq_client;
 
+#[cfg(feature = "http-ureq")]
+pub(crate) mod auth;
+#[cfg(feature = "http-ureq")]
+pub(crate) mod auth_exchange;
+#[cfg(feature = "http-ureq")]
+pub(crate) mod negotiate;
+#[cfg(feature = "http-ureq")]
+pub(crate) mod ntlm;
+#[cfg(feature = "http-ureq")]
+pub(crate) mod pinned;
+
 /// The minimal HTTP surface the smart-HTTP transport needs.
 ///
 /// Implementations legitimately perform real network I/O; the trait makes no

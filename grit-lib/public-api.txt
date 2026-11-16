@@ -5944,6 +5944,9 @@ pub grit_lib::error::AuthFailure::NoCredentialProvider
 pub grit_lib::error::AuthFailure::Rejected
 pub grit_lib::error::AuthFailure::UnsupportedScheme
 pub grit_lib::error::AuthFailure::UnsupportedScheme::schemes: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::AuthFailure::MechanismFailed
+pub grit_lib::error::AuthFailure::MechanismFailed::scheme: alloc::string::String
+pub grit_lib::error::AuthFailure::MechanismFailed::detail: alloc::string::String
 pub grit_lib::error::AuthFailure::UnusableCredentials
 pub grit_lib::error::AuthFailure::UrlNotDescribable
 impl grit_lib::error::AuthFailure

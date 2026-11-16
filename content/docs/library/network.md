@@ -92,6 +92,17 @@ Best-effort requests whose failure is ignored, such as the advertisement [`push_
 
 After an authenticated retry, [`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider) (and any custom [`CredentialProvider`](rustdoc:grit_lib::remote::credentials::CredentialProvider), which must be `Send + Sync`) runs `reject` only when the server still answers `401`; a typo, missing repository, permission denial or server error (403, 404, 429, 5xx) leaves the stored credential untouched.
 
+### HTTP authentication schemes (`http-ureq`)
+
+The default [`UreqHttpClient`](rustdoc:grit_lib::remote::transport::http::ureq_client::UreqHttpClient) negotiates `WWW-Authenticate` challenges in libcurl order when several are offered: **Negotiate** (SPNEGO/Kerberos), **NTLM**, then **Basic**. **Digest** is recognized but not implemented — a server that offers only Digest fails with [`AuthFailure::UnsupportedScheme`](rustdoc:grit_lib::error::AuthFailure::UnsupportedScheme). NTLM and IIS-style Negotiate complete on a **single kept-alive TCP connection** (not a second `ureq` request). Basic auth stays on the fast `ureq` path.
+
+| Config | Meaning |
+| --- | --- |
+| `http.emptyAuth` / `GIT_HTTP_EMPTY_AUTH` | `false` (default): never send empty credentials first. `true`: send empty credentials on the first request. `auto`: on `401`, if Negotiate is offered, try GSS without a username before the credential helper. |
+| `http.proxyAuthMethod` / `remote.<name>.proxyAuthMethod` / `GIT_HTTP_PROXY_AUTHMETHOD` | `anyauth` (default), `basic`, `negotiate`, or `ntlm` for proxy challenges when the proxy URL has userinfo (Digest as a configured method is unsupported). |
+
+Kerberos needs the `http-negotiate` feature and system GSSAPI (`libgssapi` at build time). Mechanism failures (no ticket, bad NTLM challenge, GSS init error) report [`AuthFailure::MechanismFailed`](rustdoc:grit_lib::error::AuthFailure::MechanismFailed) with the scheme name and detail, not [`AuthFailure::Rejected`](rustdoc:grit_lib::error::AuthFailure::Rejected).
+
 The HTTP client asks for credentials the way Git does: [`Credential::from_url`](rustdoc:grit_lib::remote::credentials::Credential::from_url) turns the repository URL into protocol and host, adding the repository path only when `credential.useHttpPath` applies, so a host-level entry from `git-credential-store` or a keychain helper serves every repository on the host. The full URL stays in [`Credential::url`](rustdoc:grit_lib::remote::credentials::Credential::url) for matching `credential.<url>.helper`, and `HelperCredentialProvider` never sends it to a helper. A `user:password@` in the URL fills the username and password (and is removed from `Credential::url`), so wrong URL credentials fail as [`AuthFailure::Rejected`](rustdoc:grit_lib::error::AuthFailure::Rejected). Complete URL credentials are also kept in the client's in-memory origin cache so later requests to the same scheme, host and port (such as a `bundle-uri` download with no userinfo) send the same `Authorization` header without writing secrets into a helper or resumable state files.
 
 The GitHub OAuth device flow (`remote::github_auth::DeviceFlow`) that `grit auth` uses, and the grit-server login, share, space and snapshot-checkout clients (`remote::grit_server_*`, `remote::snapshot_checkout`), exist only with the off-by-default `unstable-hosting` feature. They are outside the semver promise and may change in any release, so pin an exact `grit-lib` version if you enable it.

@@ -355,11 +355,20 @@ pub enum AuthFailure {
     /// The URL could not be split into the credential fields helpers expect.
     #[error("the URL cannot be described to a credential helper")]
     UrlNotDescribable,
-    /// The server only offers authentication schemes grit does not speak (no `Basic`).
+    /// The server only offers authentication schemes grit does not implement
+    /// (for example `Digest` alone, or no recognized scheme).
     #[error("unsupported authentication scheme: {}", schemes.join(", "))]
     UnsupportedScheme {
         /// The `WWW-Authenticate` challenges the server sent.
         schemes: Vec<String>,
+    },
+    /// A chosen scheme could not run (no Kerberos ticket, GSS init failure, NTLM error, …).
+    #[error("authentication failed ({scheme}): {detail}")]
+    MechanismFailed {
+        /// Challenge scheme name (for example `negotiate` or `ntlm`).
+        scheme: String,
+        /// Mechanism-specific detail; safe for users (no secrets).
+        detail: String,
     },
     /// Credentials were sent and the server rejected them (`401` again).
     #[error("the server rejected the credentials")]

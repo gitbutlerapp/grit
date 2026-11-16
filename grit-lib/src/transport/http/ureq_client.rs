@@ -116,6 +116,19 @@ struct InitialAuth {
     from_complete_url_userinfo: bool,
 }
 
+/// Describes the HTTP method and optional POST body for auth retry / pinned auth.
+struct AuthRetrySpec<'a> {
+    method: &'static str,
+    post: Option<PostRetrySpec<'a>>,
+}
+
+struct PostRetrySpec<'a> {
+    content_type: &'a str,
+    accept: &'a str,
+    body: &'a [u8],
+    git_protocol: Option<&'a str>,
+}
+
 /// `UreqHttpClient` struct.
 pub struct UreqHttpClient {
     agent: ureq::Agent,
@@ -145,6 +158,8 @@ pub struct UreqHttpClient {
     transport_timeouts: HttpTransportTimeouts,
     /// Per-fetch cancel, checked during timed-out socket reads.
     operation_cancel: Mutex<Option<std::sync::Arc<crate::progress::CancelToken>>>,
+    auth_settings: super::auth_exchange::HttpAuthSettings,
+    pinned_pool: super::pinned::PinnedPool,
 }
 
 impl UreqHttpClient {
@@ -170,6 +185,8 @@ impl UreqHttpClient {
             proxy_environment: Environment::empty(),
             transport_timeouts: HttpTransportTimeouts::default(),
             operation_cancel: Mutex::new(None),
+            auth_settings: super::auth_exchange::HttpAuthSettings::default(),
+            pinned_pool: super::pinned::PinnedPool::default(),
         }
     }
 
@@ -223,6 +240,8 @@ impl UreqHttpClient {
         client.extra_headers = extra_header_rules_from_config(config);
         client.credential_config = config.clone();
         client.proxy_environment = environment.clone();
+        client.auth_settings =
+            super::auth_exchange::HttpAuthSettings::from_config(config, environment);
 
         Ok(client)
     }
@@ -274,6 +293,14 @@ impl UreqHttpClient {
                 from_complete_url_userinfo: false,
             };
         }
+        if let Ok(Some(header)) =
+            super::auth_exchange::empty_auth_first_header(&self.auth_settings, url)
+        {
+            return InitialAuth {
+                header: Some(header),
+                from_complete_url_userinfo: false,
+            };
+        }
         let repo = repo_url_from_request_url(url);
         let Some(cred) = Credential::from_url(repo, &self.credential_config) else {
             return InitialAuth {
@@ -304,12 +331,19 @@ impl UreqHttpClient {
     ///
     /// Wrong complete URL userinfo is rejected immediately; otherwise a missing
     /// provider yields [`AuthFailure::NoCredentialProvider`].
-    fn fail_initial_401_before_helper(&self, url: &str, initial: &InitialAuth) -> Result<()> {
+    fn fail_initial_401_before_helper(
+        &self,
+        url: &str,
+        initial: &InitialAuth,
+        challenges: &[super::auth::AuthChallenge],
+    ) -> Result<()> {
         if initial.from_complete_url_userinfo {
             self.clear_auth_header();
             return Err(auth_error(url, AuthFailure::Rejected));
         }
-        if self.credentials.is_none() {
+        if self.credentials.is_none()
+            && !super::auth_exchange::may_try_empty_negotiate(&self.auth_settings, challenges)
+        {
             self.clear_auth_header();
             return Err(auth_error(url, AuthFailure::NoCredentialProvider));
         }
@@ -449,11 +483,64 @@ impl Default for UreqHttpClient {
     }
 }
 
+/// Outbound `Authorization` and `Proxy-Authorization` headers for one request.
+#[derive(Clone, Copy, Default)]
+struct RequestAuth<'a> {
+    authorization: Option<&'a str>,
+    proxy_authorization: Option<&'a str>,
+}
+
+fn request_auth_for_initial(initial: &InitialAuth) -> RequestAuth<'_> {
+    RequestAuth {
+        authorization: initial.header.as_deref(),
+        proxy_authorization: None,
+    }
+}
+
+fn response_needs_auth_retry(status: u16) -> bool {
+    matches!(status, 401 | 407)
+}
+
+fn auth_challenges_from_head(
+    head: &RawResponseHead,
+) -> Option<(Vec<super::auth::AuthChallenge>, bool)> {
+    if head.status == 401 {
+        Some((
+            super::auth::parse_authenticate_headers(&head.www_authenticate),
+            false,
+        ))
+    } else if head.status == 407 {
+        Some((
+            super::auth::parse_authenticate_headers(&head.proxy_authenticate),
+            true,
+        ))
+    } else {
+        None
+    }
+}
+
+fn auth_challenges_from_raw(resp: &RawResponse) -> Option<(Vec<super::auth::AuthChallenge>, bool)> {
+    if resp.status == 401 {
+        Some((
+            super::auth::parse_authenticate_headers(&resp.www_authenticate),
+            false,
+        ))
+    } else if resp.status == 407 {
+        Some((
+            super::auth::parse_authenticate_headers(&resp.proxy_authenticate),
+            true,
+        ))
+    } else {
+        None
+    }
+}
+
 /// A raw HTTP response captured from ureq (success or error status).
 struct RawResponse {
     status: u16,
     content_type: Option<String>,
     www_authenticate: Vec<String>,
+    proxy_authenticate: Vec<String>,
     set_cookie: Vec<String>,
     body: Vec<u8>,
     /// The final URL after any redirects ureq followed (from `Response::get_url`).
@@ -466,8 +553,8 @@ fn default_user_agent() -> String {
 
 /// Git-shaped HTTP timeouts and optional low-speed abort thresholds (`http.*` config).
 #[derive(Clone)]
-struct HttpTransportTimeouts {
-    connect: Duration,
+pub(crate) struct HttpTransportTimeouts {
+    pub(crate) connect: Duration,
     /// Whole-request ceiling (`http.timeout`, Git default 600s; `None` when disabled).
     global: Option<Duration>,
     low_speed: Option<LowSpeedSettings>,
@@ -479,6 +566,12 @@ struct HttpTransportTimeouts {
 struct LowSpeedSettings {
     bytes_per_second: u64,
     window: Duration,
+}
+
+impl HttpTransportTimeouts {
+    pub(crate) fn per_read(&self) -> Option<Duration> {
+        self.low_speed.as_ref().map(|l| l.window).or(self.global)
+    }
 }
 
 impl Default for HttpTransportTimeouts {
@@ -863,7 +956,7 @@ fn resolve_proxy_for_url(
 /// its query and `/info/refs` or service suffix), so `credential.<url>.*`
 /// config and `credential.useHttpPath` see the repository path that helpers
 /// such as `git-credential-store` key entries on.
-fn credential_for_url(url: &str, config: &ConfigSet) -> Option<Credential> {
+pub(crate) fn credential_for_url(url: &str, config: &ConfigSet) -> Option<Credential> {
     Credential::from_url(repo_url_from_request_url(url), config)
 }
 
@@ -916,7 +1009,7 @@ impl UreqHttpClient {
         &self,
         url: &str,
         git_protocol: Option<&str>,
-        auth: Option<&str>,
+        auth: RequestAuth<'_>,
     ) -> Result<RawResponse> {
         let cancel = self.operation_cancel_ref();
         let cancel_ref = cancel.as_deref();
@@ -927,8 +1020,11 @@ impl UreqHttpClient {
             {
                 req = req.header("Git-Protocol", v);
             }
-            if let Some(a) = auth {
+            if let Some(a) = auth.authorization {
                 req = req.header("Authorization", a);
+            }
+            if let Some(a) = auth.proxy_authorization {
+                req = req.header("Proxy-Authorization", a);
             }
             if let Some(cookie) = self.cookie_header_for_url(url) {
                 req = req.header("Cookie", &cookie);
@@ -948,7 +1044,7 @@ impl UreqHttpClient {
         content_type: &str,
         accept: &str,
         git_protocol: Option<&str>,
-        auth: Option<&str>,
+        auth: RequestAuth<'_>,
         proxy: Option<ureq::Proxy>,
     ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
         let mut req = self
@@ -960,8 +1056,11 @@ impl UreqHttpClient {
         if let Some(v) = resolve_git_protocol_header(git_protocol, self.git_protocol.as_deref()) {
             req = req.header("Git-Protocol", v);
         }
-        if let Some(a) = auth {
+        if let Some(a) = auth.authorization {
             req = req.header("Authorization", a);
+        }
+        if let Some(a) = auth.proxy_authorization {
+            req = req.header("Proxy-Authorization", a);
         }
         if let Some(cookie) = self.cookie_header_for_url(url) {
             req = req.header("Cookie", &cookie);
@@ -979,7 +1078,7 @@ impl UreqHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-        auth: Option<&str>,
+        auth: RequestAuth<'_>,
     ) -> Result<(RawResponseHead, LowSpeedReader<Box<dyn Read + Send>>)> {
         let idempotent = content_type == "application/x-git-upload-pack-request";
         let cancel = self.operation_cancel_ref();
@@ -1002,7 +1101,7 @@ impl UreqHttpClient {
         accept: &str,
         body: &[u8],
         git_protocol: Option<&str>,
-        auth: Option<&str>,
+        auth: RequestAuth<'_>,
     ) -> Result<RawResponse> {
         // A fetch negotiation request only reads from the server, so it is safe to resend; a
         // push (receive-pack) request is not.
@@ -1032,9 +1131,9 @@ impl UreqHttpClient {
             accept,
             body,
             git_protocol,
-            initial_auth.header.as_deref(),
+            request_auth_for_initial(&initial_auth),
         )?;
-        if head.status != 401 {
+        if !response_needs_auth_retry(head.status) {
             self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
             self.save_response_cookies(&head.set_cookie);
             if head.status >= 400 {
@@ -1044,16 +1143,44 @@ impl UreqHttpClient {
             return Ok(reader);
         }
         drain_response_body(reader);
-        self.fail_initial_401_before_helper(url, &initial_auth)?;
+        let Some((challenges, proxy_challenge)) = auth_challenges_from_head(&head) else {
+            return Err(http_status_error(url, head.status));
+        };
+        let spec = AuthRetrySpec {
+            method: "POST",
+            post: Some(PostRetrySpec {
+                content_type,
+                accept,
+                body,
+                git_protocol,
+            }),
+        };
+        if let Some(buf) =
+            self.try_pinned_auth_challenge(url, &spec, &initial_auth, &challenges, proxy_challenge)?
+        {
+            let timeouts = self.effective_timeouts();
+            return Ok(LowSpeedReader::new(
+                Box::new(std::io::Cursor::new(buf)) as Box<dyn Read + Send>,
+                &timeouts,
+            ));
+        }
+        self.fail_initial_401_before_helper(url, &initial_auth, &challenges)?;
         let provider = self
             .credentials
             .as_ref()
             .ok_or_else(|| auth_error(url, AuthFailure::NoCredentialProvider))?;
-        if !offers_basic(&head.www_authenticate) {
+        let auth_headers = if proxy_challenge {
+            &head.proxy_authenticate
+        } else {
+            &head.www_authenticate
+        };
+        if !offers_basic(auth_headers)
+            && !super::auth::offers_scheme(&challenges, super::auth::AuthScheme::Basic)
+        {
             return Err(auth_error(
                 url,
                 AuthFailure::UnsupportedScheme {
-                    schemes: head.www_authenticate.clone(),
+                    schemes: super::auth::challenge_scheme_names(&challenges),
                 },
             ));
         }
@@ -1067,9 +1194,20 @@ impl UreqHttpClient {
         let Some(header) = basic_auth_header(&cred) else {
             return Err(auth_error(&auth_url, AuthFailure::UnusableCredentials));
         };
+        let retry_auth = if proxy_challenge {
+            RequestAuth {
+                authorization: None,
+                proxy_authorization: Some(&header),
+            }
+        } else {
+            RequestAuth {
+                authorization: Some(&header),
+                proxy_authorization: None,
+            }
+        };
         let (retry_head, retry_reader) =
-            self.do_post_open(url, content_type, accept, body, git_protocol, Some(&header))?;
-        if retry_head.status == 401 {
+            self.do_post_open(url, content_type, accept, body, git_protocol, retry_auth)?;
+        if response_needs_auth_retry(retry_head.status) {
             let _ = provider.reject(&cred);
             self.clear_auth_header();
             drain_response_body(retry_reader);
@@ -1096,12 +1234,15 @@ impl UreqHttpClient {
         &self,
         mut req: ureq::RequestBuilder<B>,
         request: &HttpRequest<'_>,
-        auth: Option<&str>,
+        auth: RequestAuth<'_>,
         proxy: Option<ureq::Proxy>,
     ) -> ureq::RequestBuilder<B> {
         req = req.header("User-Agent", &self.user_agent);
-        if let Some(a) = auth {
+        if let Some(a) = auth.authorization {
             req = req.header("Authorization", a);
+        }
+        if let Some(a) = auth.proxy_authorization {
+            req = req.header("Proxy-Authorization", a);
         }
         if let Some(cookie) = self.cookie_header_for_url(request.url) {
             req = req.header("Cookie", &cookie);
@@ -1136,7 +1277,7 @@ impl UreqHttpClient {
     fn do_send(
         &self,
         request: &HttpRequest<'_>,
-        auth: Option<&str>,
+        auth: RequestAuth<'_>,
     ) -> Result<(RawResponseHead, HttpResponse)> {
         let url = request.url;
         // Only reads may be resent after an interrupted socket call.
@@ -1204,24 +1345,85 @@ impl UreqHttpClient {
     fn send_with_auth_retry(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
         let url = request.url;
         let initial_auth = self.auth_header_for_url(url);
-        let (head, response) = self.do_send(request, initial_auth.header.as_deref())?;
-        if head.status != 401 {
+        let (head, response) = self.do_send(request, request_auth_for_initial(&initial_auth))?;
+        if !response_needs_auth_retry(head.status) {
             self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
             self.save_response_cookies(&head.set_cookie);
             return Ok(response);
         }
         let mut body = response.body;
         let _ = std::io::copy(&mut body, &mut io::sink());
-        self.fail_initial_401_before_helper(url, &initial_auth)?;
+        let Some((challenges, proxy_challenge)) = auth_challenges_from_head(&head) else {
+            return Err(http_status_error(url, head.status));
+        };
+        let git_proto = request
+            .headers
+            .iter()
+            .find(|(k, _)| k.eq_ignore_ascii_case("Git-Protocol"))
+            .map(|(_, v)| v.as_str());
+        let spec = AuthRetrySpec {
+            method: match request.method {
+                HttpMethod::Get => "GET",
+                HttpMethod::Post => "POST",
+                HttpMethod::Head => "HEAD",
+                HttpMethod::Put => "PUT",
+                HttpMethod::Patch => "PATCH",
+                HttpMethod::Delete => "DELETE",
+            },
+            post: match request.method {
+                HttpMethod::Post | HttpMethod::Put | HttpMethod::Patch => {
+                    let ct = request
+                        .headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("Content-Type"))
+                        .map(|(_, v)| v.as_str())
+                        .unwrap_or("application/octet-stream");
+                    let accept = request
+                        .headers
+                        .iter()
+                        .find(|(k, _)| k.eq_ignore_ascii_case("Accept"))
+                        .map(|(_, v)| v.as_str())
+                        .unwrap_or("*/*");
+                    Some(PostRetrySpec {
+                        content_type: ct,
+                        accept,
+                        body: request.body,
+                        git_protocol: git_proto,
+                    })
+                }
+                _ => None,
+            },
+        };
+        if let Some(buf) =
+            self.try_pinned_auth_challenge(url, &spec, &initial_auth, &challenges, proxy_challenge)?
+        {
+            let timeouts = self.effective_timeouts();
+            return Ok(HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: Box::new(LowSpeedReader::new(
+                    Box::new(std::io::Cursor::new(buf)) as Box<dyn Read + Send>,
+                    &timeouts,
+                )),
+            });
+        }
+        self.fail_initial_401_before_helper(url, &initial_auth, &challenges)?;
         let provider = self
             .credentials
             .as_ref()
             .ok_or_else(|| auth_error(url, AuthFailure::NoCredentialProvider))?;
-        if !offers_basic(&head.www_authenticate) {
+        let auth_headers = if proxy_challenge {
+            &head.proxy_authenticate
+        } else {
+            &head.www_authenticate
+        };
+        if !offers_basic(auth_headers)
+            && !super::auth::offers_scheme(&challenges, super::auth::AuthScheme::Basic)
+        {
             return Err(auth_error(
                 url,
                 AuthFailure::UnsupportedScheme {
-                    schemes: head.www_authenticate.clone(),
+                    schemes: super::auth::challenge_scheme_names(&challenges),
                 },
             ));
         }
@@ -1234,8 +1436,19 @@ impl UreqHttpClient {
         let Some(header) = basic_auth_header(&cred) else {
             return Err(auth_error(url, AuthFailure::UnusableCredentials));
         };
-        let (retry_head, retry) = self.do_send(request, Some(&header))?;
-        if retry_head.status == 401 {
+        let retry_auth = if proxy_challenge {
+            RequestAuth {
+                authorization: None,
+                proxy_authorization: Some(&header),
+            }
+        } else {
+            RequestAuth {
+                authorization: Some(&header),
+                proxy_authorization: None,
+            }
+        };
+        let (retry_head, retry) = self.do_send(request, retry_auth)?;
+        if response_needs_auth_retry(retry_head.status) {
             let _ = provider.reject(&cred);
             self.clear_auth_header();
             return Err(auth_error(url, AuthFailure::Rejected));
@@ -1250,15 +1463,88 @@ impl UreqHttpClient {
         Ok(retry)
     }
 
+    fn pinned_headers_for_spec(
+        &self,
+        url: &str,
+        spec: &AuthRetrySpec<'_>,
+    ) -> Vec<(String, String)> {
+        let git_protocol = spec.post.as_ref().and_then(|p| p.git_protocol);
+        let mut headers = pinned_extra_headers(self, url, git_protocol);
+        if let Some(post) = &spec.post {
+            headers.push(("Content-Type".to_owned(), post.content_type.to_owned()));
+            headers.push(("Accept".to_owned(), post.accept.to_owned()));
+        }
+        headers
+    }
+
+    fn run_pinned_auth(
+        &self,
+        url: &str,
+        spec: &AuthRetrySpec<'_>,
+        scheme: super::auth::AuthScheme,
+    ) -> Result<Vec<u8>> {
+        let path = url_path_and_query(url)?;
+        let headers = self.pinned_headers_for_spec(url, spec);
+        let body = spec.post.as_ref().map(|p| p.body);
+        let request = super::auth_exchange::PinnedAuthRequest {
+            pool: &self.pinned_pool,
+            settings: &self.auth_settings,
+            timeouts: &self.transport_timeouts,
+            url,
+            method: spec.method,
+            path_query: &path,
+            extra_headers: &headers,
+            body,
+            provider: self.credentials.as_deref(),
+            credential_config: &self.credential_config,
+            scheme,
+        };
+        super::auth_exchange::pinned_request_with_auth(&request)
+    }
+
+    fn try_pinned_auth_challenge(
+        &self,
+        url: &str,
+        spec: &AuthRetrySpec<'_>,
+        initial: &InitialAuth,
+        challenges: &[super::auth::AuthChallenge],
+        proxy_challenge: bool,
+    ) -> Result<Option<Vec<u8>>> {
+        let picked = if proxy_challenge {
+            let method = self
+                .auth_settings
+                .proxy_auth_method_for_url(&self.credential_config, url);
+            super::auth::select_proxy_scheme(challenges, method)
+        } else {
+            super::auth::select_server_scheme(challenges)
+        };
+        let Some(scheme) =
+            picked.filter(|s| super::auth_exchange::scheme_needs_pinned_connection(*s))
+        else {
+            return Ok(None);
+        };
+        if scheme == super::auth::AuthScheme::Ntlm
+            || !super::auth_exchange::may_try_empty_negotiate(&self.auth_settings, challenges)
+        {
+            self.fail_initial_401_before_helper(url, initial, challenges)?;
+        }
+        Ok(Some(self.run_pinned_auth(url, spec, scheme)?))
+    }
+
     /// Run `attempt` (a GET or POST closure) with auth-retry on 401, returning
     /// the response body and the final URL after any followed redirects.
-    fn with_auth_retry<F>(&self, url: &str, attempt: F) -> Result<(Vec<u8>, String)>
+    fn with_auth_retry<F>(
+        &self,
+        url: &str,
+        spec: AuthRetrySpec<'_>,
+        attempt: F,
+    ) -> Result<(Vec<u8>, String)>
     where
-        F: Fn(&str, Option<&str>) -> Result<RawResponse>,
+        F: Fn(&str, RequestAuth<'_>) -> Result<RawResponse>,
     {
         let initial_auth = self.auth_header_for_url(url);
-        let first = attempt(url, initial_auth.header.as_deref())?;
-        if first.status != 401 {
+        let first = attempt(url, request_auth_for_initial(&initial_auth))?;
+        if !response_needs_auth_retry(first.status) {
             self.invalidate_auth_on_cross_origin_redirect(url, &first.final_url);
             self.save_response_cookies(&first.set_cookie);
             return finalize_status(
@@ -1269,19 +1555,31 @@ impl UreqHttpClient {
                 first.final_url,
             );
         }
-        // 401: need credentials. Without a provider, surface a typed auth error
-        // (so embedders can detect it and e.g. fall back to a subprocess path)
-        // rather than a generic message — and never block.
-        self.fail_initial_401_before_helper(url, &initial_auth)?;
+        let Some((challenges, proxy_challenge)) = auth_challenges_from_raw(&first) else {
+            return Err(http_status_error(url, first.status));
+        };
+        if let Some(body) =
+            self.try_pinned_auth_challenge(url, &spec, &initial_auth, &challenges, proxy_challenge)?
+        {
+            return finalize_status(url, 200, None, body, url.to_owned());
+        }
+        self.fail_initial_401_before_helper(url, &initial_auth, &challenges)?;
         let provider = self
             .credentials
             .as_ref()
             .ok_or_else(|| auth_error(url, AuthFailure::NoCredentialProvider))?;
-        if !offers_basic(&first.www_authenticate) {
+        let auth_headers = if proxy_challenge {
+            &first.proxy_authenticate
+        } else {
+            &first.www_authenticate
+        };
+        if !offers_basic(auth_headers)
+            && !super::auth::offers_scheme(&challenges, super::auth::AuthScheme::Basic)
+        {
             return Err(auth_error(
                 url,
                 AuthFailure::UnsupportedScheme {
-                    schemes: first.www_authenticate.clone(),
+                    schemes: super::auth::challenge_scheme_names(&challenges),
                 },
             ));
         }
@@ -1298,8 +1596,19 @@ impl UreqHttpClient {
         let Some(header) = basic_auth_header(&cred) else {
             return Err(auth_error(&auth_url, AuthFailure::UnusableCredentials));
         };
-        let retry = attempt(&auth_url, Some(&header))?;
-        if retry.status == 401 {
+        let retry_auth = if proxy_challenge {
+            RequestAuth {
+                authorization: None,
+                proxy_authorization: Some(&header),
+            }
+        } else {
+            RequestAuth {
+                authorization: Some(&header),
+                proxy_authorization: None,
+            }
+        };
+        let retry = attempt(&auth_url, retry_auth)?;
+        if response_needs_auth_retry(retry.status) {
             // Credentials were supplied but rejected: erase them and surface a
             // typed auth error.
             let _ = provider.reject(&cred);
@@ -1335,8 +1644,15 @@ impl HttpClient for UreqHttpClient {
     }
 
     fn get(&self, url: &str, git_protocol: Option<&str>) -> crate::error::Result<Vec<u8>> {
-        self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
-            .map(|(body, _)| body)
+        self.with_auth_retry(
+            url,
+            AuthRetrySpec {
+                method: "GET",
+                post: None,
+            },
+            |target, auth| self.do_get(target, git_protocol, auth),
+        )
+        .map(|(body, _)| body)
     }
 
     fn post(
@@ -1347,9 +1663,19 @@ impl HttpClient for UreqHttpClient {
         body: &[u8],
         git_protocol: Option<&str>,
     ) -> crate::error::Result<Vec<u8>> {
-        self.with_auth_retry(url, |target, auth| {
-            self.do_post(target, content_type, accept, body, git_protocol, auth)
-        })
+        self.with_auth_retry(
+            url,
+            AuthRetrySpec {
+                method: "POST",
+                post: Some(PostRetrySpec {
+                    content_type,
+                    accept,
+                    body,
+                    git_protocol,
+                }),
+            },
+            |target, auth| self.do_post(target, content_type, accept, body, git_protocol, auth),
+        )
         .map(|(body, _)| body)
     }
 
@@ -1386,7 +1712,7 @@ impl HttpClient for UreqHttpClient {
                 content_type,
                 accept,
                 git_protocol,
-                auth.header.as_deref(),
+                request_auth_for_initial(&auth),
                 proxy,
             )
             .send(ureq::SendBody::from_reader(body));
@@ -1415,8 +1741,15 @@ impl HttpClient for UreqHttpClient {
         url: &str,
         git_protocol: Option<&str>,
     ) -> crate::error::Result<(Vec<u8>, Option<String>)> {
-        self.with_auth_retry(url, |target, auth| self.do_get(target, git_protocol, auth))
-            .map(|(body, final_url)| (body, Some(final_url)))
+        self.with_auth_retry(
+            url,
+            AuthRetrySpec {
+                method: "GET",
+                post: None,
+            },
+            |target, auth| self.do_get(target, git_protocol, auth),
+        )
+        .map(|(body, final_url)| (body, Some(final_url)))
     }
 
     fn git_protocol_header(&self) -> Option<&str> {
@@ -1495,6 +1828,7 @@ fn read_response(
         status: head.status,
         content_type: head.content_type,
         www_authenticate: head.www_authenticate,
+        proxy_authenticate: head.proxy_authenticate,
         set_cookie: head.set_cookie,
         body,
         final_url: head.final_url,
@@ -1506,6 +1840,7 @@ struct RawResponseHead {
     status: u16,
     content_type: Option<String>,
     www_authenticate: Vec<String>,
+    proxy_authenticate: Vec<String>,
     set_cookie: Vec<String>,
     final_url: String,
 }
@@ -1523,6 +1858,7 @@ fn open_response_body(
         .and_then(|value| value.to_str().ok())
         .map(super::http_content_type_media_type);
     let www_authenticate = header_values(resp.headers(), "WWW-Authenticate");
+    let proxy_authenticate = header_values(resp.headers(), "Proxy-Authenticate");
     let set_cookie = header_values(resp.headers(), "Set-Cookie");
     let reader = resp.into_body().into_reader();
     // Side-band demux already reads in 1 MiB chunks; skip an extra BufReader layer
@@ -1532,6 +1868,7 @@ fn open_response_body(
             status,
             content_type,
             www_authenticate,
+            proxy_authenticate,
             set_cookie,
             final_url,
         },
@@ -1545,6 +1882,42 @@ fn drain_response_body(mut reader: LowSpeedReader<Box<dyn Read + Send>>) {
 
 /// Collect all values for a header as owned UTF-8 strings (skipping any that
 /// aren't valid UTF-8).
+fn url_path_and_query(url: &str) -> Result<String> {
+    let parsed = url::Url::parse(url).map_err(|e| {
+        Error::Remote(RemoteError::Unreadable {
+            url: Some(repository_url_for_display(url)),
+            reason: RemoteUnreadableReason::Transport {
+                detail: e.to_string(),
+            },
+        })
+    })?;
+    let mut path = parsed.path().to_owned();
+    if path.is_empty() {
+        path.push('/');
+    }
+    if let Some(q) = parsed.query() {
+        path.push('?');
+        path.push_str(q);
+    }
+    Ok(path)
+}
+
+fn pinned_extra_headers(
+    client: &UreqHttpClient,
+    url: &str,
+    git_protocol: Option<&str>,
+) -> Vec<(String, String)> {
+    let mut headers = vec![("User-Agent".to_owned(), client.user_agent.clone())];
+    if let Some(v) = resolve_git_protocol_header(git_protocol, client.git_protocol.as_deref()) {
+        headers.push(("Git-Protocol".to_owned(), v.to_owned()));
+    }
+    if let Some(cookie) = client.cookie_header_for_url(url) {
+        headers.push(("Cookie".to_owned(), cookie));
+    }
+    headers.extend(client.extra_headers_for_url(url));
+    headers
+}
+
 fn header_values(headers: &ureq::http::HeaderMap, name: &str) -> Vec<String> {
     headers
         .get_all(name)
