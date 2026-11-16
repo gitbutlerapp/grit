@@ -44,14 +44,21 @@ fn grit_exec_path(dir: &std::path::Path) -> std::path::PathBuf {
     dir.join(".git/rebase-merge/grit-exec")
 }
 
+/// Marker the exec command itself creates, so tests signal grit only once the command is
+/// running. `grit-exec` alone is written before grit checks out the commit, so a signal sent as
+/// soon as it appears can land while grit still holds `index.lock`.
+fn exec_started_path(dir: &std::path::Path) -> std::path::PathBuf {
+    dir.join(".git/exec-started")
+}
+
 fn wait_for_grit_exec(dir: &std::path::Path, child: &mut Child) -> bool {
     let deadline = Instant::now() + Duration::from_secs(30);
     loop {
-        if grit_exec_path(dir).is_file() {
+        if grit_exec_path(dir).is_file() && exec_started_path(dir).is_file() {
             return true;
         }
         if child.try_wait().expect("poll").is_some() {
-            return grit_exec_path(dir).is_file();
+            return grit_exec_path(dir).is_file() && exec_started_path(dir).is_file();
         }
         if Instant::now() >= deadline {
             return false;
@@ -99,10 +106,15 @@ fn init_exec_fixture(dir: &std::path::Path) -> String {
 fn spawn_slow_rebase_exec(dir: &std::path::Path) -> Child {
     let mut cmd = Command::new(GRIT);
     configure_git_env(&mut cmd);
-    cmd.args(["rebase", "main", "--exec", "sleep 300"])
-        .current_dir(dir)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
+    cmd.args([
+        "rebase",
+        "main",
+        "--exec",
+        "touch .git/exec-started && sleep 300",
+    ])
+    .current_dir(dir)
+    .stdout(Stdio::null())
+    .stderr(Stdio::null());
     cmd.spawn().expect("spawn rebase --exec")
 }
 
