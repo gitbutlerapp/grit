@@ -44,11 +44,17 @@
 //! Deliberately omitted vs. the CLI client (and noted for parity): the
 //! absolute-form-through-proxy `HttpForward` path and a SOCKS URL whose path is not
 //! empty (for example `socks5h://localhost/tunnel.sock`) — those are rejected with
-//! a clear error. Also omitted: custom CA bundles, gzip request
-//! bodies, and `GIT_TRACE_CURL`. Embedders that need those should implement
-//! [`HttpClient`] over their own stack. Askpass (`GIT_ASKPASS`, `core.askPass`)
-//! is the credential provider's job; see
+//! a clear error. Also omitted: gzip request bodies and `GIT_TRACE_CURL`.
+//! Askpass (`GIT_ASKPASS`, `core.askPass`) is the credential provider's job; see
 //! [`HelperCredentialProvider::with_askpass`](credentials::HelperCredentialProvider::with_askpass).
+//!
+//! ## TLS (`http.ssl*` and `GIT_SSL_*`)
+//!
+//! Per-request TLS honors Git's `http.sslVerify`, `http.sslCAInfo`, `http.sslCAPath`,
+//! `http.sslCert`, `http.sslKey`, and `http.sslBackend` (including URL-scoped
+//! `http.<url>.*` forms) with env overrides (`GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`,
+//! `GIT_SSL_CAPATH`, `GIT_SSL_CERT`, `GIT_SSL_KEY`). The default trust store is the
+//! OS verifier (`RootCerts::PlatformVerifier`), not the Mozilla WebPKI bundle alone.
 
 use std::env;
 use std::io::{self, Read};
@@ -150,9 +156,9 @@ pub struct UreqHttpClient {
     save_cookies: bool,
     /// Configured `http.extraHeader` rules (optionally URL-scoped).
     extra_headers: Vec<ExtraHeaderRule>,
-    /// Merged Git config used for credential URL matching and proxy resolution.
+    /// Merged Git config for credentials, proxy resolution, and HTTP TLS settings.
     credential_config: ConfigSet,
-    /// Environment snapshot for per-request proxy resolution (`http_proxy`, `NO_PROXY`, …).
+    /// Environment snapshot for proxy env vars and `GIT_SSL_*` path expansion.
     proxy_environment: Environment,
     /// HTTP read timeouts and low-speed abort thresholds (`http.*` config).
     transport_timeouts: HttpTransportTimeouts,
@@ -758,19 +764,545 @@ fn default_agent(_proxy: Option<ureq::Proxy>) -> ureq::Agent {
     agent_from_timeouts(None, &HttpTransportTimeouts::default())
 }
 
-fn agent_tls_config() -> ureq::tls::TlsConfig {
+fn default_compiled_tls_provider() -> ureq::tls::TlsProvider {
     #[cfg(feature = "http-ureq-native-tls")]
     {
-        use ureq::tls::{RootCerts, TlsConfig, TlsProvider};
-        TlsConfig::builder()
-            .provider(TlsProvider::NativeTls)
-            .root_certs(RootCerts::PlatformVerifier)
-            .build()
+        ureq::tls::TlsProvider::NativeTls
     }
     #[cfg(not(feature = "http-ureq-native-tls"))]
     {
-        use ureq::tls::{TlsConfig, TlsProvider};
-        TlsConfig::builder().provider(TlsProvider::Rustls).build()
+        ureq::tls::TlsProvider::Rustls
+    }
+}
+
+fn agent_tls_config() -> ureq::tls::TlsConfig {
+    use ureq::tls::{RootCerts, TlsConfig};
+    TlsConfig::builder()
+        .provider(default_compiled_tls_provider())
+        .root_certs(RootCerts::PlatformVerifier)
+        .build()
+}
+
+fn is_https_url(url: &str) -> bool {
+    url.split_once("://")
+        .is_some_and(|(scheme, _)| scheme.eq_ignore_ascii_case("https"))
+}
+
+/// Best-matching value for `http[.<url>].<variable>` (empty values mean unset).
+fn effective_http_value(config: &ConfigSet, variable: &str, repo_url: &str) -> Option<String> {
+    let entries = config::get_urlmatch_entries(config.entries(), "http", variable, repo_url);
+    let entry = entries.last()?;
+    let raw = entry.value.as_deref()?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    Some(raw.to_owned())
+}
+
+/// Git env SSL path override: `None` means the variable is unset (fall back to config);
+/// `Some(None)` means it is set but empty (replace config with unset); `Some(Some(p))` is the path.
+fn env_ssl_path(environment: &Environment, name: &str) -> Option<Option<PathBuf>> {
+    environment.var_os(name)?;
+    let raw = environment.var(name).unwrap_or_default();
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Some(None);
+    }
+    Some(Some(PathBuf::from(config::parse_path(
+        environment,
+        trimmed,
+    ))))
+}
+
+fn resolve_ssl_path(
+    environment: &Environment,
+    env_name: &str,
+    config: &ConfigSet,
+    config_var: &str,
+    repo_url: &str,
+) -> Option<PathBuf> {
+    match env_ssl_path(environment, env_name) {
+        Some(None) => None,
+        Some(Some(path)) => Some(path),
+        None => effective_http_value(config, config_var, repo_url)
+            .map(|v| PathBuf::from(config::parse_path(environment, &v))),
+    }
+}
+
+fn load_pem_trust_roots(path: &std::path::Path) -> Result<Vec<ureq::tls::Certificate<'static>>> {
+    use ureq::tls::{parse_pem, PemItem};
+    let bytes = std::fs::read(path).map_err(|e| {
+        Error::Remote(RemoteError::Http {
+            detail: format!("http.sslCAInfo '{}': {e}", path.display()),
+        })
+    })?;
+    let mut roots = Vec::new();
+    for item in parse_pem(&bytes) {
+        let item = item.map_err(|e| {
+            Error::Remote(RemoteError::Http {
+                detail: format!("http.sslCAInfo '{}': {e}", path.display()),
+            })
+        })?;
+        if let PemItem::Certificate(cert) = item {
+            roots.push(cert.to_owned());
+        }
+    }
+    Ok(roots)
+}
+
+fn load_pem_trust_roots_from_dir(
+    dir: &std::path::Path,
+) -> Result<Vec<ureq::tls::Certificate<'static>>> {
+    let mut roots = Vec::new();
+    let read_dir = std::fs::read_dir(dir).map_err(|e| {
+        Error::Remote(RemoteError::Http {
+            detail: format!("http.sslCAPath '{}': {e}", dir.display()),
+        })
+    })?;
+    for entry in read_dir {
+        let entry = entry.map_err(|e| {
+            Error::Remote(RemoteError::Http {
+                detail: format!("http.sslCAPath '{}': {e}", dir.display()),
+            })
+        })?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        roots.extend(load_pem_trust_roots(&path)?);
+    }
+    Ok(roots)
+}
+
+fn pem_looks_encrypted(bytes: &[u8]) -> bool {
+    std::str::from_utf8(bytes)
+        .ok()
+        .is_some_and(|s| s.contains("ENCRYPTED"))
+}
+
+fn client_cert_password_protected(
+    config: &ConfigSet,
+    environment: &Environment,
+    repo_url: &str,
+) -> bool {
+    if environment
+        .var_os("GIT_SSL_CERT_PASSWORD_PROTECTED")
+        .is_some()
+    {
+        return true;
+    }
+    effective_http_value(config, "sslCertPasswordProtected", repo_url)
+        .is_some_and(|v| config::parse_bool(&v).unwrap_or(false))
+}
+
+fn resolve_tls_provider(backend: Option<&str>) -> Result<ureq::tls::TlsProvider> {
+    let Some(raw) = backend else {
+        return Ok(default_compiled_tls_provider());
+    };
+    let backend = raw.trim().to_ascii_lowercase();
+    if backend.is_empty() {
+        return Ok(default_compiled_tls_provider());
+    }
+    match backend.as_str() {
+        "openssl" => Ok(ureq::tls::TlsProvider::Rustls),
+        "schannel" | "secure-transport" => {
+            #[cfg(feature = "http-ureq-native-tls")]
+            {
+                Ok(ureq::tls::TlsProvider::NativeTls)
+            }
+            #[cfg(not(feature = "http-ureq-native-tls"))]
+            {
+                Err(Error::Remote(RemoteError::Http {
+                    detail: format!(
+                        "http.sslBackend={raw}: native TLS is not compiled into this build"
+                    ),
+                }))
+            }
+        }
+        other => Err(Error::Remote(RemoteError::Http {
+            detail: format!("http.sslBackend={other}: unsupported or unavailable TLS backend"),
+        })),
+    }
+}
+
+fn load_client_cert(
+    config: &ConfigSet,
+    environment: &Environment,
+    repo_url: &str,
+) -> Result<Option<ureq::tls::ClientCert>> {
+    if client_cert_password_protected(config, environment, repo_url) {
+        return Err(Error::Remote(RemoteError::Http {
+            detail:
+                "password-protected SSL client keys are not supported (http.sslCertPasswordProtected)"
+                    .to_owned(),
+        }));
+    }
+    let cert_path = resolve_ssl_path(environment, "GIT_SSL_CERT", config, "sslCert", repo_url);
+    let key_path = resolve_ssl_path(environment, "GIT_SSL_KEY", config, "sslKey", repo_url);
+    let Some(cert_path) = cert_path else {
+        return Ok(None);
+    };
+    let cert_bytes = std::fs::read(&cert_path).map_err(|e| {
+        Error::Remote(RemoteError::Http {
+            detail: format!("http.sslCert '{}': {e}", cert_path.display()),
+        })
+    })?;
+    if pem_looks_encrypted(&cert_bytes) {
+        return Err(Error::Remote(RemoteError::Http {
+            detail: "encrypted SSL client keys are not supported".to_owned(),
+        }));
+    }
+    let key_bytes = if let Some(key_path) = key_path {
+        std::fs::read(&key_path).map_err(|e| {
+            Error::Remote(RemoteError::Http {
+                detail: format!("http.sslKey '{}': {e}", key_path.display()),
+            })
+        })?
+    } else {
+        cert_bytes.clone()
+    };
+    if pem_looks_encrypted(&key_bytes) {
+        return Err(Error::Remote(RemoteError::Http {
+            detail: "encrypted SSL client keys are not supported".to_owned(),
+        }));
+    }
+    use ureq::tls::{parse_pem, ClientCert, PemItem, PrivateKey};
+    let mut chain = Vec::new();
+    for item in parse_pem(&cert_bytes) {
+        let item = item.map_err(|e| {
+            Error::Remote(RemoteError::Http {
+                detail: format!("http.sslCert '{}': {e}", cert_path.display()),
+            })
+        })?;
+        if let PemItem::Certificate(cert) = item {
+            chain.push(cert.to_owned());
+        }
+    }
+    if chain.is_empty() {
+        return Err(Error::Remote(RemoteError::Http {
+            detail: format!(
+                "http.sslCert '{}': no client certificate found in PEM data",
+                cert_path.display()
+            ),
+        }));
+    }
+    let private_key = PrivateKey::from_pem(&key_bytes).map_err(|e| {
+        Error::Remote(RemoteError::Http {
+            detail: format!("http.sslKey: {e}"),
+        })
+    })?;
+    match client_key_match_result(&chain, &private_key) {
+        ClientKeyMatch::Match => {}
+        ClientKeyMatch::Mismatch => {
+            return Err(Error::Remote(RemoteError::Http {
+                detail: "http.sslCert and http.sslKey do not match".to_owned(),
+            }));
+        }
+        ClientKeyMatch::Unknown => {
+            return Err(Error::Remote(RemoteError::Http {
+                detail: "http.sslCert and http.sslKey could not be validated as a matching pair"
+                    .to_owned(),
+            }));
+        }
+    }
+    Ok(Some(ClientCert::new_with_certs(&chain, private_key)))
+}
+
+enum ClientKeyMatch {
+    Match,
+    Mismatch,
+    Unknown,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PublicKeyAlgorithm {
+    Rsa,
+    Ec,
+    Unknown,
+}
+
+const EC_PUBLIC_KEY_OID: &[u8] = &[0x06, 0x07, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01];
+const EC_NAMED_CURVE_OID_PREFIX: &[u8] = &[0x06, 0x08, 0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x03];
+const RSA_ENCRYPTION_OID: &[u8] = &[
+    0x06, 0x09, 0x2A, 0x86, 0x48, 0x86, 0xF7, 0x0D, 0x01, 0x01, 0x01,
+];
+
+fn detect_public_key_algorithm(der: &[u8]) -> PublicKeyAlgorithm {
+    if der
+        .windows(EC_PUBLIC_KEY_OID.len())
+        .any(|w| w == EC_PUBLIC_KEY_OID)
+        || der
+            .windows(EC_NAMED_CURVE_OID_PREFIX.len())
+            .any(|w| w == EC_NAMED_CURVE_OID_PREFIX)
+    {
+        PublicKeyAlgorithm::Ec
+    } else if der
+        .windows(RSA_ENCRYPTION_OID.len())
+        .any(|w| w == RSA_ENCRYPTION_OID)
+    {
+        PublicKeyAlgorithm::Rsa
+    } else {
+        PublicKeyAlgorithm::Unknown
+    }
+}
+
+/// Compare the leaf certificate SPKI with the private key (RSA modulus or EC public point).
+fn client_key_match_result(
+    chain: &[ureq::tls::Certificate<'static>],
+    key: &ureq::tls::PrivateKey<'static>,
+) -> ClientKeyMatch {
+    let cert_der = chain[0].der();
+    let key_der = key.der();
+    let cert_alg = detect_public_key_algorithm(cert_der);
+    let key_alg = detect_public_key_algorithm(key_der);
+
+    match (cert_alg, key_alg) {
+        (PublicKeyAlgorithm::Rsa, PublicKeyAlgorithm::Rsa) => {
+            match (
+                rsa_modulus_from_cert_spki(cert_der),
+                rsa_modulus_from_private_key(key_der),
+            ) {
+                (Some(cert_mod), Some(key_mod)) => {
+                    if cert_mod == key_mod {
+                        ClientKeyMatch::Match
+                    } else {
+                        ClientKeyMatch::Mismatch
+                    }
+                }
+                _ => ClientKeyMatch::Unknown,
+            }
+        }
+        (PublicKeyAlgorithm::Ec, PublicKeyAlgorithm::Ec) => {
+            match (
+                ec_public_point_from_cert_spki(cert_der),
+                ec_public_point_from_private_key(key_der),
+            ) {
+                (Some(cert_point), Some(key_point)) => {
+                    if cert_point == key_point {
+                        ClientKeyMatch::Match
+                    } else {
+                        ClientKeyMatch::Mismatch
+                    }
+                }
+                _ => ClientKeyMatch::Unknown,
+            }
+        }
+        (PublicKeyAlgorithm::Unknown, PublicKeyAlgorithm::Unknown) => ClientKeyMatch::Unknown,
+        _ => ClientKeyMatch::Mismatch,
+    }
+}
+
+fn bit_string_payload_without_unused_bits(bit_string_tlv: &[u8]) -> Option<Vec<u8>> {
+    if bit_string_tlv.first() != Some(&0x03) {
+        return None;
+    }
+    let (body_start, body_len) = der_content_slice(bit_string_tlv, 1)?;
+    let body = bit_string_tlv.get(body_start..body_start + body_len)?;
+    body.get(1..).map(<[u8]>::to_vec)
+}
+
+fn spki_public_key_after_oid(der: &[u8], algorithm_oid: &[u8]) -> Option<Vec<u8>> {
+    let oid_pos = der
+        .windows(algorithm_oid.len())
+        .position(|w| w == algorithm_oid)?;
+    let mut pos = oid_pos + algorithm_oid.len();
+    while pos < der.len() {
+        let (tag, body_start, body_len) = der_tlv_at(der, pos)?;
+        if tag == 0x03 {
+            return bit_string_payload_without_unused_bits(der.get(pos..)?);
+        }
+        pos = body_start + body_len;
+    }
+    None
+}
+
+fn ec_public_point_from_cert_spki(cert_der: &[u8]) -> Option<Vec<u8>> {
+    spki_public_key_after_oid(cert_der, EC_PUBLIC_KEY_OID)
+}
+
+fn ec_public_point_from_private_key(key_der: &[u8]) -> Option<Vec<u8>> {
+    if let Some(inner) = pkcs8_private_key_octets(key_der) {
+        if let Some(point) = ec_public_point_from_ec_private_key(&inner) {
+            return Some(point);
+        }
+    }
+    ec_public_point_from_ec_private_key(key_der).or_else(|| ec_public_point_a1_bit_string(key_der))
+}
+
+fn ec_public_point_a1_bit_string(der: &[u8]) -> Option<Vec<u8>> {
+    let mut pos = 0usize;
+    let mut found = None;
+    while pos < der.len() {
+        let (tag, body_start, body_len) = der_tlv_at(der, pos)?;
+        if tag == 0xA1 {
+            let inner = der.get(body_start..body_start + body_len)?;
+            if inner.first() == Some(&0x03) {
+                found = bit_string_payload_without_unused_bits(inner);
+            }
+        } else if tag & 0x20 != 0 {
+            found = found.or_else(|| {
+                ec_public_point_a1_bit_string(der.get(body_start..body_start + body_len)?)
+            });
+        }
+        pos = body_start + body_len;
+    }
+    found
+}
+
+fn ec_public_point_from_ec_private_key(ec_private_key: &[u8]) -> Option<Vec<u8>> {
+    let (_, seq_start, seq_len) = der_tlv_at(ec_private_key, 0)?;
+    let mut pos = seq_start;
+    let end = seq_start + seq_len;
+    while pos < end {
+        let (tag, body_start, body_len) = der_tlv_at(ec_private_key, pos)?;
+        if tag == 0xA1 {
+            let body = ec_private_key.get(body_start..body_start + body_len)?;
+            if body.first() == Some(&0x03) {
+                return bit_string_payload_without_unused_bits(body);
+            }
+        }
+        pos = body_start + body_len;
+    }
+    None
+}
+
+fn rsa_modulus_from_cert_spki(cert_der: &[u8]) -> Option<Vec<u8>> {
+    let pkcs1 = extract_subject_public_key_pkcs1(cert_der)?;
+    der_integers(&pkcs1).into_iter().next()
+}
+
+fn rsa_modulus_from_private_key(key_der: &[u8]) -> Option<Vec<u8>> {
+    let pkcs1 = pkcs8_private_key_octets(key_der).unwrap_or_else(|| key_der.to_vec());
+    der_integers(&pkcs1).into_iter().nth(1)
+}
+
+fn extract_subject_public_key_pkcs1(cert_der: &[u8]) -> Option<Vec<u8>> {
+    spki_public_key_after_oid(cert_der, RSA_ENCRYPTION_OID)
+}
+
+fn pkcs8_private_key_octets(key_der: &[u8]) -> Option<Vec<u8>> {
+    let (_, start, len) = der_tlv_at(key_der, 0)?;
+    let mut pos = start;
+    let end = start + len;
+    let mut index = 0usize;
+    while pos < end {
+        let (tag, body_start, body_len) = der_tlv_at(key_der, pos)?;
+        if tag == 0x04 && index == 1 {
+            return key_der
+                .get(body_start..body_start + body_len)
+                .map(<[u8]>::to_vec);
+        }
+        index += 1;
+        pos = body_start + body_len;
+    }
+    None
+}
+
+fn der_tlv_at(data: &[u8], pos: usize) -> Option<(u8, usize, usize)> {
+    let tag = *data.get(pos)?;
+    let (body_start, body_len) = der_content_slice(data, pos + 1)?;
+    if body_start + body_len > data.len() {
+        return None;
+    }
+    Some((tag, body_start, body_len))
+}
+
+fn der_content_slice(data: &[u8], pos: usize) -> Option<(usize, usize)> {
+    let len_byte = *data.get(pos)?;
+    if len_byte & 0x80 == 0 {
+        return Some((pos + 1, usize::from(len_byte)));
+    }
+    let nbytes = usize::from(len_byte & 0x7f);
+    let mut len = 0usize;
+    for i in 0..nbytes {
+        len = (len << 8) | usize::from(*data.get(pos + 1 + i)?);
+    }
+    Some((pos + 1 + nbytes, len))
+}
+
+fn der_integers(data: &[u8]) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    collect_der_integers(data, &mut out);
+    out
+}
+
+fn collect_der_integers(data: &[u8], out: &mut Vec<Vec<u8>>) {
+    let mut pos = 0usize;
+    while pos < data.len() {
+        let Some((tag, body_start, body_len)) = der_tlv_at(data, pos) else {
+            break;
+        };
+        let body = &data[body_start..body_start + body_len];
+        if tag == 0x02 {
+            out.push(body.to_vec());
+        } else {
+            collect_der_integers(body, out);
+        }
+        pos = body_start + body_len;
+    }
+}
+
+fn tls_config_for_repo_url(
+    config: &ConfigSet,
+    environment: &Environment,
+    repo_url: &str,
+) -> Result<ureq::tls::TlsConfig> {
+    use ureq::tls::{RootCerts, TlsConfig};
+
+    let verify = if environment.var_os("GIT_SSL_NO_VERIFY").is_some() {
+        false
+    } else if let Some(raw) = effective_http_value(config, "sslVerify", repo_url) {
+        config::parse_bool(&raw).map_err(|e| {
+            Error::Remote(RemoteError::Http {
+                detail: format!("http.sslVerify: {e}"),
+            })
+        })?
+    } else {
+        true
+    };
+
+    let backend = effective_http_value(config, "sslBackend", repo_url);
+    let provider = resolve_tls_provider(backend.as_deref())?;
+
+    let ca_info = resolve_ssl_path(environment, "GIT_SSL_CAINFO", config, "sslCAInfo", repo_url);
+    let ca_path = resolve_ssl_path(environment, "GIT_SSL_CAPATH", config, "sslCAPath", repo_url);
+
+    let mut root_certs = Vec::new();
+    if let Some(path) = ca_info {
+        root_certs.extend(load_pem_trust_roots(&path)?);
+    }
+    if let Some(dir) = ca_path {
+        root_certs.extend(load_pem_trust_roots_from_dir(&dir)?);
+    }
+
+    let mut builder = TlsConfig::builder().provider(provider);
+    if !verify {
+        builder = builder.disable_verification(true);
+    }
+    if !root_certs.is_empty() {
+        builder = builder.root_certs(RootCerts::new_with_certs(&root_certs));
+    } else if verify {
+        builder = builder.root_certs(RootCerts::PlatformVerifier);
+    }
+    if let Some(client_cert) = load_client_cert(config, environment, repo_url)? {
+        builder = builder.client_cert(Some(client_cert));
+    }
+    Ok(builder.build())
+}
+
+impl UreqHttpClient {
+    fn apply_tls_for_url<B>(
+        &self,
+        req: ureq::RequestBuilder<B>,
+        request_url: &str,
+    ) -> Result<ureq::RequestBuilder<B>> {
+        if !is_https_url(request_url) {
+            return Ok(req);
+        }
+        let repo_url = repo_url_from_request_url(request_url);
+        let tls =
+            tls_config_for_repo_url(&self.credential_config, &self.proxy_environment, repo_url)?;
+        Ok(req.config().tls_config(tls).build())
     }
 }
 
@@ -1032,6 +1564,9 @@ impl UreqHttpClient {
             for (name, value) in self.extra_headers_for_url(url) {
                 req = req.header(&name, &value);
             }
+            let req = self
+                .apply_tls_for_url(req, url)
+                .map_err(map_config_err_to_ureq)?;
             self.with_request_proxy(req, proxy.clone()).call()
         });
         finish(url, result, &self.effective_timeouts())
@@ -1046,7 +1581,7 @@ impl UreqHttpClient {
         git_protocol: Option<&str>,
         auth: RequestAuth<'_>,
         proxy: Option<ureq::Proxy>,
-    ) -> ureq::RequestBuilder<ureq::typestate::WithBody> {
+    ) -> Result<ureq::RequestBuilder<ureq::typestate::WithBody>> {
         let mut req = self
             .agent
             .post(url)
@@ -1068,7 +1603,8 @@ impl UreqHttpClient {
         for (name, value) in self.extra_headers_for_url(url) {
             req = req.header(&name, &value);
         }
-        self.with_request_proxy(req, proxy)
+        let req = self.apply_tls_for_url(req, url)?;
+        Ok(self.with_request_proxy(req, proxy))
     }
 
     fn do_post_open(
@@ -1086,6 +1622,7 @@ impl UreqHttpClient {
         let proxy = self.request_proxy(url)?;
         let result = retry_interrupted(idempotent, cancel_ref, || {
             self.post_request(url, content_type, accept, git_protocol, auth, proxy.clone())
+                .map_err(map_config_err_to_ureq)?
                 .send(body)
         });
         match result {
@@ -1111,6 +1648,7 @@ impl UreqHttpClient {
         let proxy = self.request_proxy(url)?;
         let result = retry_interrupted(idempotent, cancel_ref, || {
             self.post_request(url, content_type, accept, git_protocol, auth, proxy.clone())
+                .map_err(map_config_err_to_ureq)?
                 .send(body)
         });
         finish(url, result, &self.effective_timeouts())
@@ -1236,7 +1774,7 @@ impl UreqHttpClient {
         request: &HttpRequest<'_>,
         auth: RequestAuth<'_>,
         proxy: Option<ureq::Proxy>,
-    ) -> ureq::RequestBuilder<B> {
+    ) -> Result<ureq::RequestBuilder<B>> {
         req = req.header("User-Agent", &self.user_agent);
         if let Some(a) = auth.authorization {
             req = req.header("Authorization", a);
@@ -1256,7 +1794,8 @@ impl UreqHttpClient {
         if request.long_running {
             req = req.config().timeout_global(None).build();
         }
-        self.with_request_proxy(req, proxy)
+        let req = self.apply_tls_for_url(req, request.url)?;
+        Ok(self.with_request_proxy(req, proxy))
     }
 
     fn effective_timeouts(&self) -> HttpTransportTimeouts {
@@ -1299,18 +1838,23 @@ impl UreqHttpClient {
         let result = retry_interrupted(idempotent, cancel_ref, || match request.method {
             HttpMethod::Get => self
                 .decorate(self.agent.get(url), request, auth, proxy.clone())
+                .map_err(map_config_err_to_ureq)?
                 .call(),
             HttpMethod::Head => self
                 .decorate(self.agent.head(url), request, auth, proxy.clone())
+                .map_err(map_config_err_to_ureq)?
                 .call(),
             HttpMethod::Post => self
                 .decorate(self.agent.post(url), request, auth, proxy.clone())
+                .map_err(map_config_err_to_ureq)?
                 .send(request.body),
             HttpMethod::Patch => self
                 .decorate(self.agent.patch(url), request, auth, proxy.clone())
+                .map_err(map_config_err_to_ureq)?
                 .send(request.body),
             HttpMethod::Put => self
                 .decorate(self.agent.put(url), request, auth, proxy.clone())
+                .map_err(map_config_err_to_ureq)?
                 .send(request.body),
             HttpMethod::Delete => self
                 .decorate(
@@ -1319,6 +1863,7 @@ impl UreqHttpClient {
                     auth,
                     proxy.clone(),
                 )
+                .map_err(map_config_err_to_ureq)?
                 .send(request.body),
         });
         let resp = result.map_err(|e| map_ureq_transport_error(url, e, &timeouts))?;
@@ -1714,7 +2259,7 @@ impl HttpClient for UreqHttpClient {
                 git_protocol,
                 request_auth_for_initial(&auth),
                 proxy,
-            )
+            )?
             .send(ureq::SendBody::from_reader(body));
         let (head, reader) = match result {
             Ok(resp) => open_response_body(resp, &self.effective_timeouts())?,
@@ -1995,6 +2540,13 @@ fn map_http_read_error(url: &str, err: std::io::Error, timeouts: &HttpTransportT
     } else {
         http_transport_error(url, err)
     }
+}
+
+fn map_config_err_to_ureq(err: Error) -> ureq::Error {
+    ureq::Error::Io(std::io::Error::new(
+        std::io::ErrorKind::InvalidInput,
+        err.to_string(),
+    ))
 }
 
 fn http_status_error(url: &str, status: u16) -> Error {
@@ -2786,23 +3338,385 @@ mod tests {
     #[cfg(feature = "http-ureq-native-tls")]
     #[test]
     fn agent_tls_provider_is_native_when_native_tls_feature_enabled() {
-        use ureq::tls::TlsProvider;
+        use ureq::tls::{RootCerts, TlsProvider};
 
         let agent = super::agent_from_timeouts(None, &HttpTransportTimeouts::default());
+        let tls = agent.config().tls_config();
         assert_eq!(
-            agent.config().tls_config().provider(),
+            tls.provider(),
             TlsProvider::NativeTls,
             "http-ureq-native-tls must select ureq NativeTls (Secure Transport on macOS)"
         );
+        assert!(matches!(tls.root_certs(), RootCerts::PlatformVerifier));
     }
 
     #[cfg(all(feature = "http-ureq", not(feature = "http-ureq-native-tls")))]
     #[test]
     fn agent_tls_provider_is_rustls_without_native_tls_feature() {
-        use ureq::tls::TlsProvider;
+        use ureq::tls::{RootCerts, TlsProvider};
 
         let agent = super::agent_from_timeouts(None, &HttpTransportTimeouts::default());
-        assert_eq!(agent.config().tls_config().provider(), TlsProvider::Rustls);
+        let tls = agent.config().tls_config();
+        assert_eq!(tls.provider(), TlsProvider::Rustls);
+        assert!(
+            matches!(tls.root_certs(), RootCerts::PlatformVerifier),
+            "default agent must trust the OS certificate store"
+        );
+    }
+
+    #[test]
+    fn ssl_verify_precedence_global_url_scoped_then_env() {
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslVerify", "true")
+            .expect("global");
+        cfg.add_command_override("http.https://example.com/.sslVerify", "true")
+            .expect("url");
+        let env = Environment::empty();
+        let tls = super::tls_config_for_repo_url(&cfg, &env, "https://example.com/repo.git")
+            .expect("tls");
+        assert!(!tls.disable_verification());
+
+        cfg.add_command_override("http.https://example.com/.sslVerify", "false")
+            .expect("scoped off");
+        let tls = super::tls_config_for_repo_url(&cfg, &env, "https://example.com/repo.git")
+            .expect("tls");
+        assert!(tls.disable_verification());
+
+        let env = Environment::from_vars(
+            [("GIT_SSL_NO_VERIFY", "1")]
+                .into_iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
+            std::env::current_dir().unwrap_or_default(),
+        );
+        cfg.add_command_override("http.sslVerify", "true")
+            .expect("global on");
+        let tls =
+            super::tls_config_for_repo_url(&cfg, &env, "https://other.test/r.git").expect("tls");
+        assert!(
+            tls.disable_verification(),
+            "GIT_SSL_NO_VERIFY must disable verification regardless of value"
+        );
+    }
+
+    #[test]
+    fn ssl_ca_info_env_overrides_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ca = dir.path().join("ca.pem");
+        let openssl = std::process::Command::new("openssl")
+            .args([
+                "req",
+                "-x509",
+                "-newkey",
+                "rsa:2048",
+                "-keyout",
+                ca.to_str().expect("path"),
+                "-out",
+                ca.to_str().expect("path"),
+                "-days",
+                "1",
+                "-nodes",
+                "-subj",
+                "/CN=TestCA",
+            ])
+            .status()
+            .expect("spawn openssl");
+        if !openssl.success() {
+            eprintln!("openssl unavailable, skipping ssl_ca_info_env_overrides_config");
+            return;
+        }
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCAInfo", "/wrong/ca.pem")
+            .expect("cfg");
+        let env = Environment::from_vars(
+            [("GIT_SSL_CAINFO", ca.to_str().expect("utf8 path"))]
+                .into_iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
+            dir.path().to_path_buf(),
+        );
+        let tls =
+            super::tls_config_for_repo_url(&cfg, &env, "https://example.com/r.git").expect("tls");
+        use ureq::tls::RootCerts;
+        assert!(matches!(tls.root_certs(), RootCerts::Specific(_)));
+    }
+
+    #[test]
+    fn ssl_verify_false_disables_verification() {
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslVerify", "false")
+            .expect("off");
+        let tls = super::tls_config_for_repo_url(
+            &cfg,
+            &Environment::empty(),
+            "https://example.com/r.git",
+        )
+        .expect("tls");
+        assert!(tls.disable_verification());
+    }
+
+    fn env_with_empty(var: &str, dir: &std::path::Path) -> Environment {
+        Environment::from_vars(
+            [(var, "")]
+                .into_iter()
+                .map(|(k, v)| (std::ffi::OsString::from(k), std::ffi::OsString::from(v))),
+            dir.to_path_buf(),
+        )
+    }
+
+    #[test]
+    fn empty_git_ssl_cainfo_unsets_configured_bundle() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let ca = dir.path().join("ca.pem");
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCAInfo", ca.to_str().expect("utf8"))
+            .expect("cfg");
+        use ureq::tls::RootCerts;
+        let tls = super::tls_config_for_repo_url(
+            &cfg,
+            &env_with_empty("GIT_SSL_CAINFO", dir.path()),
+            "https://example.com/r.git",
+        )
+        .expect("tls");
+        assert!(matches!(tls.root_certs(), RootCerts::PlatformVerifier));
+    }
+
+    #[test]
+    fn empty_git_ssl_capath_unsets_configured_directory() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCAPath", dir.path().to_str().expect("dir"))
+            .expect("capath");
+        use ureq::tls::RootCerts;
+        let tls = super::tls_config_for_repo_url(
+            &cfg,
+            &env_with_empty("GIT_SSL_CAPATH", dir.path()),
+            "https://example.com/r.git",
+        )
+        .expect("tls");
+        assert!(matches!(tls.root_certs(), RootCerts::PlatformVerifier));
+    }
+
+    #[test]
+    fn empty_git_ssl_cert_unsets_configured_client_cert() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pem = dir.path().join("client.pem");
+        std::fs::write(&pem, b"x").expect("write");
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCert", pem.to_str().expect("pem"))
+            .expect("cert");
+        assert!(super::load_client_cert(
+            &cfg,
+            &env_with_empty("GIT_SSL_CERT", dir.path()),
+            "https://example.com/r.git",
+        )
+        .expect("cert")
+        .is_none());
+    }
+
+    #[test]
+    fn empty_git_ssl_key_unsets_configured_client_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let pem = dir.path().join("client.pem");
+        std::fs::write(&pem, b"x").expect("write");
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslKey", pem.to_str().expect("pem"))
+            .expect("key");
+        assert!(super::load_client_cert(
+            &cfg,
+            &env_with_empty("GIT_SSL_KEY", dir.path()),
+            "https://example.com/r.git",
+        )
+        .expect("cert")
+        .is_none());
+    }
+
+    #[test]
+    fn client_cert_rejects_key_only_pem_without_certificate() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let key_path = dir.path().join("key.pem");
+        let status = std::process::Command::new("openssl")
+            .args(["genrsa", "-out"])
+            .arg(&key_path)
+            .arg("2048")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .expect("openssl");
+        if !status.success() {
+            return;
+        }
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCert", key_path.to_str().expect("path"))
+            .expect("cfg");
+        let err = super::load_client_cert(&cfg, &Environment::empty(), "https://example.com/r.git")
+            .expect_err("key-only PEM must not build a client cert");
+        assert!(
+            matches!(err, Error::Remote(RemoteError::Http { .. })),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn client_cert_rejects_mismatched_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cert_path = dir.path().join("cert.pem");
+        let key_path = dir.path().join("wrong-key.pem");
+        let right_key = dir.path().join("right-key.pem");
+        for (out, name) in [(&right_key, "right"), (&key_path, "wrong")] {
+            let ok = std::process::Command::new("openssl")
+                .args(["genrsa", "-out"])
+                .arg(out)
+                .arg("2048")
+                .status()
+                .expect("openssl genrsa");
+            if !ok.success() {
+                return;
+            }
+            let _ = name;
+        }
+        let sign = std::process::Command::new("openssl")
+            .args(["req", "-new", "-key"])
+            .arg(&right_key)
+            .args(["-x509", "-days", "1", "-subj", "/CN=test", "-out"])
+            .arg(&cert_path)
+            .status()
+            .expect("openssl req");
+        if !sign.success() {
+            return;
+        }
+        let cert_bytes = std::fs::read(&cert_path).expect("cert");
+        let wrong_key_bytes = std::fs::read(&key_path).expect("wrong key");
+        use ureq::tls::{Certificate, PrivateKey};
+        let cert = Certificate::from_pem(&cert_bytes).expect("parse cert");
+        let wrong = PrivateKey::from_pem(&wrong_key_bytes).expect("parse wrong key");
+        let cert_mod = super::rsa_modulus_from_cert_spki(cert.der());
+        let key_mod = super::rsa_modulus_from_private_key(wrong.der());
+        assert!(
+            cert_mod.is_some() && key_mod.is_some() && cert_mod != key_mod,
+            "test fixture must produce distinct moduli: cert={cert_mod:?} key={key_mod:?}"
+        );
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCert", cert_path.to_str().expect("cert"))
+            .expect("cert");
+        cfg.add_command_override("http.sslKey", key_path.to_str().expect("key"))
+            .expect("key");
+        let err = super::load_client_cert(&cfg, &Environment::empty(), "https://example.com/r.git")
+            .expect_err("mismatched key");
+        assert!(
+            matches!(err, Error::Remote(RemoteError::Http { .. })),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn client_cert_rejects_mismatched_ecdsa_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let cert_path = dir.path().join("cert.pem");
+        let wrong_key_path = dir.path().join("wrong.key");
+        let sign_key_path = dir.path().join("sign.key");
+        for (out, args) in [
+            (
+                &sign_key_path,
+                [
+                    "ecparam",
+                    "-name",
+                    "prime256v1",
+                    "-genkey",
+                    "-noout",
+                    "-out",
+                ],
+            ),
+            (
+                &wrong_key_path,
+                [
+                    "ecparam",
+                    "-name",
+                    "prime256v1",
+                    "-genkey",
+                    "-noout",
+                    "-out",
+                ],
+            ),
+        ] {
+            let mut cmd = std::process::Command::new("openssl");
+            cmd.args(args).arg(out);
+            if !cmd.status().expect("openssl ecparam").success() {
+                return;
+            }
+        }
+        let sign = std::process::Command::new("openssl")
+            .args(["req", "-new", "-x509", "-key"])
+            .arg(&sign_key_path)
+            .args(["-subj", "/CN=test", "-days", "1", "-out"])
+            .arg(&cert_path)
+            .status()
+            .expect("openssl req");
+        if !sign.success() {
+            return;
+        }
+        let cert_bytes = std::fs::read(&cert_path).expect("cert");
+        let wrong_key_bytes = std::fs::read(&wrong_key_path).expect("wrong key");
+        use ureq::tls::{Certificate, PrivateKey};
+        let cert = Certificate::from_pem(&cert_bytes).expect("parse cert");
+        let wrong = PrivateKey::from_pem(&wrong_key_bytes).expect("parse wrong key");
+        let cert_point = super::ec_public_point_from_cert_spki(cert.der());
+        let key_point = super::ec_public_point_from_private_key(wrong.der());
+        assert!(
+            cert_point.is_some() && key_point.is_some() && cert_point != key_point,
+            "fixture must be prime256v1 with distinct public points: cert={cert_point:?} key={key_point:?}"
+        );
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCert", cert_path.to_str().expect("cert"))
+            .expect("cert");
+        cfg.add_command_override("http.sslKey", wrong_key_path.to_str().expect("key"))
+            .expect("key");
+        let err = super::load_client_cert(&cfg, &Environment::empty(), "https://example.com/r.git")
+            .expect_err("mismatched ecdsa key");
+        assert!(
+            matches!(err, Error::Remote(RemoteError::Http { .. })),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn client_cert_accepts_matching_ecdsa_key() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let key_path = dir.path().join("client.key");
+        let cert_path = dir.path().join("cert.pem");
+        let ok = std::process::Command::new("openssl")
+            .args([
+                "ecparam",
+                "-name",
+                "prime256v1",
+                "-genkey",
+                "-noout",
+                "-out",
+            ])
+            .arg(&key_path)
+            .status()
+            .expect("openssl ecparam");
+        if !ok.success() {
+            return;
+        }
+        let sign = std::process::Command::new("openssl")
+            .args(["req", "-new", "-x509", "-key"])
+            .arg(&key_path)
+            .args(["-subj", "/CN=test", "-days", "1", "-out"])
+            .arg(&cert_path)
+            .status()
+            .expect("openssl req");
+        if !sign.success() {
+            return;
+        }
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("http.sslCert", cert_path.to_str().expect("cert"))
+            .expect("cert");
+        cfg.add_command_override("http.sslKey", key_path.to_str().expect("key"))
+            .expect("key");
+        assert!(
+            super::load_client_cert(&cfg, &Environment::empty(), "https://example.com/r.git")
+                .expect("matching ecdsa pair")
+                .is_some()
+        );
     }
 
     #[test]

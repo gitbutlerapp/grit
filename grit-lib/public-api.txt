@@ -5940,13 +5940,13 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::AttrPathspecError
 pub grit_lib::error::AuthFailure::CredentialsUnavailable
 pub grit_lib::error::AuthFailure::CredentialsUnavailable::detail: alloc::string::String
 pub grit_lib::error::AuthFailure::CredentialsUnavailable::helpers: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::AuthFailure::MechanismFailed
+pub grit_lib::error::AuthFailure::MechanismFailed::detail: alloc::string::String
+pub grit_lib::error::AuthFailure::MechanismFailed::scheme: alloc::string::String
 pub grit_lib::error::AuthFailure::NoCredentialProvider
 pub grit_lib::error::AuthFailure::Rejected
 pub grit_lib::error::AuthFailure::UnsupportedScheme
 pub grit_lib::error::AuthFailure::UnsupportedScheme::schemes: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::error::AuthFailure::MechanismFailed
-pub grit_lib::error::AuthFailure::MechanismFailed::scheme: alloc::string::String
-pub grit_lib::error::AuthFailure::MechanismFailed::detail: alloc::string::String
 pub grit_lib::error::AuthFailure::UnusableCredentials
 pub grit_lib::error::AuthFailure::UrlNotDescribable
 impl grit_lib::error::AuthFailure
@@ -21824,8 +21824,8 @@ pub grit_lib::remote::push_report::PushRefStatus::RejectFetchFirst
 pub grit_lib::remote::push_report::PushRefStatus::RejectNeedsForce
 pub grit_lib::remote::push_report::PushRefStatus::RejectNonFastForward
 pub grit_lib::remote::push_report::PushRefStatus::RejectRemoteRefMissing
-pub grit_lib::remote::push_report::PushRefStatus::RejectStale
 pub grit_lib::remote::push_report::PushRefStatus::RejectRemoteUpdated
+pub grit_lib::remote::push_report::PushRefStatus::RejectStale
 pub grit_lib::remote::push_report::PushRefStatus::RemoteRejected
 pub grit_lib::remote::push_report::PushRefStatus::UpToDate
 impl grit_lib::remote::push_report::PushRefStatus

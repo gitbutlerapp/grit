@@ -115,7 +115,7 @@
 //! | Feature | Default | Description |
 //! | ------- | ------- | ----------- |
 //! | *(none)* | — | Core library: ODB, refs, index, diff, merge, local transport |
-//! | `http-ureq` | disabled | [`ureq`](https://docs.rs/ureq) HTTP client for smart-HTTP fetch/push (rustls) |
+//! | `http-ureq` | disabled | [`ureq`](https://docs.rs/ureq) HTTP client for smart-HTTP fetch/push (rustls + OS trust roots) |
 //! | `http-ureq-native-tls` | disabled | Platform TLS for `http-ureq` (Secure Transport on macOS); use instead of rustls on Apple targets |
 //! | `test-support` | disabled | Unstable test_support module for workspace tests and internal tooling only (outside semver) |
 //! | `unstable-hosting` | disabled | **Unstable, outside semver.** Clients and server engine for grit hosting services: `remote::snapshot_checkout`, `remote::grit_server_{auth,share,space,sync}`, `remote::github_auth` and `Repository::snapshot_checkouts`. May change in any release, including patch releases; pin an exact version if you enable it |

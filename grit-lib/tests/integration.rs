@@ -1454,9 +1454,6 @@ mod push_fast_deep_history;
 #[path = "push_flags_git_compat.rs"]
 mod push_flags_git_compat;
 #[cfg(feature = "full-tests")]
-#[path = "push_force_if_includes.rs"]
-mod push_force_if_includes;
-#[cfg(feature = "full-tests")]
 #[path = "push_lease_git_compat.rs"]
 mod push_lease_git_compat;
 #[cfg(feature = "full-tests")]

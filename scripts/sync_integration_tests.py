@@ -72,6 +72,8 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "stash_apply_tracked_deletion_issue_2570"),
     ("grit-lib", "one_form_handles_git_compat"),
     ("grit-lib", "text_diff_options"),
+    ("grit-lib", "options_request_builders_coverage"),
+    ("grit-cli", "diff_hunk_funcname_context"),
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",

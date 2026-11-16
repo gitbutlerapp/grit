@@ -141,7 +141,10 @@ impl PinnedConnection {
         } else {
             path_query.to_string()
         };
-        let mut req = format!("{method} {request_target} HTTP/1.1\r\nHost: {}\r\n", self.host);
+        let mut req = format!(
+            "{method} {request_target} HTTP/1.1\r\nHost: {}\r\n",
+            self.host
+        );
         req.push_str("Connection: keep-alive\r\n");
         if !self.authenticated {
             match auth {
@@ -220,10 +223,7 @@ fn absolute_request_uri(origin: &Url, path_query: &str) -> String {
     )
 }
 
-fn connect_to_plain_http_proxy(
-    proxy: &Url,
-    timeouts: &HttpTransportTimeouts,
-) -> Result<IoStream> {
+fn connect_to_plain_http_proxy(proxy: &Url, timeouts: &HttpTransportTimeouts) -> Result<IoStream> {
     let proxy_host = proxy
         .host_str()
         .ok_or_else(|| transport_err("proxy", "missing host"))?;
@@ -462,7 +462,7 @@ mod tests {
         );
     }
 
-  fn read_first_line(stream: &mut TcpStream) -> String {
+    fn read_first_line(stream: &mut TcpStream) -> String {
         let mut buf = [0u8; 4096];
         let n = stream.read(&mut buf).unwrap_or(0);
         String::from_utf8_lossy(&buf[..n])
@@ -503,9 +503,7 @@ mod tests {
             if let Ok((mut s, _)) = listener.accept() {
                 let line = read_first_line(&mut s);
                 let _ = tx.send(line);
-                let _ = s.write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n",
-                );
+                let _ = s.write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n");
             }
         });
         let proxy = Url::parse(&format!("http://127.0.0.1:{proxy_port}")).unwrap();
@@ -582,7 +580,10 @@ mod tests {
             .request("GET", "/info/refs", &[], None, AuthSend::Skip)
             .expect("first request");
         assert_eq!(first.status, 407);
-        assert_eq!(rx.recv_timeout(Duration::from_secs(5)).unwrap(), "challenge");
+        assert_eq!(
+            rx.recv_timeout(Duration::from_secs(5)).unwrap(),
+            "challenge"
+        );
         let _ = conn.request(
             "GET",
             "/info/refs",

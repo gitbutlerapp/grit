@@ -74,15 +74,7 @@ A remote that was reached but aborts the conversation itself fails with [`Remote
 
 HTTP remotes need an [`HttpClient`](rustdoc:grit_lib::remote::transport::http::HttpClient). Implement [`HttpClientFactory`](rustdoc:grit_lib::remote::HttpClientFactory) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider)). The `grit` binary on macOS enables `http-ureq-native-tls` (Secure Transport) for HTTPS throughput; other platforms use rustls unless you opt into `http-ureq-native-tls` when depending on `grit-lib`.
 
-With `http-ureq`, [`UreqHttpClient::from_config`](rustdoc:grit_lib::remote::transport::http::ureq_client::UreqHttpClient::from_config) resolves a proxy **per request URL** from Git config and the [`Environment`](rustdoc:grit_lib::environment::Environment) snapshot you pass in (not from ambient `std::env`):
-
-| Source (most specific wins) | Keys |
-| --- | --- |
-| Config | `http.<url>.proxy`, then `http.proxy`. An empty winning value disables proxying, including env. |
-| Environment (when no config applies) | For `https` remotes: `https_proxy` / `HTTPS_PROXY`, then `all_proxy` / `ALL_PROXY`. For `http` remotes: `http_proxy` / `HTTP_PROXY`, then `all_proxy` / `ALL_PROXY`. |
-| Bypass list | `NO_PROXY` / `no_proxy` (comma-separated patterns, same forms as curl/ureq). |
-
-Supported proxy URLs are HTTP(S) (`http://host:port`, or a bare `host:port`), and SOCKS `socks4://`, `socks4a://`, `socks5://`, `socks5h://`, and `socks://` (alias for SOCKS5). `socks4a` and `socks5h` resolve the target hostname inside the proxy; `socks4` and `socks5` resolve locally first, matching Git/libcurl. SOCKS over a non-empty URL path (for example `socks5h://localhost/tunnel.sock`) is rejected with a clear error.
+With `http-ureq`, HTTPS uses the **OS certificate store** by default (`RootCerts::PlatformVerifier`). Git's TLS knobs apply per request URL: `http.sslVerify` (and scoped `http.<url>.sslVerify`), `http.sslCAInfo`, `http.sslCAPath`, `http.sslCert`, `http.sslKey`, and `http.sslBackend`, with env overrides `GIT_SSL_NO_VERIFY`, `GIT_SSL_CAINFO`, `GIT_SSL_CAPATH`, `GIT_SSL_CERT`, and `GIT_SSL_KEY`. Pass an [`Environment`](rustdoc:grit_lib::environment::Environment) into [`UreqHttpClient::from_config`](rustdoc:grit_lib::remote::transport::http::ureq_client::UreqHttpClient::from_config) so path expansion and `GIT_SSL_*` match Git; `DefaultHttpClientFactory::with_environment` does this for the CLI.
 
 ## Credentials and progress
 
@@ -91,17 +83,6 @@ Supported proxy URLs are HTTP(S) (`http://host:port`, or a bare `host:port`), an
 Best-effort requests whose failure is ignored, such as the advertisement [`push_plan_context`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::push_plan_context) reads and the bundle a clone tries first, use [`HttpClientFactory::create_for_preflight`](rustdoc:grit_lib::remote::HttpClientFactory::create_for_preflight): those clients never `reject` a refused credential, so the push or fetch that follows sends it, reports [`AuthFailure::Rejected`](rustdoc:grit_lib::error::AuthFailure::Rejected), and erases it as Git does. Every factory implements `create_for_preflight`; one whose clients never reject (or carry no credentials) can return the same client as `create`.
 
 After an authenticated retry, [`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider) (and any custom [`CredentialProvider`](rustdoc:grit_lib::remote::credentials::CredentialProvider), which must be `Send + Sync`) runs `reject` only when the server still answers `401`; a typo, missing repository, permission denial or server error (403, 404, 429, 5xx) leaves the stored credential untouched.
-
-### HTTP authentication schemes (`http-ureq`)
-
-The default [`UreqHttpClient`](rustdoc:grit_lib::remote::transport::http::ureq_client::UreqHttpClient) negotiates `WWW-Authenticate` challenges in libcurl order when several are offered: **Negotiate** (SPNEGO/Kerberos), **NTLM**, then **Basic**. **Digest** is recognized but not implemented — a server that offers only Digest fails with [`AuthFailure::UnsupportedScheme`](rustdoc:grit_lib::error::AuthFailure::UnsupportedScheme). NTLM and IIS-style Negotiate complete on a **single kept-alive TCP connection** (not a second `ureq` request). Basic auth stays on the fast `ureq` path.
-
-| Config | Meaning |
-| --- | --- |
-| `http.emptyAuth` / `GIT_HTTP_EMPTY_AUTH` | `false` (default): never send empty credentials first. `true`: send empty credentials on the first request. `auto`: on `401`, if Negotiate is offered, try GSS without a username before the credential helper. |
-| `http.proxyAuthMethod` / `remote.<name>.proxyAuthMethod` / `GIT_HTTP_PROXY_AUTHMETHOD` | `anyauth` (default), `basic`, `negotiate`, or `ntlm` for proxy challenges when the proxy URL has userinfo (Digest as a configured method is unsupported). |
-
-Kerberos needs the `http-negotiate` feature and system GSSAPI (`libgssapi` at build time). Mechanism failures (no ticket, bad NTLM challenge, GSS init error) report [`AuthFailure::MechanismFailed`](rustdoc:grit_lib::error::AuthFailure::MechanismFailed) with the scheme name and detail, not [`AuthFailure::Rejected`](rustdoc:grit_lib::error::AuthFailure::Rejected).
 
 The HTTP client asks for credentials the way Git does: [`Credential::from_url`](rustdoc:grit_lib::remote::credentials::Credential::from_url) turns the repository URL into protocol and host, adding the repository path only when `credential.useHttpPath` applies, so a host-level entry from `git-credential-store` or a keychain helper serves every repository on the host. The full URL stays in [`Credential::url`](rustdoc:grit_lib::remote::credentials::Credential::url) for matching `credential.<url>.helper`, and `HelperCredentialProvider` never sends it to a helper. A `user:password@` in the URL fills the username and password (and is removed from `Credential::url`), so wrong URL credentials fail as [`AuthFailure::Rejected`](rustdoc:grit_lib::error::AuthFailure::Rejected). Complete URL credentials are also kept in the client's in-memory origin cache so later requests to the same scheme, host and port (such as a `bundle-uri` download with no userinfo) send the same `Authorization` header without writing secrets into a helper or resumable state files.
 

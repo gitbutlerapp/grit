@@ -43,6 +43,7 @@ http-ureq = [
     "dep:rustls-native-certs",
     "ureq?/rustls",
     "ureq?/socks-proxy",
+    "ureq?/platform-verifier",
 ]
 # SPNEGO/Kerberos (system GSSAPI on Unix, SSPI on Windows).
 http-negotiate = ["http-ureq"]

@@ -10,8 +10,8 @@ mod imp {
     };
     use windows_sys::Win32::Security::Credentials::{
         AcquireCredentialsHandleW, FreeCredentialsHandle, InitializeSecurityContextW, SecHandle,
-        ISC_REQ_CONFIDENTIALITY, ISC_REQ_CONNECTION, ISC_REQ_MUTUAL_AUTH,
-        ISC_REQ_REPLAY_DETECT, ISC_REQ_SEQUENCE_DETECT, SECPKG_CRED, SECPKG_CRED_OUTBOUND,
+        ISC_REQ_CONFIDENTIALITY, ISC_REQ_CONNECTION, ISC_REQ_MUTUAL_AUTH, ISC_REQ_REPLAY_DETECT,
+        ISC_REQ_SEQUENCE_DETECT, SECPKG_CRED, SECPKG_CRED_OUTBOUND,
     };
     use windows_sys::Win32::Security::{
         FreeContextBuffer, SecBuffer, SecBufferDesc, SECBUFFER_TOKEN,
