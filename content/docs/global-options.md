@@ -55,6 +55,8 @@ The `grit` CLI snapshots the process environment into [`Environment`](../library
 | `HOME`, `XDG_CONFIG_HOME`, `USERPROFILE`, `USER`, `USERNAME` | Home and identity fallbacks |
 | `GIT_AUTHOR_*`, `GIT_COMMITTER_*` | Author/committer name, email, and date overrides for new objects |
 | `GIT_SSH`, `GIT_SSH_COMMAND` | SSH transport command (`GIT_SSH_COMMAND` overrides `core.sshCommand` and `GIT_SSH`; see Git precedence) |
+| `GIT_SSH_VARIANT` | Force the ssh client family for flag spelling: `auto` (default), `ssh`, `plink`, `putty`, `tortoiseplink`, or `simple`. Overrides basename detection; any other explicit value is treated as `ssh`. Same precedence as Git: this variable wins over `ssh.variant` in config |
+| `ssh.variant` | Same tokens as `GIT_SSH_VARIANT`, read from repository config when the environment variable is unset |
 | `GIT_HTTP_LOW_SPEED_LIMIT`, `GIT_HTTP_LOW_SPEED_TIME` | HTTP low-speed abort thresholds (override `http.lowSpeedLimit` / `http.lowSpeedTime` from config) |
 | `http.timeout`, `http.lowSpeedLimit`, `http.lowSpeedTime` | Smart HTTP read timeouts in config (see [`fetch`](../fetch/)): `http.timeout` caps the whole transfer (default 600s); low-speed settings abort when throughput stays below the limit for the configured window. Fetch and clone poll cancellation during these waits, not only between read chunks |
 | `GIT_NOTES_REF`, `GIT_NOTES_DISPLAY_REF` | Notes ref selection |

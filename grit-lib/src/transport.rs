@@ -19,7 +19,7 @@
 //! run of each ref line, so SHA-256 (64-hex) advertisements parse the same way
 //! SHA-1 (40-hex) ones do.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsString;
 use std::io::{BufReader, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 use std::path::{Path, PathBuf};
@@ -771,10 +771,10 @@ impl Transport for GitDaemonTransport {
 // usual `git-upload-pack '<path>'`, shell-quoted exactly like Git's
 // `sq_quote_buf`.
 //
-// The CLI's plink/putty variant detection and `ssh -G` probe are intentionally
-// *not* ported here: this is the embedder-facing core, and OpenSSH `-p <port>`
-// covers the common case. The ssh program/command is pluggable via
-// [`SshTransport::ssh_command`] so embedders never depend on process globals.
+// Ssh client variant detection (`GIT_SSH_VARIANT`, `ssh.variant`, basename,
+// and an OpenSSH `ssh -G` probe) selects `-p` vs `-P`, `SendEnv`, and related
+// flags. The ssh program/command is pluggable via [`SshTransport::ssh_command`]
+// so embedders never depend on process globals.
 //
 // Spawning a subprocess for ssh is correct (ssh is not git); the no-process
 // rule is about the *public API shape* (no argv/stdout/global-config
@@ -1077,42 +1077,234 @@ fn remote_service_cmd(service: Service, quoted_path: &str) -> String {
 
 const OPENSSH_SENDENV_GIT_PROTOCOL: &str = "SendEnv=GIT_PROTOCOL";
 
-fn is_ssh_program_basename(name: &OsStr) -> bool {
-    name.to_string_lossy().eq_ignore_ascii_case("ssh")
-        || name.to_string_lossy().eq_ignore_ascii_case("ssh.exe")
+/// Which ssh-compatible client grit speaks (`connect.c` `enum ssh_variant`).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum SshVariant {
+    /// OpenSSH or another client that accepts OpenSSH-style flags (`-p`, `-o SendEnv=…`).
+    Ssh,
+    /// PuTTY `plink` (`-P`, no `SendEnv`).
+    Plink,
+    /// PuTTY `putty` (same flags as plink).
+    Putty,
+    /// TortoisePlink (`-batch`, then `-P`).
+    TortoisePlink,
+    /// Unknown / non-OpenSSH client with no port or extra options.
+    Simple,
 }
 
-fn shell_command_leading_program(cmd: &OsStr) -> Option<&OsStr> {
-    let s = cmd.to_str()?;
-    let token = s.split_whitespace().next()?;
-    Some(OsStr::new(token))
+/// Explicit `GIT_SSH_VARIANT` / `ssh.variant` override before basename or probe detection.
+enum SshVariantOverride {
+    Auto,
+    Resolved(SshVariant),
 }
 
-/// Whether the resolved ssh invocation should receive `-o SendEnv=GIT_PROTOCOL` (OpenSSH only).
-///
-/// Matches Git: basename `ssh` / `ssh.exe` (case-insensitive) or a shell command whose leading
-/// token resolves to that basename is treated as OpenSSH without running `ssh -V`.
-fn ssh_invocation_is_openssh(env: &crate::environment::Environment, resolved: &SshCommand) -> bool {
-    if let Some(variant) = env.var_os("GIT_SSH_VARIANT") {
-        let v = variant.to_string_lossy();
-        if v.eq_ignore_ascii_case("ssh") {
-            return true;
-        }
-        if !v.eq_ignore_ascii_case("auto") {
-            return false;
+fn ssh_program_basename_token(token: &str) -> String {
+    let path = Path::new(token);
+    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+        if !name.contains('\\') {
+            return name.to_string();
         }
     }
-    let program = match resolved {
-        SshCommand::Program(prog) => Path::new(prog),
+    token
+        .rsplit(['/', '\\'])
+        .next()
+        .filter(|s| !s.is_empty())
+        .unwrap_or(token)
+        .to_string()
+}
+
+fn basename_ssh_variant(resolved: &SshCommand) -> Option<SshVariant> {
+    let name: String = match resolved {
+        SshCommand::Program(prog) => ssh_program_basename_token(&prog.to_string_lossy()),
         SshCommand::ShellCommand(cmd) => {
-            let Some(token) = shell_command_leading_program(cmd) else {
-                return false;
-            };
-            Path::new(token)
+            let s = cmd.to_str()?;
+            let words = shell_words::split(s).ok()?;
+            let first = words.first()?;
+            ssh_program_basename_token(first)
         }
-        SshCommand::Auto => return false,
+        SshCommand::Auto => return None,
     };
-    program.file_name().is_some_and(is_ssh_program_basename)
+    if name.eq_ignore_ascii_case("ssh") || name.eq_ignore_ascii_case("ssh.exe") {
+        return Some(SshVariant::Ssh);
+    }
+    if name.eq_ignore_ascii_case("plink") || name.eq_ignore_ascii_case("plink.exe") {
+        return Some(SshVariant::Plink);
+    }
+    if name.eq_ignore_ascii_case("tortoiseplink") || name.eq_ignore_ascii_case("tortoiseplink.exe")
+    {
+        return Some(SshVariant::TortoisePlink);
+    }
+    None
+}
+
+fn parse_ssh_variant_token(token: &str) -> SshVariantOverride {
+    match token {
+        "auto" => SshVariantOverride::Auto,
+        "plink" => SshVariantOverride::Resolved(SshVariant::Plink),
+        "putty" => SshVariantOverride::Resolved(SshVariant::Putty),
+        "tortoiseplink" => SshVariantOverride::Resolved(SshVariant::TortoisePlink),
+        "simple" => SshVariantOverride::Resolved(SshVariant::Simple),
+        "ssh" => SshVariantOverride::Resolved(SshVariant::Ssh),
+        _ => SshVariantOverride::Resolved(SshVariant::Ssh),
+    }
+}
+
+/// Read `GIT_SSH_VARIANT` then `ssh.variant` (Git `override_ssh_variant`, exact token match).
+fn configured_ssh_variant_override(
+    env: &crate::environment::Environment,
+    config: Option<&crate::config::ConfigSet>,
+) -> Option<SshVariantOverride> {
+    if env.var_os("GIT_SSH_VARIANT").is_some() {
+        let token = env
+            .var_os("GIT_SSH_VARIANT")
+            .map(|v| v.to_string_lossy().into_owned())
+            .unwrap_or_default();
+        return Some(parse_ssh_variant_token(&token));
+    }
+    let token = config.and_then(|c| c.value("ssh.variant"))?;
+    Some(parse_ssh_variant_token(&token))
+}
+
+fn push_openssh_probe_args(args: &mut Vec<OsString>, protocol_version: u8, port: Option<&str>) {
+    if protocol_version > 0 {
+        push_openssh_sendenv_args(args);
+    }
+    if let Some(p) = port {
+        args.push(OsString::from("-p"));
+        args.push(OsString::from(p));
+    }
+}
+
+fn openssh_probe_options_fragment(protocol_version: u8, port: Option<&str>) -> String {
+    let mut out = String::new();
+    if protocol_version > 0 {
+        out.push_str(openssh_sendenv_option_fragment());
+    }
+    if let Some(p) = port {
+        out.push_str(&format!(" -p {}", shell_words::quote(p)));
+    }
+    out
+}
+
+fn ssh_openssh_probe_spec(
+    resolved: &SshCommand,
+    ssh_host: &str,
+    port: Option<&str>,
+    protocol_version: u8,
+) -> CommandSpec {
+    match resolved {
+        SshCommand::ShellCommand(cmd) => {
+            let cmd = cmd.to_string_lossy();
+            let probe_opts = openssh_probe_options_fragment(protocol_version, port);
+            let script = format!("{cmd} -G{probe_opts} {}", shell_words::quote(ssh_host),);
+            CommandSpec {
+                program: "sh".into(),
+                args: Vec::new(),
+                shell: Some(ShellInvocation::DashC {
+                    script,
+                    argv0: None,
+                    args: Vec::new(),
+                }),
+                cwd: None,
+                env: CommandEnvironment::inherit_process_only(),
+                stdin: CommandStdin::Null,
+                stdout: CommandStdio::Null,
+                stderr: CommandStdio::Null,
+            }
+        }
+        SshCommand::Program(prog) => {
+            let mut args = vec![OsString::from("-G")];
+            push_openssh_probe_args(&mut args, protocol_version, port);
+            args.push(OsString::from(ssh_host));
+            CommandSpec {
+                program: PathBuf::from(prog),
+                args,
+                shell: None,
+                cwd: None,
+                env: CommandEnvironment::inherit_process_only(),
+                stdin: CommandStdin::Null,
+                stdout: CommandStdio::Null,
+                stderr: CommandStdio::Null,
+            }
+        }
+        SshCommand::Auto => unreachable!("probe requires a resolved ssh command"),
+    }
+}
+
+fn determine_ssh_variant(
+    env: &crate::environment::Environment,
+    config: Option<&crate::config::ConfigSet>,
+    resolved: &SshCommand,
+    runner: &dyn CommandRunner,
+    ssh_host: &str,
+    port: Option<&str>,
+    protocol_version: u8,
+) -> Result<SshVariant> {
+    if let Some(SshVariantOverride::Resolved(v)) = configured_ssh_variant_override(env, config) {
+        return Ok(v);
+    }
+    if let Some(v) = basename_ssh_variant(resolved) {
+        return Ok(v);
+    }
+
+    let probe = ssh_openssh_probe_spec(resolved, ssh_host, port, protocol_version);
+    let child = runner
+        .spawn(&probe)
+        .map_err(|e| transport_io_err(format!("failed to probe ssh variant: {e}")))?;
+    let exit = child
+        .wait()
+        .map_err(|e| transport_io_err(format!("ssh variant probe wait failed: {e}")))?;
+    Ok(if exit.success {
+        SshVariant::Ssh
+    } else {
+        SshVariant::Simple
+    })
+}
+
+fn ssh_shell_connect_options_fragment(
+    variant: SshVariant,
+    protocol_version: u8,
+    port: Option<&str>,
+) -> String {
+    let mut out = String::new();
+    if variant == SshVariant::Ssh && protocol_version > 0 {
+        out.push_str(openssh_sendenv_option_fragment());
+    }
+    if variant == SshVariant::TortoisePlink {
+        out.push_str(" -batch");
+    }
+    if let Some(p) = port {
+        let flag = match variant {
+            SshVariant::Ssh => "-p",
+            SshVariant::Plink | SshVariant::Putty | SshVariant::TortoisePlink => "-P",
+            SshVariant::Simple => return out,
+        };
+        out.push_str(&format!(" {flag} {}", shell_words::quote(p)));
+    }
+    out
+}
+
+fn push_ssh_variant_program_args(
+    args: &mut Vec<OsString>,
+    variant: SshVariant,
+    protocol_version: u8,
+    port: Option<&str>,
+) {
+    if variant == SshVariant::Ssh && protocol_version > 0 {
+        push_openssh_sendenv_args(args);
+    }
+    if variant == SshVariant::TortoisePlink {
+        args.push(OsString::from("-batch"));
+    }
+    if let Some(p) = port {
+        let flag = match variant {
+            SshVariant::Ssh => "-p",
+            SshVariant::Plink | SshVariant::Putty | SshVariant::TortoisePlink => "-P",
+            SshVariant::Simple => return,
+        };
+        args.push(OsString::from(flag));
+        args.push(OsString::from(p));
+    }
 }
 
 fn push_openssh_sendenv_args(args: &mut Vec<OsString>) {
@@ -1139,10 +1331,12 @@ pub enum SshCommand {
     #[default]
     Auto,
     /// A bare program invoked directly (no shell), like Git's `$GIT_SSH`. The
-    /// argv is `[program, <-p port>, host, remote_cmd]`.
+    /// argv is `[program, variant-specific opts, host, remote_cmd]` (`-p` for
+    /// OpenSSH, `-P` for PuTTY clients, `-batch` for TortoisePlink).
     Program(OsString),
     /// A shell command line run via `sh -c`, like Git's `$GIT_SSH_COMMAND`. The
-    /// command is appended with `<-p port> host remote_cmd`.
+    /// command is appended with the same variant-specific options, then
+    /// `host remote_cmd`.
     ShellCommand(OsString),
 }
 
@@ -1530,7 +1724,8 @@ impl SshTransport {
         self
     }
 
-    /// Config consulted for `core.sshCommand` when [`Self::ssh_command`] is [`SshCommand::Auto`].
+    /// Config consulted for `core.sshCommand` when [`Self::ssh_command`] is [`SshCommand::Auto`],
+    /// and for `ssh.variant` when resolving PuTTY vs OpenSSH ssh flags.
     #[must_use]
     pub fn with_ssh_config(mut self, config: Arc<crate::config::ConfigSet>) -> Self {
         self.ssh_config = Some(config);
@@ -1566,43 +1761,48 @@ impl SshTransport {
         spec: &SshUrl,
         service: Service,
         opts: &ConnectOptions,
-    ) -> CommandSpec {
+    ) -> Result<CommandSpec> {
         let quoted_path = sq_quote_shell_arg(&spec.path);
         let remote_cmd = remote_service_cmd(service, &quoted_path);
         let port = spec.port.as_deref();
 
+        let resolved = self
+            .ssh_command
+            .resolve(self.ssh_env.as_ref(), self.ssh_config.as_deref());
+        let variant = determine_ssh_variant(
+            self.ssh_env.as_ref(),
+            self.ssh_config.as_deref(),
+            &resolved,
+            self.command_runner.as_ref(),
+            &spec.ssh_host,
+            port,
+            opts.protocol_version,
+        )?;
+        if variant == SshVariant::Simple && port.is_some() {
+            return Err(ssh_transport_err(
+                "ssh variant 'simple' does not support a custom port",
+            ));
+        }
+
         let mut env = CommandEnvironment::inherit_process_only();
-        if opts.protocol_version > 0 {
+        if variant == SshVariant::Ssh && opts.protocol_version > 0 {
             env.set.push((
                 OsString::from("GIT_PROTOCOL"),
                 OsString::from(format!("version={}", opts.protocol_version)),
             ));
         }
 
-        let resolved = self
-            .ssh_command
-            .resolve(self.ssh_env.as_ref(), self.ssh_config.as_deref());
-        let openssh_sendenv = opts.protocol_version > 0
-            && ssh_invocation_is_openssh(self.ssh_env.as_ref(), &resolved);
-
         match resolved {
             SshCommand::ShellCommand(cmd) => {
                 let cmd = cmd.to_string_lossy();
-                let sendenv = if openssh_sendenv {
-                    openssh_sendenv_option_fragment()
-                } else {
-                    ""
-                };
-                let port_opt = match port {
-                    Some(p) => format!("{sendenv} -p {}", shell_words::quote(p)),
-                    None => sendenv.to_string(),
-                };
+                let port_opt =
+                    ssh_shell_connect_options_fragment(variant, opts.protocol_version, port);
                 let script = format!(
                     "{cmd}{port_opt} {} {}",
                     shell_words::quote(&spec.ssh_host),
                     shell_words::quote(&remote_cmd),
                 );
-                CommandSpec {
+                Ok(CommandSpec {
                     program: "sh".into(),
                     args: Vec::new(),
                     shell: Some(ShellInvocation::DashC {
@@ -1615,20 +1815,14 @@ impl SshTransport {
                     stdin: CommandStdin::Pipe(Vec::new()),
                     stdout: CommandStdio::Pipe,
                     stderr: CommandStdio::Inherit,
-                }
+                })
             }
             SshCommand::Program(prog) => {
                 let mut args = Vec::new();
-                if openssh_sendenv {
-                    push_openssh_sendenv_args(&mut args);
-                }
-                if let Some(p) = port {
-                    args.push(OsString::from("-p"));
-                    args.push(OsString::from(p));
-                }
+                push_ssh_variant_program_args(&mut args, variant, opts.protocol_version, port);
                 args.push(OsString::from(spec.ssh_host.as_str()));
                 args.push(OsString::from(remote_cmd.as_str()));
-                CommandSpec {
+                Ok(CommandSpec {
                     program: PathBuf::from(prog),
                     args,
                     shell: None,
@@ -1637,7 +1831,7 @@ impl SshTransport {
                     stdin: CommandStdin::Pipe(Vec::new()),
                     stdout: CommandStdio::Pipe,
                     stderr: CommandStdio::Inherit,
-                }
+                })
             }
             SshCommand::Auto => unreachable!("SshCommand::resolve never yields Auto"),
         }
@@ -1659,7 +1853,7 @@ impl Transport for SshTransport {
             opts.protocol_version
         );
         let spec = parse_ssh_url(url)?;
-        let cmd_spec = self.ssh_command_spec(&spec, service, opts);
+        let cmd_spec = self.ssh_command_spec(&spec, service, opts)?;
         let running = self.command_runner.spawn(&cmd_spec).map_err(|e| {
             transport_io_err(format!("failed to spawn ssh for {}: {e}", spec.ssh_host))
         })?;
@@ -2270,10 +2464,11 @@ eval "$cmd"
     }
 
     #[test]
-    fn ssh_non_openssh_program_omits_sendenv_but_keeps_git_protocol_env() {
-        use crate::command_runner::RecordingRunner;
+    fn ssh_non_openssh_program_probes_then_omits_sendenv_and_git_protocol_env() {
+        use crate::command_runner::{RecordedResponse, RecordingRunner};
 
         let runner = RecordingRunner::always_success();
+        runner.push_response(RecordedResponse::Exit(1));
         let transport = SshTransport::with_program("/usr/local/bin/fake-ssh")
             .with_command_runner(runner.clone());
         let opts = ConnectOptions {
@@ -2282,20 +2477,318 @@ eval "$cmd"
         };
         let _ = transport.connect("example.com:repo.git", Service::UploadPack, &opts);
         let specs = runner.specs();
-        assert_eq!(specs.len(), 1);
-        let args: Vec<String> = specs[0]
+        assert_eq!(
+            specs.len(),
+            2,
+            "unknown program probes with ssh -G then connects"
+        );
+        assert!(
+            specs[0].args.first().map(|a| a.to_string_lossy()) == Some("-G".into()),
+            "probe must be ssh -G, got {:?}",
+            specs[0].args
+        );
+        let connect_args: Vec<String> = specs[1]
             .args
             .iter()
             .map(|a| a.to_string_lossy().into_owned())
             .collect();
         assert!(
-            !args.iter().any(|a| a.contains("SendEnv")),
-            "non-OpenSSH programs must not get SendEnv, got {args:?}"
+            !connect_args.iter().any(|a| a.contains("SendEnv")),
+            "simple variant must not get SendEnv, got {connect_args:?}"
         );
         assert!(
-            specs[0].env.set.iter().any(|(k, _)| k == "GIT_PROTOCOL"),
-            "GIT_PROTOCOL env must still be set for the child process"
+            !specs[1].env.set.iter().any(|(k, _)| k == "GIT_PROTOCOL"),
+            "simple variant must not set GIT_PROTOCOL on the child"
         );
+    }
+
+    #[test]
+    fn ssh_probe_openssh_uses_sendenv_on_connect() {
+        use crate::command_runner::{RecordedResponse, RecordingRunner};
+
+        let runner = RecordingRunner::always_success();
+        runner.push_response(RecordedResponse::Success);
+        let transport = SshTransport::with_program("/usr/local/bin/fake-ssh")
+            .with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect("example.com:repo.git", Service::UploadPack, &opts);
+        let specs = runner.specs();
+        assert_eq!(specs.len(), 2);
+        assert!(command_spec_has_sendenv(&specs[1]));
+        assert!(specs[1].env.set.iter().any(|(k, _)| k == "GIT_PROTOCOL"));
+    }
+
+    #[test]
+    fn ssh_simple_variant_rejects_custom_port() {
+        use crate::command_runner::{RecordedResponse, RecordingRunner};
+
+        let runner = RecordingRunner::always_success();
+        runner.push_response(RecordedResponse::Exit(1));
+        let transport = SshTransport::with_program("/usr/local/bin/fake-ssh")
+            .with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        match transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        ) {
+            Err(err) => assert!(
+                matches!(err, Error::Remote(RemoteError::Ssh { .. })),
+                "{err:?}"
+            ),
+            Ok(_) => panic!("simple ssh must not accept a port"),
+        }
+        assert_eq!(runner.specs().len(), 1, "only the probe runs");
+    }
+
+    fn args_join(spec: &CommandSpec) -> String {
+        spec.args
+            .iter()
+            .map(|a| a.to_string_lossy().into_owned())
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+
+    fn shell_script(spec: &CommandSpec) -> Option<&str> {
+        match &spec.shell {
+            Some(ShellInvocation::DashC { script, .. }) => Some(script.as_str()),
+            _ => None,
+        }
+    }
+
+    #[test]
+    fn ssh_plink_program_uses_uppercase_port_flag() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let transport = SshTransport::with_program("plink.exe").with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        );
+        let spec = &runner.specs()[0];
+        assert!(!command_spec_has_sendenv(spec));
+        assert!(
+            args_join(spec).contains("-P 2222"),
+            "plink must use -P, got {:?}",
+            spec.args
+        );
+        assert!(
+            !spec.env.set.iter().any(|(k, _)| k == "GIT_PROTOCOL"),
+            "plink must not export GIT_PROTOCOL"
+        );
+    }
+
+    #[test]
+    fn ssh_plink_shell_command_uses_uppercase_port_flag() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let transport = SshTransport::with_shell_command("plink -load mysession")
+            .with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect("[host:2222]:repo.git", Service::UploadPack, &opts);
+        let specs = runner.specs();
+        let script = shell_script(&specs[0]).expect("shell transport");
+        assert!(
+            script.contains(" -P 2222 "),
+            "shell plink must inject -P, got {script}"
+        );
+        assert!(
+            !script.contains("SendEnv"),
+            "plink shell command must not inject SendEnv"
+        );
+    }
+
+    #[test]
+    fn ssh_tortoiseplink_adds_batch_before_port() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let transport =
+            SshTransport::with_program("TortoisePlink.exe").with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        );
+        let joined = args_join(&runner.specs()[0]);
+        assert!(
+            joined.contains("-batch"),
+            "TortoisePlink needs -batch, got {joined}"
+        );
+        let batch_pos = joined.find("-batch").unwrap();
+        let port_pos = joined.find("-P").unwrap();
+        assert!(batch_pos < port_pos, "-batch must precede -P, got {joined}");
+    }
+
+    #[test]
+    fn ssh_variant_config_overrides_program_basename() {
+        use crate::command_runner::RecordingRunner;
+        use std::sync::Arc;
+
+        let runner = RecordingRunner::always_success();
+        let mut config = crate::config::ConfigSet::new();
+        config
+            .add_command_override("ssh.variant", "tortoiseplink")
+            .expect("override");
+        let transport = SshTransport::with_program("ssh")
+            .with_command_runner(runner.clone())
+            .with_ssh_config(Arc::new(config));
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        );
+        let joined = args_join(&runner.specs()[0]);
+        assert!(
+            joined.contains("-batch") && joined.contains("-P 2222"),
+            "ssh.variant=tortoiseplink must win over ssh basename, got {joined}"
+        );
+        assert!(!command_spec_has_sendenv(&runner.specs()[0]));
+    }
+
+    #[test]
+    fn ssh_empty_ssh_variant_config_skips_probe_and_uses_openssh_port() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let mut config = crate::config::ConfigSet::new();
+        config
+            .add_command_override("ssh.variant", "")
+            .expect("override");
+        let transport = SshTransport::with_program("/usr/local/bin/fake-ssh")
+            .with_command_runner(runner.clone())
+            .with_ssh_config(Arc::new(config));
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        );
+        assert_eq!(
+            runner.specs().len(),
+            1,
+            "explicit empty ssh.variant must not run ssh -G probe"
+        );
+        let joined = args_join(&runner.specs()[0]);
+        assert!(
+            joined.contains("-p 2222"),
+            "empty ssh.variant is OpenSSH (-p), got {joined}"
+        );
+        assert!(command_spec_has_sendenv(&runner.specs()[0]));
+    }
+
+    #[test]
+    fn ssh_putty_config_variant_uses_uppercase_port_flag() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let mut config = crate::config::ConfigSet::new();
+        config
+            .add_command_override("ssh.variant", "putty")
+            .expect("override");
+        let transport = SshTransport::with_program("putty.exe")
+            .with_command_runner(runner.clone())
+            .with_ssh_config(Arc::new(config));
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        );
+        assert_eq!(runner.specs().len(), 1);
+        let joined = args_join(&runner.specs()[0]);
+        assert!(
+            joined.contains("-P 2222"),
+            "putty variant must use -P, got {joined}"
+        );
+        assert!(!command_spec_has_sendenv(&runner.specs()[0]));
+    }
+
+    #[test]
+    fn ssh_plink_shell_command_quoted_windows_path_uses_uppercase_port() {
+        use crate::command_runner::RecordingRunner;
+
+        let runner = RecordingRunner::always_success();
+        let transport = SshTransport::with_shell_command(
+            "'C:\\Program Files\\PuTTY\\plink.exe' -load mysession",
+        )
+        .with_command_runner(runner.clone());
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        );
+        let specs = runner.specs();
+        let script = shell_script(&specs[0]).expect("shell transport");
+        assert!(
+            script.contains(" -P 2222 "),
+            "quoted plink path must get -P, got {script}"
+        );
+        assert!(!script.contains("SendEnv"));
+    }
+
+    #[test]
+    fn ssh_unknown_git_ssh_variant_uses_openssh_flags() {
+        use crate::command_runner::RecordingRunner;
+        use crate::environment::Environment;
+
+        let runner = RecordingRunner::always_success();
+        let env = Arc::new(Environment::from_vars(
+            [("GIT_SSH_VARIANT", "PLINK")].map(|(k, v)| (OsString::from(k), OsString::from(v))),
+            PathBuf::from("."),
+        ));
+        let transport = SshTransport::with_program("plink.exe")
+            .with_command_runner(runner.clone())
+            .with_ssh_environment(env);
+        let opts = ConnectOptions {
+            protocol_version: 2,
+            ..Default::default()
+        };
+        let _ = transport.connect(
+            "ssh://example.com:2222/repo.git",
+            Service::UploadPack,
+            &opts,
+        );
+        let joined = args_join(&runner.specs()[0]);
+        assert!(
+            joined.contains("-p 2222"),
+            "unknown GIT_SSH_VARIANT must fall back to OpenSSH -p, got {joined}"
+        );
+        assert!(command_spec_has_sendenv(&runner.specs()[0]));
     }
 
     #[test]
