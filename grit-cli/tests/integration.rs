@@ -500,6 +500,8 @@ mod push_delete_remote_branch;
 #[cfg(feature = "full-tests")]
 #[path = "push_dry_run.rs"]
 mod push_dry_run;
+#[path = "push_force_if_includes_cli.rs"]
+mod push_force_if_includes_cli;
 #[cfg(feature = "full-tests")]
 #[path = "push_force_lease.rs"]
 mod push_force_lease;

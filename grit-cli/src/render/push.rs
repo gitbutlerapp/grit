@@ -191,6 +191,10 @@ impl HumanRender for PushOutcome {
                         w,
                         "  rejected {target}: stale remote ref — run `grit fetch --prune` and try again"
                     ),
+                    PushRefStatus::RejectRemoteUpdated => outln!(
+                        w,
+                        "  rejected {target}: remote has commits you have not integrated — merge or rebase them locally, then try again"
+                    ),
                     PushRefStatus::RejectRemoteRefMissing => {
                         outln!(w, "  rejected {target}: remote ref does not exist")
                     }

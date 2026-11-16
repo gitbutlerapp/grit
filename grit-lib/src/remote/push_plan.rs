@@ -78,6 +78,9 @@ pub struct PushRequest {
     pub follow_tags: bool,
     /// After a successful branch push, write `branch.<name>.remote` / `.merge` (`-u`).
     pub set_upstream: bool,
+    /// With a tracking [`ForceMode::Lease`], require the remote-tracking tip to appear in the
+    /// pushed branch's reflog (Git's `--force-if-includes`).
+    pub force_if_includes: bool,
     /// Push every local branch (`refs/heads/*:refs/heads/*`), including names the remote
     /// does not advertise yet (unlike `push.default = matching` or a `:` refspec).
     pub all: bool,
@@ -165,6 +168,13 @@ impl PushRequest {
     #[must_use]
     pub const fn with_prune(mut self, prune: bool) -> Self {
         self.prune = prune;
+        self
+    }
+
+    /// Sets [`force_if_includes`](Self::force_if_includes).
+    #[must_use]
+    pub const fn with_force_if_includes(mut self, force_if_includes: bool) -> Self {
+        self.force_if_includes = force_if_includes;
         self
     }
 }
@@ -382,7 +392,13 @@ pub(crate) fn resolve_push(
         }
     }
 
-    apply_force_mode(repo, &resolved.remote, &mut resolved.specs, &force_mode)?;
+    apply_force_mode(
+        repo,
+        &resolved.remote,
+        &mut resolved.specs,
+        &force_mode,
+        request.force_if_includes,
+    )?;
     Ok(resolved)
 }
 
@@ -694,6 +710,15 @@ pub fn push_follow_tags_config(config: &ConfigSet) -> bool {
         .unwrap_or(false)
 }
 
+/// Whether `push.useForceIfIncludes` is enabled in config (default false).
+#[must_use]
+pub fn push_use_force_if_includes_config(config: &ConfigSet) -> bool {
+    config
+        .value("push.useForceIfIncludes")
+        .and_then(|v| parse_git_config_maybe_bool(&v))
+        .unwrap_or(false)
+}
+
 /// Append annotated tag refspecs reachable from the updates in `specs`.
 ///
 /// Matches `git push --follow-tags`: lightweight tags are skipped, tags already on the remote
@@ -826,7 +851,13 @@ fn resolve_delete_push(
         branch_label,
         kind: PushPlanKind::Delete,
     };
-    apply_force_mode(repo, &resolved.remote, &mut resolved.specs, &request.force)?;
+    apply_force_mode(
+        repo,
+        &resolved.remote,
+        &mut resolved.specs,
+        &request.force,
+        request.force_if_includes,
+    )?;
     Ok(resolved)
 }
 
@@ -851,7 +882,13 @@ fn resolve_tags_push(
         branch_label: None,
         kind: PushPlanKind::Tags,
     };
-    apply_force_mode(repo, &resolved.remote, &mut resolved.specs, &request.force)?;
+    apply_force_mode(
+        repo,
+        &resolved.remote,
+        &mut resolved.specs,
+        &request.force,
+        request.force_if_includes,
+    )?;
     Ok(resolved)
 }
 
@@ -1666,6 +1703,7 @@ fn apply_force_mode(
     remote: &str,
     specs: &mut [PushRefSpec],
     mode: &ForceMode,
+    force_if_includes: bool,
 ) -> PlanResult<()> {
     match mode {
         ForceMode::None => {}
@@ -1679,6 +1717,7 @@ fn apply_force_mode(
         ForceMode::Lease(LeaseExpectation::Tracking) => {
             for spec in specs.iter_mut() {
                 apply_tracking_lease(repo, remote, spec);
+                maybe_enable_force_includes(spec, force_if_includes);
             }
         }
         ForceMode::Lease(LeaseExpectation::Value(expected)) => {
@@ -1698,14 +1737,22 @@ fn apply_force_mode(
 /// Let `spec` replace the remote ref when it still holds what this clone's
 /// remote-tracking ref for it says (`--force-with-lease` for one ref), or
 /// is absent when there is none.
+fn maybe_enable_force_includes(spec: &mut PushRefSpec, force_if_includes: bool) {
+    if force_if_includes && !spec.delete && spec.expected_old.is_some() {
+        spec.check_if_includes = true;
+    }
+}
+
 pub(crate) fn apply_tracking_lease(repo: &Repository, remote: &str, spec: &mut PushRefSpec) {
     spec.force = true;
     spec.expected_old = None;
     spec.expect_absent = false;
+    spec.includes_tracking_ref = None;
     let Ok(config) = repo.config().snapshot() else {
         return;
     };
     if let Some(tracking) = remote_tracking_ref_for_remote_ref(config.as_ref(), remote, &spec.dst) {
+        spec.includes_tracking_ref = Some(tracking.clone());
         match refs::resolve_ref(repo.git_dir(), &tracking) {
             Ok(oid) => spec.expected_old = Some(oid),
             Err(_) => spec.expect_absent = true,
@@ -2077,6 +2124,53 @@ mod tests {
         assert_eq!(resolved.specs.len(), 1);
         assert_eq!(resolved.specs[0].expected_old, Some(oid));
         assert!(resolved.specs[0].force);
+    }
+
+    #[test]
+    fn force_if_includes_sets_check_on_tracking_lease() {
+        let (_tmp, repo) = init_repo();
+        let git_dir = repo.git_dir();
+        std::fs::write(
+            git_dir.join("config"),
+            r#"[remote "origin"]
+	url = /tmp/o.git
+	fetch = +refs/heads/*:refs/remotes/origin/*
+[branch "main"]
+	remote = origin
+	merge = refs/heads/main
+"#,
+        )
+        .expect("config");
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+        let oid = ObjectId::from_hex("a".repeat(40).as_str()).expect("oid");
+        std::fs::create_dir_all(git_dir.join("refs/heads")).expect("heads dir");
+        std::fs::write(
+            git_dir.join("refs/heads/main"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("main");
+        std::fs::create_dir_all(git_dir.join("refs/remotes/origin")).expect("rt dir");
+        std::fs::write(
+            git_dir.join("refs/remotes/origin/main"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("tracking");
+        let ctx = PushPlanContext::default();
+        let resolved = resolve_push(
+            &repo,
+            &PushRequest {
+                force: ForceMode::Lease(LeaseExpectation::Tracking),
+                force_if_includes: true,
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("resolve");
+        assert!(resolved.specs[0].check_if_includes);
+        assert_eq!(
+            resolved.specs[0].includes_tracking_ref.as_deref(),
+            Some("refs/remotes/origin/main")
+        );
     }
 
     #[test]

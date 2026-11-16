@@ -246,7 +246,7 @@ $ grit rebase origin/main --json
 $ grit push --force-with-lease --json
 ```
 
-After rewriting history, always **fetch** before **`--force-with-lease`**. Exit **1** with **`"rejected": true`** means the remote moved or the lease is stale — **fetch**, then **`rebase --check`** and **`rebase`** onto the updated upstream (do not push again until local history includes what you just fetched), then retry **`--force-with-lease`**. Use **`--force`** only when you intentionally overwrite remote work.
+After rewriting history, always **fetch** before **`--force-with-lease`**. Exit **1** with **`"rejected": true`** means the remote moved or the lease is stale — **fetch**, then **`rebase --check`** and **`rebase`** onto the updated upstream (do not push again until local history includes what you just fetched), then retry **`--force-with-lease`**. With **`--force-if-includes`** (or `push.useForceIfIncludes`), a tracking lease also requires the remote tip in the local branch's history; **`reason": "remote_updated"`** means merge or rebase `origin/<branch>` locally first. Use **`--force`** only when you intentionally overwrite remote work.
 
 ### Fetch a pull request ref
 
