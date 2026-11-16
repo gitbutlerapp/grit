@@ -68,6 +68,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
+      - name: Install GSSAPI (grit-cli http-negotiate-gss on Unix)
+        run: ./scripts/ci-install-gssapi.sh
+
       - name: Shed incremental artifacts before coverage links
         run: |
           rm -rf target/debug/incremental target/release/incremental 2>/dev/null || true
@@ -141,6 +144,9 @@ jobs:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
+
+      - name: Install GSSAPI (grit-cli http-negotiate-gss on Unix)
+        run: ./scripts/ci-install-gssapi.sh
 
       - run: cargo check -p grit-lib
       - run: cargo check -p grit-cli
@@ -230,6 +236,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
+      - name: Install GSSAPI (semver-check doc build pulls http-negotiate-gss)
+        run: ./scripts/ci-install-gssapi.sh
+
       - run: make semver-check
 
   rustdoc:
@@ -249,6 +258,9 @@ jobs:
           shared-key: rustdoc
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
+
+      - name: Install GSSAPI (rustdoc --all-features enables http-negotiate-gss)
+        run: ./scripts/ci-install-gssapi.sh
 
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
@@ -282,6 +294,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
+      - name: Install GSSAPI (make bench-scenarios builds grit-cli)
+        run: ./scripts/ci-install-gssapi.sh
+
       - name: Scenario suite smoke (TIER=S, timings not gated)
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
@@ -309,6 +324,9 @@ jobs:
           shared-key: bench-daily-smoke
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
+
+      - name: Install GSSAPI (grit-cli http-negotiate-gss on Unix)
+        run: ./scripts/ci-install-gssapi.sh
 
       - name: Build release grit and grit-bench
         run: cargo build --release -p grit-cli -p grit-utils
@@ -360,6 +378,9 @@ jobs:
           shared-key: test-threaded
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
+
+      - name: Install GSSAPI (grit-cli http-negotiate-gss on Unix)
+        run: ./scripts/ci-install-gssapi.sh
 
       - name: Shed incremental artifacts before release test links
         run: |
@@ -434,6 +455,9 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
 
+      - name: Install GSSAPI (grit-cli http-negotiate-gss on Unix)
+        run: ./scripts/ci-install-gssapi.sh
+
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-nextest
@@ -494,6 +518,9 @@ jobs:
           shared-key: test-full
           save-if: ${{ github.ref == 'refs/heads/main' }}
           cache-on-failure: true
+
+      - name: Install GSSAPI (grit-cli http-negotiate-gss on Unix)
+        run: ./scripts/ci-install-gssapi.sh
 
       - uses: taiki-e/install-action@v2
         with:
