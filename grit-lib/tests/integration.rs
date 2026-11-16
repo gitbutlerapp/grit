@@ -1454,6 +1454,9 @@ mod push_fast_deep_history;
 #[path = "push_flags_git_compat.rs"]
 mod push_flags_git_compat;
 #[cfg(feature = "full-tests")]
+#[path = "push_force_if_includes.rs"]
+mod push_force_if_includes;
+#[cfg(feature = "full-tests")]
 #[path = "push_lease_git_compat.rs"]
 mod push_lease_git_compat;
 #[cfg(feature = "full-tests")]
@@ -2228,6 +2231,8 @@ mod transport_http_redirect_auth;
 #[cfg(feature = "full-tests")]
 #[path = "transport_http_shallow.rs"]
 mod transport_http_shallow;
+#[path = "transport_http_ssl.rs"]
+mod transport_http_ssl;
 #[cfg(feature = "full-tests")]
 #[path = "transport_push.rs"]
 mod transport_push;
