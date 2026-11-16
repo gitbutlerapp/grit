@@ -288,7 +288,7 @@ pub fn store_token(url: &str, username: &str, token: &str) -> Result<AuthOutcome
         .context("storing the token with your credential helper")?;
     Ok(AuthOutcome {
         authenticated: true,
-        host: credential.host.unwrap_or_default(),
+        host: credential.host().unwrap_or_default().to_owned(),
         user: Some(username.to_owned()),
         verified: false,
     })
@@ -375,11 +375,11 @@ pub fn logout(server: Option<&ServerUrl>, dry_run: bool) -> Result<LogoutOutcome
         let filled = HelperCredentialProvider::new(config.clone())
             .fill(&lookup)
             .ok()
-            .filter(|c| c.password.as_ref().is_some_and(|p| !p.is_empty()));
+            .filter(|c| c.password().is_some_and(|p| !p.is_empty()));
         let credential = filled.map(|c| LogoutCredentialPreview {
-            protocol: c.protocol.unwrap_or_else(|| "https".to_owned()),
-            host: c.host.unwrap_or_else(|| host.clone()),
-            username: c.username,
+            protocol: c.protocol().unwrap_or("https").to_owned(),
+            host: c.host().map_or_else(|| host.clone(), str::to_owned),
+            username: c.username().map(str::to_owned),
         });
         return Ok(LogoutOutcome {
             logged_out: credential.is_some(),

@@ -9,7 +9,7 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;

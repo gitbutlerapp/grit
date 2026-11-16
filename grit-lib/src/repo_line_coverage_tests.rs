@@ -4,7 +4,8 @@
 
 use crate::config::environment::{Environment, RepositoryOptions};
 use crate::git_path::CanonicalizeExt;
-use crate::index::{IndexEntry, MODE_REGULAR};
+use crate::index::IndexEntry;
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::parallel::ThreadPolicy;
@@ -29,7 +30,7 @@ fn index_entry(path: &str, oid: crate::objects::ObjectId) -> IndexEntry {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: MODE_REGULAR,
+        mode: FileMode::REGULAR,
         uid: 0,
         gid: 0,
         size: 0,

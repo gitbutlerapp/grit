@@ -36,7 +36,7 @@ use crate::diff::bloom::BloomFilterSettings;
 use crate::environment::Environment;
 use crate::error::{ConfigError, Error, Result};
 use crate::fsck as repo_fsck;
-use crate::gc::{prune_loose_unreachable_with, LazyReachable, PruneStats, S_IFDIR, S_IFMT};
+use crate::gc::{prune_loose_unreachable_with, LazyReachable, PruneStats};
 use crate::git_date::approx::approxidate_careful_at;
 use crate::index_pack::{
     install_pack_bytes_with_progress, install_pack_path_with_progress, IngestPackOptions,
@@ -46,8 +46,8 @@ use crate::midx::{
     MidxBitmapWriteOutcome, WriteMultiPackIndexOptions, WriteMultiPackIndexResult,
 };
 use crate::objects::{
-    oid_hash_map, tag_object_line_oid, CommitRef, FileMode, ObjectId, ObjectKind, OidHashMap,
-    OidHashSet, TreeRefIter,
+    oid_hash_map, tag_object_line_oid, CommitRef, ObjectId, ObjectKind, OidHashMap, OidHashSet,
+    TreeRefIter,
 };
 use crate::odb::UnreachablePackRetention;
 use crate::odb::{Odb, PruneTarget};
@@ -1580,11 +1580,11 @@ fn named_reachable_loose_objects(
             let obj = odb.read(&tree)?;
             for entry in TreeRefIter::with_oid_len(&obj.data, hash_len) {
                 let entry = entry?;
-                if FileMode::new(entry.mode).is_gitlink() || !pending.contains(&entry.oid) {
+                if entry.mode.is_gitlink() || !pending.contains(&entry.oid) {
                     continue;
                 }
                 let hash = pack_name_hash_child(name_hash, entry.name);
-                if entry.mode & S_IFMT == S_IFDIR {
+                if entry.mode.is_tree() {
                     trees.push((entry.oid, Some(hash)));
                 } else {
                     pending.remove(&entry.oid);

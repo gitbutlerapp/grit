@@ -30,8 +30,8 @@ pub fn looks_like_command_line_option(s: &str) -> bool {
 
 /// True when `name` names a `.gitmodules` file (HFS / NTFS spellings), not a symlink.
 #[must_use]
-pub fn tree_entry_is_gitmodules_blob(mode: u32, name: &[u8]) -> bool {
-    if mode == 0o120000 {
+pub fn tree_entry_is_gitmodules_blob(mode: FileMode, name: &[u8]) -> bool {
+    if mode == FileMode::SYMLINK {
         return false;
     }
     let Ok(name_str) = std::str::from_utf8(name) else {
@@ -42,8 +42,8 @@ pub fn tree_entry_is_gitmodules_blob(mode: u32, name: &[u8]) -> bool {
 
 /// True for a tree entry name that should be treated as `.gitattributes` for fsck (blob only).
 #[must_use]
-pub fn tree_entry_is_gitattributes_blob(mode: u32, name: &[u8]) -> bool {
-    if mode == 0o120000 {
+pub fn tree_entry_is_gitattributes_blob(mode: FileMode, name: &[u8]) -> bool {
+    if mode == FileMode::SYMLINK {
         return false;
     }
     let Ok(name_str) = std::str::from_utf8(name) else {
@@ -810,7 +810,7 @@ fn collect_gitmodules_blobs_from_tree(
         }
         let entries = parse_tree(&obj.data)?;
         for TreeEntry { mode, name, oid } in entries {
-            if tree_entry_is_gitmodules_blob(mode.bits(), &name) {
+            if tree_entry_is_gitmodules_blob(mode, &name) {
                 blobs.insert(oid);
             } else if mode == FileMode::TREE {
                 stack.push(oid);

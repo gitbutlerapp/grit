@@ -1142,7 +1142,7 @@ fn commit_files_between_trees(
 fn root_commit_files_from_index(index: &Index) -> Option<Vec<CommitFile>> {
     let mut files = Vec::with_capacity(index.entries().len());
     for entry in index.entries() {
-        if entry.mode == crate::index::MODE_TREE {
+        if entry.mode == crate::objects::FileMode::TREE {
             return None;
         }
         if entry.stage() != 0 || entry.intent_to_add() {
@@ -1210,14 +1210,14 @@ fn commit_files_from_raw_paths(
         odb: &crate::odb::Odb,
         tree: &ObjectId,
         prefix: &[u8],
-        out: &mut BTreeMap<Vec<u8>, (u32, ObjectId)>,
+        out: &mut BTreeMap<Vec<u8>, (crate::objects::FileMode, ObjectId)>,
     ) -> Result<()> {
         for entry in crate::objects::parse_tree(&odb.read(tree)?.data)? {
             let path = crate::repo_relpath::join_rel(prefix, &entry.name);
             if entry.mode == crate::objects::FileMode::TREE {
                 collect(odb, &entry.oid, &path, out)?;
             } else {
-                out.insert(path, (entry.mode.bits(), entry.oid));
+                out.insert(path, (entry.mode, entry.oid));
             }
         }
         Ok(())
@@ -2197,7 +2197,8 @@ mod tests {
 
     use super::*;
     use crate::error::Error;
-    use crate::index::{entry_from_stat, Index, MODE_REGULAR};
+    use crate::index::{entry_from_stat, Index};
+    use crate::objects::FileMode;
     use crate::objects::ObjectKind;
     use crate::pathspec::{Pathspec, PathspecGlobalFlags};
     use crate::porcelain::add::{stage, StageOptions};
@@ -2240,7 +2241,7 @@ mod tests {
         }
         fs::write(&abs, contents).unwrap();
         let oid = repo.odb().write(ObjectKind::Blob, contents).unwrap();
-        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).unwrap();
+        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).unwrap();
         index.add_or_replace(entry);
     }
 
@@ -2284,7 +2285,7 @@ mod tests {
             stage_file_in_index(&repo, &mut index, rel, rel.as_bytes());
         }
         let template = index.get(b"a.txt", 0).unwrap().clone();
-        let with_path = |path: &[u8], mode: u32, oid: ObjectId| {
+        let with_path = |path: &[u8], mode: crate::objects::FileMode, oid: ObjectId| {
             let mut entry = template.clone();
             entry.path = path.to_vec();
             entry.flags = path.len() as u16;
@@ -2293,10 +2294,14 @@ mod tests {
             entry
         };
         let blob = repo.odb().write(ObjectKind::Blob, b"raw\n").unwrap();
-        index.add_or_replace(with_path(b"bin\xff.txt", MODE_REGULAR, blob));
+        index.add_or_replace(with_path(b"bin\xff.txt", FileMode::REGULAR, blob));
         let gitlink = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
-        index.add_or_replace(with_path(b"module", crate::index::MODE_GITLINK, gitlink));
-        let mut ita = with_path(b"ita.txt", MODE_REGULAR, blob);
+        index.add_or_replace(with_path(
+            b"module",
+            crate::objects::FileMode::GITLINK,
+            gitlink,
+        ));
+        let mut ita = with_path(b"ita.txt", FileMode::REGULAR, blob);
         ita.set_intent_to_add(true);
         index.add_or_replace(ita);
         index.sort();
@@ -2308,7 +2313,7 @@ mod tests {
         assert_eq!(from_index.len(), 6);
         assert_eq!(from_index, from_tree);
 
-        let mut placeholder = with_path(b"sparse/", crate::index::MODE_TREE, tree);
+        let mut placeholder = with_path(b"sparse/", crate::objects::FileMode::TREE, tree);
         placeholder.set_skip_worktree(true);
         index.add_or_replace(placeholder);
         assert!(root_commit_files_from_index(&index).is_none());

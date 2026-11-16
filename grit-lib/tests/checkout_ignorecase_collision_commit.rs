@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{entry_from_stat, Index, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
@@ -43,7 +44,7 @@ fn build_collision_tree(repo: &Repository) -> grit_lib::objects::ObjectId {
             .write(ObjectKind::Blob, format!("{name}\n").as_bytes())
             .expect("blob");
         index.add_or_replace(
-            entry_from_stat(&path, name.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+            entry_from_stat(&path, name.as_bytes(), oid, FileMode::REGULAR).expect("entry"),
         );
     }
     index.sort();
@@ -431,7 +432,7 @@ fn build_directory_name_collision_index(
             &dest.join("Docs/guide.md"),
             b"Docs/guide.md",
             oid_one,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )
         .expect("entry"),
     );
@@ -440,7 +441,7 @@ fn build_directory_name_collision_index(
             &dest.join("Docs/guide.md"),
             b"docs/guide.md",
             oid_two,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )
         .expect("entry"),
     );
@@ -589,10 +590,10 @@ fn build_flat_name_collision_tree(repo: &Repository, dest: &Path) -> grit_lib::o
     fs::write(dest.join("a.txt"), b"twotwotwo\n").expect("on-disk bytes match a.txt");
     let mut index = Index::new();
     index.add_or_replace(
-        entry_from_stat(&dest.join("a.txt"), b"A.txt", oid_one, MODE_REGULAR).expect("A"),
+        entry_from_stat(&dest.join("a.txt"), b"A.txt", oid_one, FileMode::REGULAR).expect("A"),
     );
     index.add_or_replace(
-        entry_from_stat(&dest.join("a.txt"), b"a.txt", oid_two, MODE_REGULAR).expect("a"),
+        entry_from_stat(&dest.join("a.txt"), b"a.txt", oid_two, FileMode::REGULAR).expect("a"),
     );
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
@@ -660,7 +661,7 @@ fn build_flat_readme_collision_head(fx: &TestRepo) -> grit_lib::objects::ObjectI
             &fx.dest.join("readme.txt"),
             b"Readme.TXT",
             oid_upper,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )
         .expect("upper entry"),
     );
@@ -669,7 +670,7 @@ fn build_flat_readme_collision_head(fx: &TestRepo) -> grit_lib::objects::ObjectI
             &fx.dest.join("readme.txt"),
             b"readme.txt",
             oid_lower,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )
         .expect("lower entry"),
     );

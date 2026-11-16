@@ -20,7 +20,8 @@ fn init_repo() -> (TempDir, Repository) {
 }
 
 fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::ObjectId {
-    use grit_lib::index::{entry_from_stat, MODE_REGULAR};
+    use grit_lib::index::entry_from_stat;
+    use grit_lib::objects::FileMode;
     let work_tree = repo.work_tree().expect("wt");
     for i in 0..count {
         std::fs::write(work_tree.join(format!("f{i}.txt")), format!("body {i}\n")).expect("write");
@@ -34,7 +35,7 @@ fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::Obje
         let abs = work_tree.join(&rel);
         let data = std::fs::read(&abs).expect("read");
         let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
-        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry");
+        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).expect("entry");
         index.add_or_replace(entry);
     }
     index.sort();

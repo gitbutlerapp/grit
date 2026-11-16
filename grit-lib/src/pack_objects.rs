@@ -21,7 +21,8 @@ use crate::error::{Error, Result};
 use crate::hash::HashingWriter;
 use crate::objects::{
     empty_object_id_hash_set, oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit,
-    parse_tag, HashAlgo, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
+    parse_tag, FileMode, HashAlgo, ObjectId, ObjectInfo, ObjectKind, OidHashMap, OidHashSet,
+    TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::pack_object_select::{
@@ -1706,7 +1707,7 @@ fn collect_reachable_excluding(
                     let entry = entry?;
                     // Skip submodule (gitlink) entries: the commit they name
                     // lives in another object store and is not part of this pack.
-                    if entry.mode == 0o160000 {
+                    if entry.mode == FileMode::GITLINK {
                         continue;
                     }
                     enqueue(entry.oid, &mut queue, &mut visited, &mut ordered);

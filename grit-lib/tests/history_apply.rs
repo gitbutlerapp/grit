@@ -9,12 +9,12 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
 use grit_lib::progress::CancelToken;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    ApplyOptions, CommitEdit, HistoryEdits, RefScope, RewriteOptions,
+    ApplyOptions, CommitEdit, CommitRewrite, HistoryEdits, RefScope, RewriteOptions,
 };
 
 use support::{
@@ -110,7 +110,11 @@ fn plan_reword_tree_from_commit(
     let mut edits = HistoryEdits::new();
     edits.insert(
         target,
-        CommitEdit::rewrite(Some(new_tree), Some(format!("{message}\n")), None, None),
+        CommitEdit::rewrite(
+            CommitRewrite::default()
+                .with_tree(new_tree)
+                .with_message(format!("{message}\n")),
+        ),
     );
     grit.history()
         .plan_rewrite(
@@ -129,7 +133,7 @@ fn plan_reword(
     let mut edits = HistoryEdits::new();
     edits.insert(
         target,
-        CommitEdit::rewrite(None, Some(format!("{message}\n")), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message(format!("{message}\n"))),
     );
     grit.history()
         .plan_rewrite(
@@ -154,7 +158,11 @@ fn plan_reword_with_tree(
     let mut edits = HistoryEdits::new();
     edits.insert(
         target,
-        CommitEdit::rewrite(Some(new_tree), Some(format!("{message}\n")), None, None),
+        CommitEdit::rewrite(
+            CommitRewrite::default()
+                .with_tree(new_tree)
+                .with_message(format!("{message}\n")),
+        ),
     );
     grit.history()
         .plan_rewrite(
@@ -257,7 +265,11 @@ fn apply_rewrite_refuses_when_head_moved_since_plan() {
             tree_plus_file(&grit, parent_tree, "rewritten-only.txt", b"new\n").expect("tree");
         edits.insert(
             oids["b"],
-            CommitEdit::rewrite(Some(new_tree), Some("tree change\n".into()), None, None),
+            CommitEdit::rewrite(
+                CommitRewrite::default()
+                    .with_tree(new_tree)
+                    .with_message("tree change\n"),
+            ),
         );
         grit.history()
             .plan_rewrite(
@@ -401,7 +413,7 @@ fn apply_rewrite_bare_repository() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oid,
-        CommitEdit::rewrite(None, Some("bare reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("bare reword\n")),
     );
     let plan = grit
         .history()
@@ -799,7 +811,11 @@ fn plan_tip_tree_edits(
     let mut edits = HistoryEdits::new();
     edits.insert(
         tip,
-        CommitEdit::rewrite(Some(tree), Some("rewrite many paths\n".into()), None, None),
+        CommitEdit::rewrite(
+            CommitRewrite::default()
+                .with_tree(tree)
+                .with_message("rewrite many paths\n"),
+        ),
     );
     grit.history()
         .plan_rewrite(

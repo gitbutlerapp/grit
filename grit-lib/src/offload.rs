@@ -671,7 +671,7 @@ fn select_candidates(repo: &Repository, filter: &ObjectFilterSpec) -> Result<Sel
                 let anchors = will_be_rewritten(&oid);
                 for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
                     let entry = entry?;
-                    match entry.mode & 0o170000 {
+                    match entry.mode.bits() & 0o170000 {
                         0o100000 | 0o120000 => {}
                         0o040000 => {
                             queue.push(entry.oid);
@@ -784,7 +784,7 @@ fn kept_object_the_promisor_pack_names(
             ObjectKind::Tree => {
                 for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
                     let entry = entry?;
-                    if entry.mode & 0o170000 != 0o160000 {
+                    if !entry.mode.is_gitlink() {
                         named.push(entry.oid);
                     }
                 }

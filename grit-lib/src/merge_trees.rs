@@ -19,11 +19,10 @@ use crate::config::ConfigSet;
 use crate::crlf::{DiffAttr, FileAttrs, MergeAttr, TextAttr};
 use crate::diff::{detect_renames, diff_trees, DiffStatus};
 use crate::error::ConfigError;
-use crate::index::{
-    entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_REGULAR,
-};
+use crate::index::{entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry};
 use crate::merge_driver::{try_merge_driver, MergeDriverLabels, MergeDriverOutcome};
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
+use crate::objects::FileMode;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -951,7 +950,7 @@ fn renamed_file_content(
     if same_blob(base, ours) {
         return Ok(Some(theirs.clone()));
     }
-    let regular = |e: &IndexEntry| matches!(e.mode, 0o100644 | 0o100755);
+    let regular = |e: &IndexEntry| matches!(e.mode, FileMode::REGULAR | FileMode::EXECUTABLE);
     if !(regular(base) && regular(ours) && regular(theirs)) {
         return Ok(None);
     }
@@ -1087,7 +1086,7 @@ fn apply_df_file_directory_conflicts_trees(
         let Some(entry) = ours.get(path) else {
             continue;
         };
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             continue;
         }
         if !merge_trees_walk::side_tree_has_descendant_at(
@@ -1121,7 +1120,7 @@ fn apply_df_file_directory_conflicts_trees(
         let Some(entry) = theirs.get(path) else {
             continue;
         };
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             continue;
         }
         if !merge_trees_walk::side_tree_has_descendant_at(
@@ -1210,14 +1209,14 @@ fn park_df_file_side(
     side_entry: Option<IndexEntry>,
 ) -> Option<DfParkedFile> {
     let mut side_entry = side_entry?;
-    if side_entry.mode == 0o040000 {
+    if side_entry.mode == FileMode::TREE {
         return None;
     }
     let occupied = occupied_paths(base, ours, theirs);
     let escaped = uniquify_df_escape_path(path, label, &occupied);
     side_entry.path = escaped.clone();
     side_entry.flags = path_len_flags(&escaped);
-    let base_at_path = base.get(path).filter(|e| e.mode != 0o040000).cloned();
+    let base_at_path = base.get(path).filter(|e| e.mode != FileMode::TREE).cloned();
     Some(DfParkedFile {
         orig: path.to_vec(),
         escaped,
@@ -1247,7 +1246,7 @@ fn directory_unchanged_from_base(
     else {
         return Ok(false);
     };
-    Ok(base.mode == 0o040000 && side.mode == 0o040000 && base.oid == side.oid)
+    Ok(base.mode == FileMode::TREE && side.mode == FileMode::TREE && base.oid == side.oid)
 }
 
 /// Git skips D/F relocation when one side only expanded a base file into `path/…`.
@@ -1263,7 +1262,7 @@ fn skip_df_expansion_ours_file(
     let Some(ours_e) = ours.get(path) else {
         return false;
     };
-    if base_e.mode == 0o040000 {
+    if base_e.mode == FileMode::TREE {
         return false;
     }
     if !same_blob(base_e, ours_e) {
@@ -1287,7 +1286,7 @@ fn skip_df_expansion_theirs_file(
     let Some(theirs_e) = theirs.get(path) else {
         return false;
     };
-    if base_e.mode == 0o040000 {
+    if base_e.mode == FileMode::TREE {
         return false;
     }
     if !same_blob(base_e, theirs_e) {
@@ -1303,7 +1302,8 @@ fn parent_has_file(side: &BTreeMap<Vec<u8>, IndexEntry>, path: &[u8]) -> bool {
     let Some(pos) = path.iter().rposition(|b| *b == b'/') else {
         return false;
     };
-    side.get(&path[..pos]).is_some_and(|e| e.mode != 0o040000)
+    side.get(&path[..pos])
+        .is_some_and(|e| e.mode != FileMode::TREE)
 }
 
 type RenamePathPair = (Vec<u8>, Vec<u8>, u32);
@@ -1387,7 +1387,7 @@ pub(crate) fn merge_one_path(
         (Some(be), Some(oe), Some(te))
             if be.mode == oe.mode
                 && oe.mode == te.mode
-                && matches!(be.mode, 0o120000 | 0o160000) =>
+                && matches!(be.mode, FileMode::SYMLINK | FileMode::GITLINK) =>
         {
             if ctx.virtual_base() {
                 push_stage0(index, out_path, be);
@@ -1505,7 +1505,7 @@ fn push_merged_blob(
     index: &mut Index,
     path: &[u8],
     template: &IndexEntry,
-    mode: u32,
+    mode: FileMode,
     content: &[u8],
 ) -> crate::error::Result<()> {
     let mut e = template.clone();
@@ -1596,8 +1596,8 @@ fn add_add_executable_mode_conflict(
     theirs: &IndexEntry,
     favor: MergeFavor,
 ) -> bool {
-    matches!(ours.mode, 0o100644 | 0o100755)
-        && matches!(theirs.mode, 0o100644 | 0o100755)
+    matches!(ours.mode, FileMode::REGULAR | FileMode::EXECUTABLE)
+        && matches!(theirs.mode, FileMode::REGULAR | FileMode::EXECUTABLE)
         && ours.mode != theirs.mode
         && favor == MergeFavor::None
 }
@@ -1667,9 +1667,9 @@ fn content_merge_or_conflict(
     diff_algorithm: Option<&str>,
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<()> {
-    if matches!(base.mode, 0o120000 | 0o160000)
-        || matches!(ours.mode, 0o120000 | 0o160000)
-        || matches!(theirs.mode, 0o120000 | 0o160000)
+    if matches!(base.mode, FileMode::SYMLINK | FileMode::GITLINK)
+        || matches!(ours.mode, FileMode::SYMLINK | FileMode::GITLINK)
+        || matches!(theirs.mode, FileMode::SYMLINK | FileMode::GITLINK)
     {
         if ctx.virtual_base() {
             push_stage0(index, path, base);
@@ -1826,7 +1826,9 @@ fn add_add_content_conflict(
 ) -> crate::error::Result<()> {
     // Gitlink add/add: no textual merge is possible; leave unmerged stages. A virtual base keeps
     // the (absent) base version, so the path is left out.
-    if matches!(ours.mode, 0o120000 | 0o160000) || matches!(theirs.mode, 0o120000 | 0o160000) {
+    if matches!(ours.mode, FileMode::SYMLINK | FileMode::GITLINK)
+        || matches!(theirs.mode, FileMode::SYMLINK | FileMode::GITLINK)
+    {
         if ctx.virtual_base() {
             return Ok(());
         }
@@ -1951,8 +1953,8 @@ fn add_add_content_conflict(
     // the result is a conflict even if the *content* merges cleanly — Git records unmerged stages
     // 2/3 with the diverging modes (t6411: double mode change with identical content). Type clashes
     // (file/symlink/submodule) are handled by the gitlink branch above / elsewhere.
-    let both_regular_files =
-        matches!(ours.mode, 0o100644 | 0o100755) && matches!(theirs.mode, 0o100644 | 0o100755);
+    let both_regular_files = matches!(ours.mode, FileMode::REGULAR | FileMode::EXECUTABLE)
+        && matches!(theirs.mode, FileMode::REGULAR | FileMode::EXECUTABLE);
     let mode_conflict = both_regular_files && ours.mode != theirs.mode && favor == MergeFavor::None;
 
     if result.conflicts > 0 || mode_conflict {
@@ -2006,7 +2008,7 @@ pub fn refresh_tree_merge_index_stat_cache(
         if entry.stage() != 0 {
             continue;
         }
-        if entry.mode != MODE_REGULAR && entry.mode != crate::index::MODE_EXECUTABLE {
+        if entry.mode != FileMode::REGULAR && entry.mode != crate::objects::FileMode::EXECUTABLE {
             continue;
         }
         if let Some(existing) = index.get(&entry.path, 0) {
@@ -2087,7 +2089,8 @@ fn pending_tree_merge_index_rows(index: &Index, merged: &TreeMergeOutput) -> Tre
             (Some([row]), Some(existing)) => {
                 const FLAG_ASSUME_UNCHANGED: u16 = 0x8000;
                 row.stage() == 0
-                    && (row.mode == MODE_REGULAR || row.mode == crate::index::MODE_EXECUTABLE)
+                    && (row.mode == FileMode::REGULAR
+                        || row.mode == crate::objects::FileMode::EXECUTABLE)
                     && existing.oid == row.oid
                     && existing.mode == row.mode
                     && (existing.flags & !FLAG_ASSUME_UNCHANGED)
@@ -2163,7 +2166,7 @@ pub fn materialized_merge_result_tree(
                 .get(path, 2)
                 .or_else(|| merged.index.get(path, 3))
                 .map(|e| e.mode)
-                .unwrap_or(crate::index::MODE_REGULAR);
+                .unwrap_or(crate::objects::FileMode::REGULAR);
             let mut entry = IndexEntry {
                 ctime_sec: 0,
                 ctime_nsec: 0,
@@ -2242,7 +2245,8 @@ mod tests {
     use super::*;
     use crate::diff::zero_oid;
     use crate::environment::RepositoryOptions;
-    use crate::index::{IndexEntry, MODE_REGULAR};
+    use crate::index::IndexEntry;
+    use crate::objects::FileMode;
     use crate::objects::{parse_commit, ObjectId};
     use crate::repo::Repository;
 
@@ -2531,7 +2535,7 @@ mod tests {
                     assert!(!out.index.has_unmerged_entries(), "no conflict ({case})");
                     assert!(out.conflict_content.is_empty(), "no markers ({case})");
                     assert!(
-                        out.index.entries().iter().all(|e| e.mode != 0o040000),
+                        out.index.entries().iter().all(|e| e.mode != FileMode::TREE),
                         "no directory rows in the index ({case})"
                     );
                     assert_eq!(out.result_tree, expected, "same tree as git ({case})");
@@ -3030,7 +3034,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,
@@ -3062,7 +3066,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 1,
             ino: 1,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 4,

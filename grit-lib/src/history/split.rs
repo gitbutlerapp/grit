@@ -2,7 +2,7 @@
 
 use crate::diff::{diff_trees_with_renames, DiffEntry, DiffStatus};
 use crate::index::{Index, IndexEntry};
-use crate::objects::{ObjectId, ObjectKind};
+use crate::objects::{FileMode, ObjectId, ObjectKind};
 use crate::pathspec::{matches_pathspec_list_with_context, PathspecMatchContext};
 use crate::porcelain::index_from_tree::index_from_tree;
 use crate::repo::Repository;
@@ -167,7 +167,7 @@ fn prepare_index_for_nested_add(index: &mut Index, path: &str) {
     }
 }
 
-fn add_index_blob(index: &mut Index, path: &str, mode: u32, oid: ObjectId) {
+fn add_index_blob(index: &mut Index, path: &str, mode: FileMode, oid: ObjectId) {
     prepare_index_for_nested_add(index, path);
     index.add_or_replace(index_entry(path, mode, oid));
 }
@@ -185,7 +185,7 @@ fn apply_diff_entry_to_index(
             let path = entry.new_path.as_deref().ok_or_else(|| {
                 HistoryError::Planning(PlanningError::SplitAddedDiffMissingNewPath)
             })?;
-            let mode = entry.new_mode.bits();
+            let mode = entry.new_mode;
             add_index_blob(index, path, mode, entry.new_oid);
         }
         DiffStatus::Deleted => {
@@ -208,7 +208,7 @@ fn apply_diff_entry_to_index(
                 .ok_or_else(|| {
                     HistoryError::Planning(PlanningError::SplitModifiedDiffMissingPath)
                 })?;
-            let mode = entry.new_mode.bits();
+            let mode = entry.new_mode;
             add_index_blob(index, path, mode, entry.new_oid);
         }
         DiffStatus::Renamed => {
@@ -219,13 +219,13 @@ fn apply_diff_entry_to_index(
                 let path = entry.new_path.as_deref().ok_or_else(|| {
                     HistoryError::Planning(PlanningError::SplitRenameMissingNewPath)
                 })?;
-                let mode = entry.new_mode.bits();
+                let mode = entry.new_mode;
                 add_index_blob(index, path, mode, entry.new_oid);
             } else if sides.new {
                 let path = entry.new_path.as_deref().ok_or_else(|| {
                     HistoryError::Planning(PlanningError::SplitRenameMissingNewPath)
                 })?;
-                let mode = entry.new_mode.bits();
+                let mode = entry.new_mode;
                 add_index_blob(index, path, mode, entry.new_oid);
             } else if sides.old {
                 let path = entry.old_path.as_deref().ok_or_else(|| {
@@ -241,7 +241,7 @@ fn apply_diff_entry_to_index(
     Ok(())
 }
 
-fn index_entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
+fn index_entry(path: &str, mode: FileMode, oid: ObjectId) -> IndexEntry {
     let path_bytes = path.as_bytes().to_vec();
     IndexEntry {
         ctime_sec: 0,

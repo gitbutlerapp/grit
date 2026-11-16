@@ -11,7 +11,7 @@ use grit_lib::error::Error;
 use grit_lib::index::resolve_undo::{
     parse_resolve_undo_payload, write_resolve_undo_payload, ResolveUndoRecord,
 };
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::index::{IndexCorruptReason, IndexError};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::Repository;

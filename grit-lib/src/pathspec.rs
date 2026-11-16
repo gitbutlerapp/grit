@@ -12,6 +12,7 @@
 //! library does not read the process environment for them.
 
 use crate::git_path::CanonicalizeExt;
+use crate::objects::FileMode;
 use crate::worktree::WorktreeError;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
@@ -559,7 +560,7 @@ impl Pathspec {
         &self,
         repo: &Repository,
         path: &str,
-        mode: u32,
+        mode: FileMode,
     ) -> crate::error::Result<bool> {
         if self.is_entire_tree() {
             return Ok(true);
@@ -1372,8 +1373,7 @@ impl<'s> PathspecMatcher<'s> {
     /// are none or the list is empty) and no `:(exclude)` spec.
     #[must_use]
     pub fn matches(&self, path: &str) -> bool {
-        const REGULAR_FILE: u32 = 0o100644;
-        self.matches_entry(path, REGULAR_FILE)
+        self.matches_entry(path, FileMode::REGULAR)
     }
 
     /// Like [`Self::matches`], but uses Git tree/index entry `mode` for trailing-slash and
@@ -1381,7 +1381,7 @@ impl<'s> PathspecMatcher<'s> {
     ///
     /// Required for path-limited history walks and staging when specs include `:(attr:...)` magic.
     #[must_use]
-    pub fn matches_entry(&self, path: &str, mode: u32) -> bool {
+    pub fn matches_entry(&self, path: &str, mode: FileMode) -> bool {
         let ctx = context_from_mode_bits(mode);
         let match_ctx = PathspecMatchContext {
             is_directory: ctx.is_directory,
@@ -1460,7 +1460,7 @@ fn attr_requirements_match(
     attrs: AttrLookup<'_>,
     path: &str,
     is_dir: bool,
-    mode: u32,
+    mode: FileMode,
 ) -> bool {
     let no_macros = MacroTable::default();
     let assigned = path_gitattribute_values(
@@ -1472,7 +1472,7 @@ fn attr_requirements_match(
     );
     requirements.iter().all(|req| {
         let value: Option<Cow<'_, str>> = if req.name() == "builtin_objectmode" {
-            (mode != 0).then(|| Cow::Owned(format!("{mode:06o}")))
+            (mode != FileMode::ABSENT).then(|| Cow::Owned(format!("{mode:06o}")))
         } else {
             assigned
                 .get(req.name())
@@ -1830,7 +1830,7 @@ impl<'a> PathspecListMatcher<'a> {
 #[must_use]
 pub(crate) fn matches_pathspec_list_for_object(
     path: &str,
-    mode: u32,
+    mode: FileMode,
     attr_rules: &[AttrRule],
     specs: &[String],
 ) -> bool {
@@ -1839,7 +1839,7 @@ pub(crate) fn matches_pathspec_list_for_object(
 
 pub(crate) fn matches_pathspec_list_with_attrs(
     path: &str,
-    mode: u32,
+    mode: FileMode,
     attrs: AttrLookup<'_>,
     specs: &[String],
 ) -> bool {
@@ -1871,7 +1871,7 @@ pub(crate) fn matches_pathspec_list_with_attrs(
 fn matches_pathspec_exclude_for_object(
     spec: &str,
     path: &str,
-    mode: u32,
+    mode: FileMode,
     attrs: AttrLookup<'_>,
 ) -> bool {
     let globals = PathspecGlobalFlags::default();
@@ -2153,16 +2153,15 @@ pub(crate) fn context_from_mode_octal(mode: &str) -> PathspecMatchContext {
     let Ok(bits) = u32::from_str_radix(mode, 8) else {
         return PathspecMatchContext::default();
     };
-    context_from_mode_bits(bits)
+    context_from_mode_bits(FileMode::new(bits))
 }
 
 /// Classify a raw Git mode (e.g. from an index or tree entry) for pathspec matching.
 #[must_use]
-pub(crate) fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
-    let ty = mode & 0o170000;
+pub(crate) fn context_from_mode_bits(mode: FileMode) -> PathspecMatchContext {
     PathspecMatchContext {
-        is_directory: ty == 0o040000,
-        is_git_submodule: ty == 0o160000,
+        is_directory: mode.is_tree(),
+        is_git_submodule: mode.is_gitlink(),
         precompose_paths: false,
         ..PathspecMatchContext::default()
     }
@@ -2178,7 +2177,7 @@ pub(crate) fn context_from_mode_bits(mode: u32) -> PathspecMatchContext {
 pub(crate) fn matches_ls_tree_pathspec(
     spec: &str,
     path: &str,
-    mode: u32,
+    mode: FileMode,
     attr_rules: &[AttrRule],
 ) -> bool {
     let globals = PathspecGlobalFlags::default();
@@ -2255,7 +2254,7 @@ pub(crate) fn matches_ls_tree_pathspec(
 fn matches_pathspec_for_object_with_attrs(
     spec: &str,
     path: &str,
-    mode: u32,
+    mode: FileMode,
     attrs: AttrLookup<'_>,
 ) -> bool {
     let globals = PathspecGlobalFlags::default();
@@ -2960,7 +2959,7 @@ mod tree_entry_pathspec_tests {
         assert!(matches_ls_tree_pathspec(
             "a[a]",
             "a[a]/three",
-            0o100644,
+            FileMode::REGULAR,
             &[]
         ));
         assert!(!matches_pathspec_with_context(
@@ -3078,13 +3077,13 @@ mod pathspec_list_tests {
         let attrs = parse_gitattributes_content("fileB labelB\n");
         assert!(!matches_pathspec_list_for_object(
             "sub/fileB",
-            0o100644,
+            FileMode::REGULAR,
             &attrs,
             &specs,
         ));
         assert!(!matches_pathspec_list_for_object(
             "sub/fileB",
-            0o100644,
+            FileMode::REGULAR,
             &attrs,
             &exclude_only,
         ));

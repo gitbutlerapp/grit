@@ -12,7 +12,7 @@ use crate::index::IndexLock;
 use crate::merge_trees::{
     apply_tree_merge_output_to_index, apply_tree_merge_output_to_worktree_index, TreeMergeOutput,
 };
-use crate::objects::ObjectId;
+use crate::objects::{FileMode, ObjectId};
 use crate::porcelain::checkout::{
     checkout_tree_changes_with_index_deferred, checkout_tree_changes_with_index_opts,
     CheckoutApplyOptions, CheckoutIndexWrite,
@@ -249,7 +249,7 @@ pub(crate) fn apply_conflict_tree_merge_to_worktree(
                 .get(path, 2)
                 .or_else(|| index.get(path, 3))
                 .map(|e| e.mode)
-                .unwrap_or(0o100644);
+                .unwrap_or(FileMode::REGULAR);
             let rel = String::from_utf8_lossy(path);
             crate::porcelain::checkout::write_smudged_blob_to_worktree(
                 repo,

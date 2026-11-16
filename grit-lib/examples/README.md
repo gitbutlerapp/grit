@@ -96,7 +96,7 @@ Writes a `.gitignore` in the work tree, builds `IgnoreMatcher::from_repository`,
 
 ## `walk_tree`
 
-Builds a small tree with nested paths, resolves `HEAD`, reads the commit’s **tree** OID, then recursively walks with `objects::parse_tree`. Subtrees use `MODE_TREE`; blobs print as `path -> oid`.
+Builds a small tree with nested paths, resolves `HEAD`, reads the commit’s **tree** OID, then recursively walks with `objects::parse_tree`. Subtrees use `FileMode::TREE`; blobs print as `path -> oid`.
 
 **Interesting bits:** tree objects are flat lists of `(mode, name, oid)`; directories are separate tree objects referenced by OID.
 

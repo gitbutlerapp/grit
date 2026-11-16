@@ -6,7 +6,8 @@ use std::path::Path;
 
 use crate::diff::refresh_index_stat_content_verified_with_rules;
 use crate::error::{Error, Result};
-use crate::index::{index_file_mtime, CacheTreeNode, Index, IndexEntry, MODE_TREE};
+use crate::index::{index_file_mtime, CacheTreeNode, Index, IndexEntry};
+use crate::objects::FileMode;
 use crate::objects::{parse_tree, ObjectId, ObjectKind};
 use crate::path_population::validate_tree_walk_entry;
 use crate::path_validate::ProtectOptions;
@@ -499,7 +500,7 @@ fn sparse_candidate_subtrees(
         }));
     }
     for entry in parse_tree(&obj.data)? {
-        validate_tree_walk_entry(prefix, &entry.name, entry.mode.bits(), protect)?;
+        validate_tree_walk_entry(prefix, &entry.name, entry.mode, protect)?;
         if entry.mode != crate::objects::FileMode::TREE {
             continue;
         }
@@ -630,19 +631,16 @@ impl TreeIndexWalk<'_> {
         let mut entry_count: i32 = 0;
         let mut children = Vec::new();
         for te in parse_tree(&obj.data)? {
-            validate_tree_walk_entry(prefix, &te.name, te.mode.bits(), self.protect)?;
+            validate_tree_walk_entry(prefix, &te.name, te.mode, self.protect)?;
             let path = join_rel(prefix, &te.name);
-            if crate::index::is_tree_mode(te.mode.bits()) {
+            if crate::index::is_tree_mode(te.mode) {
                 let child_seed = seed_node.and_then(|n| find_child(n, &te.name));
                 let child = self.walk(&te.oid, &path, te.name, child_seed)?;
                 entry_count = entry_count.saturating_add(child.entry_count.max(0));
                 children.push(child);
             } else {
-                self.entries.push(tree_entry(
-                    path,
-                    crate::index::canon_mode(te.mode.bits()),
-                    te.oid,
-                ));
+                self.entries
+                    .push(tree_entry(path, crate::index::canon_mode(te.mode), te.oid));
                 entry_count = entry_count.saturating_add(1);
             }
         }
@@ -652,7 +650,7 @@ impl TreeIndexWalk<'_> {
 }
 
 /// Stage-0 entry with zeroed stat data, as read from a tree.
-fn tree_entry(path: Vec<u8>, mode: u32, oid: ObjectId) -> IndexEntry {
+fn tree_entry(path: Vec<u8>, mode: FileMode, oid: ObjectId) -> IndexEntry {
     IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
@@ -698,7 +696,7 @@ fn seed_rows_under<'a>(
     let end = start.checked_add(count)?;
     let rows = seed.get(start..end)?;
     let plain = rows.iter().all(|e| {
-        e.path.starts_with(&dir) && e.stage() == 0 && !e.intent_to_add() && e.mode != MODE_TREE
+        e.path.starts_with(&dir) && e.stage() == 0 && !e.intent_to_add() && e.mode != FileMode::TREE
     });
     let closed = seed.get(end).is_none_or(|e| !e.path.starts_with(&dir));
     (plain && closed).then_some(rows)
@@ -762,7 +760,8 @@ fn copy_stat(dst: &mut IndexEntry, src: &IndexEntry) {
 mod tests {
     use super::*;
     use crate::environment::RepositoryOptions;
-    use crate::index::{IndexEntry, MODE_EXECUTABLE, MODE_REGULAR};
+    use crate::index::IndexEntry;
+    use crate::objects::FileMode;
     use crate::objects::ObjectKind;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::commit::{create_commit, CommitRequest};
@@ -774,7 +773,7 @@ mod tests {
     use tempfile::TempDir;
 
     /// `mtime == 0` builds a tree-style entry with every stat field zeroed.
-    fn entry(path: &str, oid: ObjectId, mode: u32, mtime: u32) -> IndexEntry {
+    fn entry(path: &str, oid: ObjectId, mode: FileMode, mtime: u32) -> IndexEntry {
         let stat = |v: u32| if mtime == 0 { 0 } else { v };
         IndexEntry {
             ctime_sec: mtime,
@@ -809,19 +808,19 @@ mod tests {
         let a = ObjectId::from_bytes(&[1; 20]).expect("oid");
         let b = ObjectId::from_bytes(&[2; 20]).expect("oid");
         let mut target = index_of(vec![
-            entry("same", a, MODE_REGULAR, 0),
-            entry("other-oid", a, MODE_REGULAR, 0),
-            entry("other-mode", a, MODE_REGULAR, 0),
-            entry("only-in-tree", a, MODE_REGULAR, 0),
-            entry("skipped", a, MODE_REGULAR, 0),
+            entry("same", a, FileMode::REGULAR, 0),
+            entry("other-oid", a, FileMode::REGULAR, 0),
+            entry("other-mode", a, FileMode::REGULAR, 0),
+            entry("only-in-tree", a, FileMode::REGULAR, 0),
+            entry("skipped", a, FileMode::REGULAR, 0),
         ]);
-        let mut skipped = entry("skipped", a, MODE_REGULAR, 50);
+        let mut skipped = entry("skipped", a, FileMode::REGULAR, 50);
         skipped.flags |= 0x8000;
         let seed = index_of(vec![
-            entry("same", a, MODE_REGULAR, 10),
-            entry("other-oid", b, MODE_REGULAR, 20),
-            entry("other-mode", a, MODE_EXECUTABLE, 30),
-            entry("only-in-seed", a, MODE_REGULAR, 40),
+            entry("same", a, FileMode::REGULAR, 10),
+            entry("other-oid", b, FileMode::REGULAR, 20),
+            entry("other-mode", a, FileMode::EXECUTABLE, 30),
+            entry("only-in-seed", a, FileMode::REGULAR, 40),
             skipped,
         ]);
         seed_stage0_stat_data(&mut target, &seed);
@@ -876,7 +875,7 @@ mod tests {
             index_from_tree_with_seeded_worktree_stats(&repo, &tree, &real).expect("seeded");
         let plain = index_from_tree_with_worktree_stats(&repo, &tree).expect("plain");
 
-        let oids = |idx: &Index| -> Vec<(Vec<u8>, ObjectId, u32)> {
+        let oids = |idx: &Index| -> Vec<(Vec<u8>, ObjectId, FileMode)> {
             idx.entries
                 .iter()
                 .map(|e| (e.path.clone(), e.oid, e.mode))
@@ -1227,7 +1226,7 @@ mod tests {
     fn sparse_tree_walk_keeps_matching_excluded_subtree_opaque() {
         let (dir, repo, t1, _) = two_commit_repo();
         let unchanged = subtree_oid(&repo, &t1, b"a");
-        let mut placeholder = entry("a/", unchanged, MODE_TREE, 0);
+        let mut placeholder = entry("a/", unchanged, FileMode::TREE, 0);
         placeholder.set_skip_worktree(true);
         let seed = index_of(vec![placeholder]);
         // An unchanged sparse tree must not need any descendant objects or rows.
@@ -1781,7 +1780,7 @@ mod tests {
         let mut missing_row = at_t2.clone();
         missing_row.entries.retain(|e| e.path != b"a/x");
         let mut extra_row = at_t2.clone();
-        extra_row.add_or_replace(entry("a/new", any_oid, MODE_REGULAR, 0));
+        extra_row.add_or_replace(entry("a/new", any_oid, FileMode::REGULAR, 0));
         let mut unmerged = at_t2.clone();
         let mut stage2 = unmerged.get(b"a/x", 0).expect("a/x").clone();
         stage2.set_stage(2);

@@ -22,24 +22,26 @@ Object fsck always enables both flags via [`ProtectOptions::fsck`](rustdoc:grit_
 
 ## Validating components and paths
 
-[`validate_component`](rustdoc:grit_lib::path_validate::validate_component) checks a single tree/index segment (no `/` inside). Pass the Git mode and a [`PathValidationKind`](rustdoc:grit_lib::path_validate::PathValidationKind). Worktree population and checkout use **`Worktree`**. On Windows with `core.protectNTFS` (default), each segment is checked with Git’s `is_valid_win32_path` rules: forbidden characters (`:*?"<>|` and controls), trailing spaces or periods (except `.` and `..`), DOS device names (`CON`, `AUX`, `COM1`, …), plus NTFS drive prefixes and backslash-`.git` spellings. Symlink names reject **`.gitmodules`** on worktree; object fsck uses **`Fsck`** (all four symlink dot-files):
+[`validate_component`](rustdoc:grit_lib::path_validate::validate_component) checks a single tree/index segment (no `/` inside). Pass the Git mode (a [`FileMode`](rustdoc:grit_lib::objects::FileMode)) and a [`PathValidationKind`](rustdoc:grit_lib::path_validate::PathValidationKind). Worktree population and checkout use **`Worktree`**. On Windows with `core.protectNTFS` (default), each segment is checked with Git’s `is_valid_win32_path` rules: forbidden characters (`:*?"<>|` and controls), trailing spaces or periods (except `.` and `..`), DOS device names (`CON`, `AUX`, `COM1`, …), plus NTFS drive prefixes and backslash-`.git` spellings. Symlink names reject **`.gitmodules`** on worktree; object fsck uses **`Fsck`** (all four symlink dot-files):
 
 ```rust
-use grit_lib::path_validate::{validate_component, EntryMode, PathValidationKind, ProtectOptions};
+use grit_lib::objects::FileMode;
+use grit_lib::path_validate::{validate_component, PathValidationKind, ProtectOptions};
 
 let opts = ProtectOptions::fsck();
-validate_component(b"src", EntryMode::new(0o100644), opts, PathValidationKind::Worktree)?;
+validate_component(b"src", FileMode::REGULAR, opts, PathValidationKind::Worktree)?;
 ```
 
 Fsck checks all symlink dot-files (`.gitmodules`, `.gitattributes`, `.gitignore`, `.mailmap`):
 
 ```rust
-use grit_lib::path_validate::{validate_component, EntryMode, PathValidationKind, ProtectOptions};
+use grit_lib::objects::FileMode;
+use grit_lib::path_validate::{validate_component, PathValidationKind, ProtectOptions};
 
 let opts = ProtectOptions::fsck();
 validate_component(
     b".gitignore",
-    EntryMode::new(0o120000),
+    FileMode::SYMLINK,
     opts,
     PathValidationKind::Fsck,
 )?;

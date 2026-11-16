@@ -6,9 +6,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::TreeDiffOptions;
 use grit_lib::error::ObjectError;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{
-    entry_from_stat, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR,
-};
+use grit_lib::index::{entry_from_stat, Index, IndexEntry};
 use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
@@ -124,9 +122,9 @@ fn walk(base: &Path, dir: &Path, out: &mut BTreeMap<String, WorktreeFile>) {
         let git_mode = if meta.file_type().is_symlink() {
             0o120000
         } else if mode & 0o111 != 0 {
-            MODE_EXECUTABLE
+            FileMode::EXECUTABLE
         } else {
-            MODE_REGULAR
+            FileMode::REGULAR
         };
         let symlink_target = if meta.file_type().is_symlink() {
             Some(
@@ -354,7 +352,7 @@ fn parallel_matches_serial_gitlink_and_replacements() {
             &wt.join("file"),
             b"file",
             repo.odb().write(ObjectKind::Blob, b"v1\n").unwrap(),
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )
         .unwrap(),
     );
@@ -382,7 +380,7 @@ fn parallel_matches_serial_gitlink_and_replacements() {
             &wt.join("file/inner"),
             b"file/inner",
             repo.odb().write(ObjectKind::Blob, b"x\n").unwrap(),
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )
         .unwrap(),
     );
@@ -443,7 +441,7 @@ fn external_smudge_filter_runs_once_via_recording_runner() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     index.add_or_replace(
-        entry_from_stat(&wt.join("filtered"), b"filtered", blob, MODE_REGULAR).expect("e"),
+        entry_from_stat(&wt.join("filtered"), b"filtered", blob, FileMode::REGULAR).expect("e"),
     );
     index.sort();
     let _tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
@@ -518,7 +516,7 @@ fn ignorecase_collision_uses_serial_path_and_matches() {
         let path = wt.join(name);
         fs::write(&path, b"").expect("write");
         index.add_or_replace(
-            entry_from_stat(&path, name.as_bytes(), empty, MODE_REGULAR).expect("e"),
+            entry_from_stat(&path, name.as_bytes(), empty, FileMode::REGULAR).expect("e"),
         );
     }
     index.sort();

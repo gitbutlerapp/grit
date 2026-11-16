@@ -3,7 +3,7 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use grit_lib::error::{Error, ObjectError};
-use grit_lib::index::{Index, IndexEntry, MODE_EXECUTABLE};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{
     parse_tree, serialize_tree, FileMode, ObjectId, ObjectKind, TreeEntry, TreeEntryError,
 };
@@ -18,7 +18,7 @@ fn index_entry_new_is_stage_zero_with_zeroed_stat_data() {
     let entry = IndexEntry::new("dir/file.txt", oid(1), FileMode::EXECUTABLE);
     assert_eq!(entry.path, b"dir/file.txt");
     assert_eq!(entry.oid, oid(1));
-    assert_eq!(entry.mode, MODE_EXECUTABLE);
+    assert_eq!(entry.mode, FileMode::EXECUTABLE);
     assert_eq!(entry.stage(), 0);
     assert!(entry.stat_cache_unset());
     assert_eq!(

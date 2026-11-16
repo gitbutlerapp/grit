@@ -272,7 +272,7 @@ fn write_blob_if_missing(
         return Ok(());
     }
     *oid = hash_side_at_path(path, mode)?;
-    let data = read_worktree_bytes_for_mode(Path::new(path), mode.bits()).map_err(|_| {
+    let data = read_worktree_bytes_for_mode(Path::new(path), mode).map_err(|_| {
         NoIndexError::PathNotAccessible {
             path: path.to_owned(),
         }
@@ -282,7 +282,7 @@ fn write_blob_if_missing(
 }
 
 fn hash_side_at_path(path: &str, mode: FileMode) -> Result<ObjectId, NoIndexError> {
-    let data = read_worktree_bytes_for_mode(Path::new(path), mode.bits()).map_err(|_| {
+    let data = read_worktree_bytes_for_mode(Path::new(path), mode).map_err(|_| {
         NoIndexError::PathNotAccessible {
             path: path.to_owned(),
         }
@@ -299,7 +299,7 @@ fn hash_blob(data: &[u8]) -> Result<ObjectId, NoIndexError> {
     })
 }
 
-fn read_side_bytes(path: &Path, mode: u32) -> Result<Vec<u8>, NoIndexError> {
+fn read_side_bytes(path: &Path, mode: FileMode) -> Result<Vec<u8>, NoIndexError> {
     read_worktree_bytes_for_mode(path, mode).map_err(|_| NoIndexError::PathNotAccessible {
         path: path.display().to_string(),
     })
@@ -308,8 +308,8 @@ fn read_side_bytes(path: &Path, mode: u32) -> Result<Vec<u8>, NoIndexError> {
 fn worktree_content_equal(
     left: &Path,
     right: &Path,
-    mode_left: u32,
-    mode_right: u32,
+    mode_left: FileMode,
+    mode_right: FileMode,
 ) -> Result<bool, NoIndexError> {
     let (ls, rs) = (
         fs::metadata(left).map(|m| m.len()).ok(),
@@ -327,11 +327,11 @@ fn worktree_content_equal(
 fn oids_for_pair(
     left: Option<&Path>,
     right: Option<&Path>,
-    mode_left: u32,
-    mode_right: u32,
+    mode_left: FileMode,
+    mode_right: FileMode,
 ) -> Result<(ObjectId, ObjectId), NoIndexError> {
     match (left, right) {
-        (Some(l), Some(r)) if mode_left != 0 && mode_right != 0 => {
+        (Some(l), Some(r)) if mode_left != FileMode::ABSENT && mode_right != FileMode::ABSENT => {
             let old_bytes = read_side_bytes(l, mode_left)?;
             let new_bytes = read_side_bytes(r, mode_right)?;
             let old_oid = hash_blob(&old_bytes)?;
@@ -342,11 +342,11 @@ fn oids_for_pair(
             };
             Ok((old_oid, new_oid))
         }
-        (Some(l), _) if mode_left != 0 => {
+        (Some(l), _) if mode_left != FileMode::ABSENT => {
             let old_bytes = read_side_bytes(l, mode_left)?;
             Ok((hash_blob(&old_bytes)?, zero_oid()))
         }
-        (_, Some(r)) if mode_right != 0 => {
+        (_, Some(r)) if mode_right != FileMode::ABSENT => {
             let new_bytes = read_side_bytes(r, mode_right)?;
             Ok((zero_oid(), hash_blob(&new_bytes)?))
         }
@@ -410,19 +410,26 @@ fn queue_diff(
     let dir_left = path_is_dir(left);
     let dir_right = path_is_dir(right);
 
-    if mode_left != 0 && mode_right != 0 && dir_left != dir_right {
+    if mode_left != FileMode::ABSENT && mode_right != FileMode::ABSENT && dir_left != dir_right {
         if dir_left {
             emit_pair(
                 out,
                 None,
                 right,
-                0,
+                FileMode::ABSENT,
                 mode_right,
                 right.map(path_display_string),
             )?;
             return queue_diff(left, None, true, out);
         }
-        emit_pair(out, left, None, mode_left, 0, left.map(path_display_string))?;
+        emit_pair(
+            out,
+            left,
+            None,
+            mode_left,
+            FileMode::ABSENT,
+            left.map(path_display_string),
+        )?;
         return queue_diff(None, right, true, out);
     }
 
@@ -498,13 +505,13 @@ fn emit_pair(
     out: &mut Vec<DiffEntry>,
     left: Option<&Path>,
     right: Option<&Path>,
-    mode_left: u32,
-    mode_right: u32,
+    mode_left: FileMode,
+    mode_right: FileMode,
     display: Option<String>,
 ) -> Result<(), NoIndexError> {
     let (status, old_path, new_path) = match (left, right) {
-        (Some(_l), Some(_r)) if mode_left == 0 || mode_right == 0 => {
-            if mode_left == 0 {
+        (Some(_l), Some(_r)) if mode_left == FileMode::ABSENT || mode_right == FileMode::ABSENT => {
+            if mode_left == FileMode::ABSENT {
                 (DiffStatus::Added, None, display.clone())
             } else {
                 (DiffStatus::Deleted, display.clone(), None)
@@ -525,12 +532,12 @@ fn emit_pair(
         (None, None) => return Ok(()),
     };
 
-    let old_mode = FileMode::new(mode_left);
-    let new_mode = FileMode::new(mode_right);
+    let old_mode = mode_left;
+    let new_mode = mode_right;
 
     if let (Some(l), Some(r)) = (left, right) {
-        if mode_left != 0
-            && mode_right != 0
+        if mode_left != FileMode::ABSENT
+            && mode_right != FileMode::ABSENT
             && old_mode == new_mode
             && worktree_content_equal(l, r, mode_left, mode_right)?
         {
@@ -557,24 +564,24 @@ fn emit_pair(
     Ok(())
 }
 
-fn file_kind(mode: u32) -> u32 {
-    if mode & S_IFMT != 0 {
-        mode & S_IFMT
+fn file_kind(mode: FileMode) -> u32 {
+    if mode.bits() & S_IFMT != 0 {
+        mode.bits() & S_IFMT
     } else {
         S_IFREG
     }
 }
 
-fn path_mode(path: Option<&Path>, recursing: bool) -> Result<u32, NoIndexError> {
+fn path_mode(path: Option<&Path>, recursing: bool) -> Result<FileMode, NoIndexError> {
     let Some(path) = path else {
-        return Ok(0);
+        return Ok(FileMode::ABSENT);
     };
     if !recursing && path.as_os_str().is_empty() {
-        return Ok(0);
+        return Ok(FileMode::ABSENT);
     }
     match fs::symlink_metadata(path) {
         Ok(meta) => Ok(mode_from_metadata(&meta)),
-        Err(_) if recursing => Ok(0),
+        Err(_) if recursing => Ok(FileMode::ABSENT),
         Err(_) => Err(NoIndexError::PathNotAccessible {
             path: path.display().to_string(),
         }),

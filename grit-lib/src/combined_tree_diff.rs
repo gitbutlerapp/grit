@@ -6,7 +6,9 @@
 
 use crate::diff::zero_oid;
 use crate::error::Result;
-use crate::objects::{parse_commit, parse_tree, tree_name_cmp, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{
+    parse_commit, parse_tree, tree_name_cmp, FileMode, ObjectId, ObjectKind, TreeEntry,
+};
 use crate::odb::Odb;
 
 /// One character per parent for raw / name-status combined output (`A`/`M`/`D`).
@@ -160,8 +162,9 @@ pub enum CombinedParentStatus {
 pub struct CombinedDiffPath {
     /// Path relative to repository root.
     pub path: String,
-    /// Mode and OID on the merge result side (`0` / zero OID when deleted from merge).
-    pub merge_mode: u32,
+    /// Mode and OID on the merge result side ([`FileMode::ABSENT`] / zero OID when deleted
+    /// from merge).
+    pub merge_mode: FileMode,
     /// `merge_oid` field.
     pub merge_oid: ObjectId,
     /// One slot per parent commit (same order as `parents` passed to [`combined_diff_paths_filtered`]).
@@ -180,7 +183,7 @@ impl CombinedDiffPath {
     #[must_use]
     pub fn new(
         path: impl Into<String>,
-        merge_mode: u32,
+        merge_mode: FileMode,
         merge_oid: ObjectId,
         parents: Vec<CombinedParentSide>,
     ) -> Self {
@@ -197,8 +200,8 @@ impl CombinedDiffPath {
 #[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct CombinedParentSide {
-    /// `mode` field.
-    pub mode: u32,
+    /// This parent's mode at the path ([`FileMode::ABSENT`] when the parent lacks it).
+    pub mode: FileMode,
     /// `oid` field.
     pub oid: ObjectId,
     /// `status` field.
@@ -218,7 +221,7 @@ impl CombinedParentSide {
     /// - `oid`: the parent's object id at this path.
     /// - `status`: how the merge result differs from this parent.
     #[must_use]
-    pub fn new(mode: u32, oid: ObjectId, status: CombinedParentStatus) -> Self {
+    pub fn new(mode: FileMode, oid: ObjectId, status: CombinedParentStatus) -> Self {
         Self {
             mode,
             oid,
@@ -254,10 +257,6 @@ impl CombinedTreeDiffOptions {
     }
 }
 
-fn is_tree_mode(mode: u32) -> bool {
-    (mode & 0o170000) == 0o040000
-}
-
 fn read_tree_entries(odb: &Odb, oid: Option<&ObjectId>) -> Result<Vec<TreeEntry>> {
     let Some(oid) = oid else {
         return Ok(Vec::new());
@@ -274,12 +273,9 @@ fn tree_entry_pathcmp(a: Option<&TreeEntry>, b: Option<&TreeEntry>) -> std::cmp:
         (None, None) => std::cmp::Ordering::Equal,
         (None, Some(_)) => std::cmp::Ordering::Greater,
         (Some(_), None) => std::cmp::Ordering::Less,
-        (Some(e1), Some(e2)) => tree_name_cmp(
-            &e1.name,
-            is_tree_mode(e1.mode.bits()),
-            &e2.name,
-            is_tree_mode(e2.mode.bits()),
-        ),
+        (Some(e1), Some(e2)) => {
+            tree_name_cmp(&e1.name, e1.mode.is_tree(), &e2.name, e2.mode.is_tree())
+        }
     }
 }
 
@@ -310,9 +306,9 @@ fn emit_combined_path(
             let tpi_valid = !parent_neq[i];
             let (mode_i, oid_i, status) = if tpi_valid {
                 let e = &tp[i][tp_idx[i]];
-                (e.mode.bits(), e.oid, CombinedParentStatus::Modified)
+                (e.mode, e.oid, CombinedParentStatus::Modified)
             } else {
-                (0u32, zero_oid(), CombinedParentStatus::Added)
+                (FileMode::ABSENT, zero_oid(), CombinedParentStatus::Added)
             };
             parents.push(CombinedParentSide {
                 mode: mode_i,
@@ -323,7 +319,7 @@ fn emit_combined_path(
         }
         let p = CombinedDiffPath {
             path,
-            merge_mode: te.mode.bits(),
+            merge_mode: te.mode,
             merge_oid: te.oid,
             parents,
         };
@@ -335,9 +331,9 @@ fn emit_combined_path(
             let tpi_valid = !parent_neq[i];
             let (mode_i, oid_i, status) = if tpi_valid {
                 let e = &tp[i][tp_idx[i]];
-                (e.mode.bits(), e.oid, CombinedParentStatus::Deleted)
+                (e.mode, e.oid, CombinedParentStatus::Deleted)
             } else {
-                (0u32, zero_oid(), CombinedParentStatus::Added)
+                (FileMode::ABSENT, zero_oid(), CombinedParentStatus::Added)
             };
             parents.push(CombinedParentSide {
                 mode: mode_i,
@@ -348,7 +344,7 @@ fn emit_combined_path(
         }
         let p = CombinedDiffPath {
             path,
-            merge_mode: 0,
+            merge_mode: FileMode::ABSENT,
             merge_oid: zero_oid(),
             parents,
         };
@@ -445,7 +441,7 @@ fn ll_diff_tree_paths(
                         format!("{base_path}/{name}")
                     };
 
-                    let isdir = is_tree_mode(te.mode.bits());
+                    let isdir = te.mode.is_tree();
                     let mut do_emit = true;
                     if isdir && should_recurse_dir(&full_path, opt) {
                         do_emit = opt.tree_in_recursive;
@@ -473,9 +469,9 @@ fn ll_diff_tree_paths(
                             if let Some(pe) = tp_entries[i].get(tp_idx[i]) {
                                 if tree_name_cmp(
                                     &pe.name,
-                                    is_tree_mode(pe.mode.bits()),
+                                    pe.mode.is_tree(),
                                     &te.name,
-                                    is_tree_mode(te.mode.bits()),
+                                    te.mode.is_tree(),
                                 ) == std::cmp::Ordering::Equal
                                 {
                                     child_parent_opts[i] = Some(pe.oid);
@@ -512,7 +508,7 @@ fn ll_diff_tree_paths(
             } else {
                 format!("{base_path}/{name}")
             };
-            let isdir = is_tree_mode(te.mode.bits());
+            let isdir = te.mode.is_tree();
             let mut do_emit = true;
             if isdir && should_recurse_dir(&full_path, opt) {
                 do_emit = opt.tree_in_recursive;
@@ -556,7 +552,7 @@ fn ll_diff_tree_paths(
                     } else {
                         format!("{base_path}/{name}")
                     };
-                    let isdir = is_tree_mode(pe.mode.bits());
+                    let isdir = pe.mode.is_tree();
                     let mut do_emit = true;
                     if isdir && should_recurse_dir(&full_path, opt) {
                         do_emit = opt.tree_in_recursive;

@@ -10,12 +10,14 @@ use std::process::Command;
 
 use grit_lib::commit::encoding;
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{
     parse_commit, parse_tree, serialize_commit, CommitData, ObjectId, ObjectKind,
 };
 use grit_lib::repo::Repository;
-use grit_lib::revwalk::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
+use grit_lib::revwalk::history::{
+    CommitEdit, CommitRewrite, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
+};
 
 use support::{build_commit_dag, commit_file, git, git_rev_parse, HistoryRepo};
 
@@ -123,7 +125,7 @@ fn plan_rewrite_rewords_and_replays_linear_descendants() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["b"],
-        CommitEdit::rewrite(None, Some("second reworded\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("second reworded\n")),
     );
     let plan = grit
         .history()
@@ -177,7 +179,7 @@ fn plan_rewrite_preserves_encoding_when_message_unchanged() {
     git(wt, &["update-ref", "refs/heads/main", &encoded_b.to_hex()]);
 
     let mut edits = HistoryEdits::new();
-    edits.insert(encoded_b, CommitEdit::rewrite(None, None, None, None));
+    edits.insert(encoded_b, CommitEdit::rewrite(CommitRewrite::default()));
     let plan = grit
         .history()
         .plan_rewrite(
@@ -213,11 +215,11 @@ fn plan_rewrite_implicit_tree_replay_preserves_ancestor_tree_change() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         a_oid,
-        CommitEdit::rewrite(Some(a_tree_with_ancestor), None, None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_tree(a_tree_with_ancestor)),
     );
     edits.insert(
         b_oid,
-        CommitEdit::rewrite(None, Some("reword child only\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("reword child only\n")),
     );
     let plan = grit
         .history()
@@ -342,7 +344,7 @@ fn plan_rewrite_non_commit_tip_is_a_typed_engine_error() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         blob,
-        CommitEdit::rewrite(None, Some("nope\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("nope\n")),
     );
     let err = grit
         .history()
@@ -411,7 +413,7 @@ fn plan_rewrite_strips_gpgsig_and_gpgsig_sha256() {
         let mut edits = HistoryEdits::new();
         edits.insert(
             signed,
-            CommitEdit::rewrite(None, Some(format!("reword {case}\n")), None, None),
+            CommitEdit::rewrite(CommitRewrite::default().with_message(format!("reword {case}\n"))),
         );
         let plan = grit
             .history()
@@ -455,7 +457,7 @@ fn plan_rewrite_keeps_all_merge_parents_on_implicit_tree_reword() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         merge_oid,
-        CommitEdit::rewrite(None, Some("merge reword only\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("merge reword only\n")),
     );
     let plan = grit
         .history()
@@ -485,7 +487,7 @@ fn plan_rewrite_skips_merge_when_parent_tree_unchanged() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("first reworded\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("first reworded\n")),
     );
     let _plan = grit
         .history()
@@ -509,7 +511,7 @@ fn plan_rewrite_updates_all_descendant_branches() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("root reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("root reword\n")),
     );
     let plan = grit
         .history()
@@ -540,7 +542,7 @@ fn plan_rewrite_head_scope_updates_only_head() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("base reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("base reword\n")),
     );
     let plan = grit
         .history()
@@ -574,7 +576,7 @@ fn plan_rewrite_replays_merge_descendants() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("reword root\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("reword root\n")),
     );
     let plan = grit
         .history()
@@ -634,7 +636,10 @@ fn plan_rewrite_reports_conflict_with_paths() {
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
 
     let mut edits = HistoryEdits::new();
-    edits.insert(b, CommitEdit::rewrite(Some(tree_middle), None, None, None));
+    edits.insert(
+        b,
+        CommitEdit::rewrite(CommitRewrite::default().with_tree(tree_middle)),
+    );
 
     let err = grit
         .history()
@@ -673,7 +678,10 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
     grit_test_support::refs::set_ref(&grit, "refs/heads/main", &c).expect("ref");
     let oids_c = c;
     let mut edits_drop = HistoryEdits::new();
-    edits_drop.insert(b, CommitEdit::rewrite(Some(tree_a), None, None, None));
+    edits_drop.insert(
+        b,
+        CommitEdit::rewrite(CommitRewrite::default().with_tree(tree_a)),
+    );
     let drop_plan = grit
         .history()
         .plan_rewrite(
@@ -696,7 +704,10 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
     );
 
     let mut edits_abort = HistoryEdits::new();
-    edits_abort.insert(b, CommitEdit::rewrite(Some(tree_a), None, None, None));
+    edits_abort.insert(
+        b,
+        CommitEdit::rewrite(CommitRewrite::default().with_tree(tree_a)),
+    );
     let abort_err = grit
         .history()
         .plan_rewrite(
@@ -748,7 +759,7 @@ fn plan_rewrite_rejects_branch_checked_out_in_other_worktree() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("reword\n")),
     );
     let err = grit
         .history()
@@ -784,7 +795,7 @@ fn plan_rewrite_skips_same_tip_branch_checked_out_in_other_worktree() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("reword\n")),
     );
     let plan = grit
         .history()
@@ -807,7 +818,7 @@ fn plan_rewrite_detached_head() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["b"],
-        CommitEdit::rewrite(None, Some("detached reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("detached reword\n")),
     );
     let plan = grit
         .history()
@@ -834,7 +845,7 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("silent reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("silent reword\n")),
     );
     let _plan = grit
         .history()
@@ -864,7 +875,7 @@ fn plan_rewrite_surfaces_missing_object_as_library_error() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["b"],
-        CommitEdit::rewrite(None, Some("reword\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("reword\n")),
     );
     let err = grit
         .history()
@@ -903,7 +914,7 @@ fn plan_rewrite_parent_only_replay_matches_git_commit_tree() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         oids["a"],
-        CommitEdit::rewrite(None, Some("reword first\n".into()), None, None),
+        CommitEdit::rewrite(CommitRewrite::default().with_message("reword first\n")),
     );
     let committer_line = committer(99);
     let plan = grit

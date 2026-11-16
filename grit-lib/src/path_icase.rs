@@ -9,8 +9,9 @@ use std::sync::Arc;
 
 use smallvec::SmallVec;
 
-use crate::index::{Index, MODE_GITLINK, MODE_TREE};
+use crate::index::Index;
 use crate::index_name_hash_lazy::memihash;
+use crate::objects::FileMode;
 use crate::parallel::{par_map, ParallelOptions};
 use crate::unicode_normalization::{
     has_non_ascii_utf8, precompose_utf8_path, precompose_utf8_segment,
@@ -964,7 +965,9 @@ pub(crate) fn smudge_ignorecase_collision_stat_mismatches(
             {
                 continue;
             }
-            if ie.mode != crate::index::MODE_REGULAR && ie.mode != crate::index::MODE_EXECUTABLE {
+            if ie.mode != crate::objects::FileMode::REGULAR
+                && ie.mode != crate::objects::FileMode::EXECUTABLE
+            {
                 continue;
             }
             let abs = worktree_path_for_index_entry_with_options(work_tree, member, collision_opts);
@@ -1001,7 +1004,7 @@ fn stage0_blob_paths(index: &Index) -> Vec<&str> {
     index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK)
+        .filter(|e| e.stage() == 0 && e.mode != FileMode::TREE && e.mode != FileMode::GITLINK)
         .filter_map(|e| std::str::from_utf8(&e.path).ok())
         .collect()
 }
@@ -1085,7 +1088,7 @@ pub fn icase_worktree_file_stats(
     let mut bytes = 0u64;
     if !collision_opts.active() {
         for e in &index.entries {
-            if e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK {
+            if e.stage() == 0 && e.mode != FileMode::TREE && e.mode != FileMode::GITLINK {
                 files += 1;
                 bytes += u64::from(e.size);
             }
@@ -1317,7 +1320,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: 0o100644,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

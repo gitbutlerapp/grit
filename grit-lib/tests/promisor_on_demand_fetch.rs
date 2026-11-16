@@ -1027,7 +1027,7 @@ fn hard_reset_keeps_stat_clean_files_without_fetching_their_missing_blobs() {
                 &abs,
                 path.as_bytes(),
                 oid,
-                grit_lib::index::MODE_REGULAR,
+                grit_lib::objects::FileMode::REGULAR,
             )
             .unwrap(),
         );

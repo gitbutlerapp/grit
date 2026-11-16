@@ -4,12 +4,9 @@
 //! instead of reading and parsing each tree on the way by hand.
 
 use crate::error::Result;
-use crate::objects::{ObjectId, TreeEntry, TreeRefIter};
+use crate::objects::{FileMode, ObjectId, TreeEntry, TreeRefIter};
 
 use super::{Odb, SessionTree};
-
-/// Mode of a subtree entry.
-const MODE_TREE: u32 = 0o040000;
 
 impl Odb {
     /// The entry at `path` inside the tree `tree`.
@@ -46,12 +43,12 @@ impl Odb {
             };
             if components.peek().is_none() {
                 return Ok(Some(TreeEntry {
-                    mode: crate::objects::FileMode::new(mode),
+                    mode,
                     name: name.to_vec(),
                     oid,
                 }));
             }
-            if mode != MODE_TREE {
+            if mode != FileMode::TREE {
                 return Ok(None);
             }
             current = oid;
@@ -60,12 +57,12 @@ impl Odb {
     }
 
     /// Mode and id of the entry called `name` directly inside `tree`.
-    fn tree_child(&self, tree: &ObjectId, name: &[u8]) -> Result<Option<(u32, ObjectId)>> {
+    fn tree_child(&self, tree: &ObjectId, name: &[u8]) -> Result<Option<(FileMode, ObjectId)>> {
         match self.cached_tree_for_walk(tree)? {
             SessionTree::Parsed(entries) => Ok(entries
                 .iter()
                 .find(|e| e.name == name)
-                .map(|e| (e.mode.bits(), e.oid))),
+                .map(|e| (e.mode, e.oid))),
             SessionTree::Raw(data) => {
                 for entry in TreeRefIter::with_oid_len(&data, self.hash_algo().len()) {
                     let entry = entry?;
@@ -93,18 +90,18 @@ mod tests {
         entries.sort_by(|a, b| {
             crate::objects::tree_name_cmp(
                 &a.name,
-                a.mode == crate::objects::FileMode::TREE,
+                a.mode == FileMode::TREE,
                 &b.name,
-                b.mode == crate::objects::FileMode::TREE,
+                b.mode == FileMode::TREE,
             )
         });
         odb.write(ObjectKind::Tree, &serialize_tree(&entries))
             .unwrap()
     }
 
-    fn entry(mode: u32, name: &[u8], oid: ObjectId) -> TreeEntry {
+    fn entry(mode: FileMode, name: &[u8], oid: ObjectId) -> TreeEntry {
         TreeEntry {
-            mode: crate::objects::FileMode::new(mode),
+            mode,
             name: name.to_vec(),
             oid,
         }
@@ -114,22 +111,22 @@ mod tests {
     fn fixture(odb: &Odb) -> (ObjectId, ObjectId, ObjectId, ObjectId) {
         let blob_a = odb.write(ObjectKind::Blob, b"a\n").unwrap();
         let blob_b = odb.write(ObjectKind::Blob, b"b\n").unwrap();
-        let nested = write_tree(odb, vec![entry(0o100755, b"b", blob_b)]);
+        let nested = write_tree(odb, vec![entry(FileMode::EXECUTABLE, b"b", blob_b)]);
         let dir = write_tree(
             odb,
             vec![
-                entry(0o100644, b"a", blob_a),
-                entry(MODE_TREE, b"nested", nested),
+                entry(FileMode::REGULAR, b"a", blob_a),
+                entry(FileMode::TREE, b"nested", nested),
             ],
         );
         let gitlink = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         let root = write_tree(
             odb,
             vec![
-                entry(0o100644, b"file", blob_a),
-                entry(0o120000, b"link", blob_b),
-                entry(0o160000, b"sub", gitlink),
-                entry(MODE_TREE, b"dir", dir),
+                entry(FileMode::REGULAR, b"file", blob_a),
+                entry(FileMode::SYMLINK, b"link", blob_b),
+                entry(FileMode::GITLINK, b"sub", gitlink),
+                entry(FileMode::TREE, b"dir", dir),
             ],
         );
         (root, dir, nested, blob_b)
@@ -145,10 +142,10 @@ mod tests {
             .tree_entry_at_path(&root, b"dir/nested/b")
             .unwrap()
             .unwrap();
-        assert_eq!(found, entry(0o100755, b"b", blob_b));
+        assert_eq!(found, entry(FileMode::EXECUTABLE, b"b", blob_b));
         assert_eq!(
             odb.tree_entry_at_path(&root, b"dir").unwrap().unwrap(),
-            entry(MODE_TREE, b"dir", dir)
+            entry(FileMode::TREE, b"dir", dir)
         );
         assert_eq!(
             odb.tree_entry_at_path(&root, b"dir/nested")
@@ -162,11 +159,11 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .mode,
-            crate::objects::FileMode::SYMLINK
+            FileMode::SYMLINK
         );
         assert_eq!(
             odb.tree_entry_at_path(&root, b"sub").unwrap().unwrap().mode,
-            crate::objects::FileMode::GITLINK
+            FileMode::GITLINK
         );
     }
 

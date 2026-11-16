@@ -1983,7 +1983,8 @@ mod tests {
 
     use crate::bloom::BloomFilterSettings;
     use crate::commit_graph_write::{build_commit_graph_bytes, load_commit_graph_commit_info};
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::write_tree_from_index;
@@ -2021,7 +2022,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 2,
@@ -2545,7 +2546,8 @@ mod tests {
     fn bloom_skips_most_steps_when_tracked_path_unchanged_in_linear_history() {
         use crate::bloom::bloom_keyvec_for_path;
         use crate::commit_graph_write::{build_commit_graph_bytes, load_commit_graph_commit_info};
-        use crate::index::{Index, IndexEntry, MODE_REGULAR};
+        use crate::index::{Index, IndexEntry};
+        use crate::objects::FileMode;
         use crate::objects::{serialize_commit, CommitData, ObjectKind};
         use crate::pathspec::bloom_lookup_prefix_with_cwd;
         use crate::repo::init_repository;
@@ -2571,7 +2573,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_REGULAR,
+                mode: FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: stable.len() as u32,
@@ -2593,7 +2595,7 @@ mod tests {
                     mtime_nsec: 0,
                     dev: 0,
                     ino: 0,
-                    mode: MODE_REGULAR,
+                    mode: FileMode::REGULAR,
                     uid: 0,
                     gid: 0,
                     size: 8,

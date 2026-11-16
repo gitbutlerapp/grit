@@ -39,8 +39,8 @@ use crate::error::{Error, Result};
 use crate::fsck_msg_policy::{default_fsck_level, DefaultFsckLevel};
 use crate::fsck_standalone::{fsck_object, FsckError, FsckObjectOptions};
 use crate::gitmodules::{fsck_dot_special_tree_pass, DotFsckIssue, DotFsckTracker};
-use crate::index::MODE_GITLINK;
 use crate::midx::verify_midx;
+use crate::objects::FileMode;
 use crate::objects::{
     oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit,
     parse_commit_tree_and_parents_lenient, parse_tag, HashAlgo, ObjectId, ObjectKind, OidHashMap,
@@ -196,7 +196,7 @@ pub enum FsckIssue {
         /// Entry path component (UTF-8 lossy).
         name: String,
         /// Mode from the tree entry.
-        mode: u32,
+        mode: FileMode,
         /// Target oid from the tree entry.
         target: ObjectId,
     },
@@ -1858,7 +1858,7 @@ fn walk_one_tree_entry(
     entry: TreeEntryRef<'_>,
     promised: &OidHashSet,
 ) {
-    if entry.mode == MODE_GITLINK {
+    if entry.mode == FileMode::GITLINK {
         return;
     }
     if let Some(expected) = kind_for_tree_mode(entry.mode) {
@@ -2012,7 +2012,7 @@ fn follow_typed_link(
                 issues.push(FsckIssue::BrokenLink {
                     tree: parent,
                     name: link_name.to_owned(),
-                    mode: 0,
+                    mode: FileMode::ABSENT,
                     target,
                 });
             }
@@ -2027,8 +2027,8 @@ fn follow_typed_link(
     }
 }
 
-fn kind_for_tree_mode(mode: u32) -> Option<ObjectKind> {
-    match mode {
+fn kind_for_tree_mode(mode: FileMode) -> Option<ObjectKind> {
+    match mode.bits() {
         0o040000 => Some(ObjectKind::Tree),
         // Legacy non-executable file mode; Git still follows the link while reporting badFilemode.
         0o100644 | 0o100664 | 0o100755 | 0o120000 => Some(ObjectKind::Blob),
@@ -2065,7 +2065,7 @@ fn fsck_index_missing_blobs(
     let odb = repo.odb();
     let mut already_reported = issue_oids(issues);
     for entry in index.entries() {
-        if entry.mode == MODE_GITLINK || entry.oid.is_zero() {
+        if entry.mode == FileMode::GITLINK || entry.oid.is_zero() {
             continue;
         }
         if already_reported.contains(&entry.oid) {
@@ -2202,7 +2202,7 @@ mod tests {
                 FsckIssue::BrokenLink {
                     tree: oid,
                     name: "a.txt".to_owned(),
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     target: other,
                 },
                 Some(oid),
@@ -2256,7 +2256,7 @@ mod tests {
         let broken = FsckIssue::BrokenLink {
             tree: oid,
             name: "a.txt".to_owned(),
-            mode: 0o100644,
+            mode: FileMode::REGULAR,
             target: other,
         };
         assert_eq!(
@@ -2587,7 +2587,8 @@ mod tests {
 
     #[test]
     fn fsck_index_missing_blob_uses_contains_not_full_read() {
-        use crate::index::{IndexEntry, MODE_REGULAR};
+        use crate::index::IndexEntry;
+        use crate::objects::FileMode;
 
         let dir = TempDir::new().unwrap();
         let (repo, _) = Repository::init(dir.path(), &InitOptions::default()).unwrap();
@@ -2600,7 +2601,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

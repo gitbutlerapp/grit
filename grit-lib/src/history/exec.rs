@@ -1562,7 +1562,9 @@ mod tests {
         RunningCommand,
     };
     use crate::history::plan::plan_rewrite;
-    use crate::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
+    use crate::history::{
+        CommitEdit, CommitRewrite, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
+    };
     use crate::index::write_tree::write_tree_from_index;
     use crate::objects::parse_commit;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
@@ -1618,7 +1620,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: crate::objects::FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: contents.len() as u32,
@@ -1697,21 +1699,21 @@ mod tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(root_tree),
                 message: Some("root'\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         edits.insert(
             tip,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(tip_tree),
                 message: Some("tip'\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         plan_rewrite(repo, &edits, &test_rewrite()).expect("plan")
     }
@@ -2250,12 +2252,12 @@ mod tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             tip,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(tip_tree),
                 message: Some("tip'\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let mut plan = plan_rewrite(&repo, &edits, &test_rewrite()).expect("plan");
         let (started_tx, started_rx) = mpsc::channel();

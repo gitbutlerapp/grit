@@ -15,8 +15,9 @@ use crate::config::{parse_path, ConfigSet};
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::EwahBitmap;
 use crate::ignore::IgnoreMatcher;
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::Index;
 use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
+use crate::objects::FileMode;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::repo_relpath::{
@@ -694,7 +695,7 @@ fn invalidate_directory(uc: &mut UntrackedCache, dir: &mut UntrackedCacheDir) {
 
 fn tracked_ignore_blob_oid(index: &Index, rel_path: &str) -> Option<ObjectId> {
     let entry = index.get(rel_path.as_bytes(), 0)?;
-    if entry.mode == MODE_GITLINK {
+    if entry.mode == FileMode::GITLINK {
         return None;
     }
     Some(entry.oid)
@@ -765,7 +766,7 @@ impl<'a> TrackedUnderLookup<'a> {
         let mut gitlink_paths: Vec<Vec<u8>> = index
             .entries
             .iter()
-            .filter(|e| e.mode == MODE_GITLINK)
+            .filter(|e| e.mode == FileMode::GITLINK)
             .map(|e| e.path.clone())
             .collect();
         gitlink_paths.sort();
@@ -1237,7 +1238,7 @@ pub(crate) fn refresh_untracked_cache_for_status(
     let gitlinks: BTreeSet<String> = index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+        .filter(|e| e.stage() == 0 && e.mode == FileMode::GITLINK)
         .map(|e| storage_string(&e.path))
         .collect();
 
@@ -2393,7 +2394,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -2412,7 +2413,7 @@ mod tests {
         let gitlinks: BTreeSet<String> = index
             .entries
             .iter()
-            .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+            .filter(|e| e.stage() == 0 && e.mode == FileMode::GITLINK)
             .map(|e| storage_string(&e.path))
             .collect();
         let tracked: BTreeSet<String> = index
@@ -2494,7 +2495,7 @@ mod tests {
 
     #[test]
     fn tracked_under_lookup_unsorted_many_probes_stay_logarithmic() {
-        use crate::index::MODE_REGULAR;
+        use crate::objects::FileMode;
 
         const N: usize = 100_000;
         const M: usize = 1_000;
@@ -2507,7 +2508,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_REGULAR,
+                mode: FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: 0,

@@ -187,14 +187,14 @@ fn wire_format_preserves_extra_and_multivalued_keys_round_trip() {
                  password_expiry_utc=1700000000\n";
     let cred = Credential::parse(input);
 
-    assert_eq!(cred.protocol.as_deref(), Some("https"));
-    assert_eq!(cred.host.as_deref(), Some("example.com"));
-    assert_eq!(cred.username.as_deref(), Some("alice"));
-    assert_eq!(cred.password.as_deref(), Some("secret"));
+    assert_eq!(cred.protocol(), Some("https"));
+    assert_eq!(cred.host(), Some("example.com"));
+    assert_eq!(cred.username(), Some("alice"));
+    assert_eq!(cred.password(), Some("secret"));
 
     // Multi-valued key appears twice, in order; single unknown keys preserved.
     let caps: Vec<&str> = cred
-        .extra
+        .extra()
         .iter()
         .filter(|(k, _)| k == "capability[]")
         .map(|(_, v)| v.as_str())
@@ -205,11 +205,11 @@ fn wire_format_preserves_extra_and_multivalued_keys_round_trip() {
         "capability[] order preserved"
     );
     assert!(cred
-        .extra
+        .extra()
         .iter()
         .any(|(k, v)| k == "authtype" && v == "Bearer"));
     assert!(cred
-        .extra
+        .extra()
         .iter()
         .any(|(k, v)| k == "password_expiry_utc" && v == "1700000000"));
 
@@ -224,13 +224,13 @@ fn parse_stops_at_blank_line_and_tolerates_crlf() {
     let input =
         "protocol=https\r\nhost=h.example\r\nusername=u\r\npassword=p\r\n\r\ninjected=evil\r\n";
     let cred = Credential::parse(input);
-    assert_eq!(cred.host.as_deref(), Some("h.example"));
-    assert_eq!(cred.username.as_deref(), Some("u"));
-    assert_eq!(cred.password.as_deref(), Some("p"));
+    assert_eq!(cred.host(), Some("h.example"));
+    assert_eq!(cred.username(), Some("u"));
+    assert_eq!(cred.password(), Some("p"));
     assert!(
-        cred.extra.iter().all(|(k, _)| k != "injected"),
+        cred.extra().iter().all(|(k, _)| k != "injected"),
         "fields after the blank record terminator must not be parsed: {:?}",
-        cred.extra
+        cred.extra()
     );
 }
 
@@ -238,12 +238,12 @@ fn parse_stops_at_blank_line_and_tolerates_crlf() {
 fn parse_bytes_matches_parse_and_lines_without_equals_ignored() {
     let bytes = b"protocol=https\nhost=b.example\nthis line has no equals sign\nusername=bob\npassword=pw\n";
     let cred = Credential::parse_bytes(bytes);
-    assert_eq!(cred.host.as_deref(), Some("b.example"));
-    assert_eq!(cred.username.as_deref(), Some("bob"));
-    assert_eq!(cred.password.as_deref(), Some("pw"));
+    assert_eq!(cred.host(), Some("b.example"));
+    assert_eq!(cred.username(), Some("bob"));
+    assert_eq!(cred.password(), Some("pw"));
     // The malformed line is silently dropped (not an extra, not a panic).
     assert!(cred
-        .extra
+        .extra()
         .iter()
         .all(|(k, _)| !k.contains("this line has no equals sign")));
     // parse_bytes and parse agree on identical input.
@@ -252,17 +252,17 @@ fn parse_bytes_matches_parse_and_lines_without_equals_ignored() {
 
 #[test]
 fn is_complete_requires_nonempty_user_and_password() {
-    let mut c = Credential::default()
+    let c = Credential::default()
         .with_protocol(Some("https".into()))
         .with_host(Some("h".into()));
     assert!(!c.is_complete(), "no user/pass");
-    c.username = Some("u".into());
+    let c = c.with_username(Some("u".into()));
     assert!(!c.is_complete(), "user only");
-    c.password = Some(String::new());
+    let c = c.with_password(Some(String::new()));
     assert!(!c.is_complete(), "empty password is not complete");
-    c.password = Some("p".into());
+    let c = c.with_password(Some("p".into()));
     assert!(c.is_complete(), "user + non-empty password is complete");
-    c.username = Some(String::new());
+    let c = c.with_username(Some(String::new()));
     assert!(!c.is_complete(), "empty username is not complete");
 }
 
@@ -380,8 +380,8 @@ fn shell_helper_fills_and_forwards_configured_args_and_dispatches_actions() {
     let filled = provider
         .fill(&sample_target("argful.example"))
         .expect("fill via shell helper");
-    assert_eq!(filled.username.as_deref(), Some("carol"));
-    assert_eq!(filled.password.as_deref(), Some("pw-carol"));
+    assert_eq!(filled.username(), Some("carol"));
+    assert_eq!(filled.password(), Some("pw-carol"));
 
     let cred = (sample_target("argful.example"))
         .with_username(Some("carol".into()))
@@ -462,10 +462,10 @@ fn external_credential_store_helper_full_lifecycle_cross_checked_with_git() {
 
     // fill now completes from the stored credential.
     let filled = provider.fill(&target).expect("fill from stored credential");
-    assert_eq!(filled.username.as_deref(), Some("dave"));
-    assert_eq!(filled.password.as_deref(), Some("p@ss-w0rd"));
+    assert_eq!(filled.username(), Some("dave"));
+    assert_eq!(filled.password(), Some("p@ss-w0rd"));
     // Target fields preserved.
-    assert_eq!(filled.host.as_deref(), Some("store.example.com"));
+    assert_eq!(filled.host(), Some("store.example.com"));
 
     // CROSS-CHECK: the system `git credential-store` reading the SAME file must
     // return the identical credential (proves wire compatibility with Git).
@@ -492,11 +492,11 @@ fn external_credential_store_helper_full_lifecycle_cross_checked_with_git() {
         .expect("run git credential-store get");
     let git_cred = Credential::parse_bytes(&git_get.stdout);
     assert_eq!(
-        git_cred.username.as_deref(),
+        git_cred.username(),
         Some("dave"),
         "system git must read the same stored username"
     );
-    assert_eq!(git_cred.password.as_deref(), Some("p@ss-w0rd"));
+    assert_eq!(git_cred.password(), Some("p@ss-w0rd"));
 
     // reject(erase) removes it; fill goes back to the typed non-interactive error.
     provider
@@ -542,8 +542,8 @@ fn store_shorthand_helper_resolves_via_git_exec_path() {
 
     provider.approve(&full).expect("store shorthand approve");
     let filled = provider.fill(&target).expect("store shorthand fill");
-    assert_eq!(filled.username.as_deref(), Some("bob"));
-    assert_eq!(filled.password.as_deref(), Some("secret"));
+    assert_eq!(filled.username(), Some("bob"));
+    assert_eq!(filled.password(), Some("secret"));
 }
 
 // ---------------------------------------------------------------------------
@@ -580,7 +580,7 @@ fn url_scoped_helper_match_nonmatch_wildcard_and_reset() {
     let inside = provider
         .fill(&sample_target("git.corp.example"))
         .expect("wildcard scope matches *.corp.example");
-    assert_eq!(inside.username.as_deref(), Some("corp-user"));
+    assert_eq!(inside.username(), Some("corp-user"));
 
     // Different host -> scope does not apply -> typed non-interactive error.
     let outside = provider
@@ -664,8 +664,8 @@ fn multiple_helpers_chain_until_complete() {
     let filled = provider
         .fill(&sample_target("chain.example"))
         .expect("two helpers together complete the credential");
-    assert_eq!(filled.username.as_deref(), Some("chain-user"));
-    assert_eq!(filled.password.as_deref(), Some("chain-pass"));
+    assert_eq!(filled.username(), Some("chain-user"));
+    assert_eq!(filled.password(), Some("chain-pass"));
 }
 
 #[test]

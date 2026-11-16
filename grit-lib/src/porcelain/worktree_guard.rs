@@ -261,11 +261,11 @@ pub(crate) fn local_change_diffs_for_tree_changes(
 
 /// True when a touched path is a gitlink in the index (requires full submodule checks, not stat-only).
 fn touched_paths_include_gitlinks(index: &Index, paths: &BTreeSet<String>) -> bool {
-    use crate::index::MODE_GITLINK;
+    use crate::objects::FileMode;
     paths.iter().any(|path| {
         index
             .get(crate::repo_relpath::storage_bytes(path).as_ref(), 0)
-            .is_some_and(|ie| ie.stage() == 0 && ie.mode == MODE_GITLINK)
+            .is_some_and(|ie| ie.stage() == 0 && ie.mode == FileMode::GITLINK)
     })
 }
 
@@ -286,7 +286,7 @@ fn switch_worktree_clean_for_paths(
     index_mtime: Option<(u32, u32)>,
     stat_policy: StatMatchPolicy,
 ) -> Result<SwitchWorktreeClean> {
-    use crate::index::MODE_GITLINK;
+    use crate::objects::FileMode;
     use crate::worktree_scan::{
         collect_blob_lookup_batches, for_each_blob_by_directory,
         group_blob_entries_by_dir_for_paths, visit_blob_lookup_batches, BlobDiskLookup,
@@ -304,7 +304,7 @@ fn switch_worktree_clean_for_paths(
             let Some(ie) = index.get(crate::repo_relpath::storage_bytes(path).as_ref(), 0) else {
                 continue;
             };
-            if !indexed_path_needs_worktree_stat_check(ie) || ie.mode != MODE_GITLINK {
+            if !indexed_path_needs_worktree_stat_check(ie) || ie.mode != FileMode::GITLINK {
                 continue;
             }
             let abs = crate::repo_relpath::worktree_abs(work_tree, path);
@@ -313,7 +313,7 @@ fn switch_worktree_clean_for_paths(
             }
         }
     }
-    let mut racy: Vec<(usize, u32)> = Vec::new();
+    let mut racy: Vec<(usize, FileMode)> = Vec::new();
     let mut visit = |entry_index: usize, lookup: BlobDiskLookup| -> Result<()> {
         let ie = &index.entries[entry_index];
         if !indexed_path_needs_worktree_stat_check(ie) {
@@ -327,12 +327,12 @@ fn switch_worktree_clean_for_paths(
                 dirty.insert(crate::repo_relpath::storage_string(&ie.path));
             }
             BlobDiskLookup::Present(stat) => {
-                let mismatch = if ie.mode == MODE_GITLINK {
+                let mismatch = if ie.mode == FileMode::GITLINK {
                     !stat.is_dir
                 } else if stat.is_dir
-                    || stat.git_mode != crate::index::MODE_SYMLINK
-                        && stat.git_mode != crate::index::MODE_REGULAR
-                        && stat.git_mode != crate::index::MODE_EXECUTABLE
+                    || stat.git_mode != crate::objects::FileMode::SYMLINK
+                        && stat.git_mode != crate::objects::FileMode::REGULAR
+                        && stat.git_mode != crate::objects::FileMode::EXECUTABLE
                 {
                     true
                 } else {
@@ -426,7 +426,7 @@ fn racy_entries_with_changed_content(
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
-    racy: &[(usize, u32)],
+    racy: &[(usize, FileMode)],
     cfg: Arc<ConfigSet>,
     precompose_unicode: bool,
     ignorecase: bool,
@@ -438,7 +438,7 @@ fn racy_entries_with_changed_content(
         entry: &'a IndexEntry,
         rel_path: String,
         abs_path: PathBuf,
-        worktree_mode: u32,
+        worktree_mode: FileMode,
         attrs: crlf::FileAttrs,
     }
 
@@ -496,7 +496,7 @@ fn indexed_path_needs_worktree_stat_check(ie: &IndexEntry) -> bool {
 
 #[derive(Clone, Copy)]
 enum HeadTreeSide {
-    Present { oid: ObjectId, mode: u32 },
+    Present { oid: ObjectId, mode: FileMode },
     Absent,
 }
 
@@ -510,7 +510,7 @@ fn head_tree_sides_from_changes(tree_changes: &[DiffEntry]) -> HashMap<String, H
             path.clone(),
             HeadTreeSide::Present {
                 oid: change.old_oid,
-                mode: change.old_mode.bits(),
+                mode: change.old_mode,
             },
         );
     }
@@ -627,7 +627,7 @@ fn staged_diff_for_tree_switch_paths(
                     old_path: None,
                     new_path: Some(path.clone()),
                     old_mode: FileMode::ABSENT,
-                    new_mode: FileMode::new(ie.mode),
+                    new_mode: ie.mode,
                     old_oid: ObjectId::zero(),
                     new_oid: ie.oid,
                     score: None,
@@ -638,7 +638,7 @@ fn staged_diff_for_tree_switch_paths(
                     status: DiffStatus::Deleted,
                     old_path: Some(path.clone()),
                     new_path: None,
-                    old_mode: FileMode::new(mode),
+                    old_mode: mode,
                     new_mode: FileMode::ABSENT,
                     old_oid: oid,
                     new_oid: ObjectId::zero(),
@@ -653,8 +653,8 @@ fn staged_diff_for_tree_switch_paths(
                     status: DiffStatus::for_content_change(mode, ie.mode),
                     old_path: Some(path.clone()),
                     new_path: Some(path.clone()),
-                    old_mode: FileMode::new(mode),
-                    new_mode: FileMode::new(ie.mode),
+                    old_mode: mode,
+                    new_mode: ie.mode,
                     old_oid: oid,
                     new_oid: ie.oid,
                     score: None,
@@ -1001,9 +1001,13 @@ fn switch_prepare_stat_parallel_threads(
 
 /// True when a scheduled delete path can contain other scheduled deletes and must be descended.
 fn scheduled_delete_skip_file_type_probe(index: &Index, rel: &str) -> bool {
-    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    use crate::objects::FileMode;
     index.get(rel.as_bytes(), 0).is_some_and(|e| {
-        e.stage() == 0 && matches!(e.mode, MODE_REGULAR | MODE_EXECUTABLE | MODE_SYMLINK)
+        e.stage() == 0
+            && matches!(
+                e.mode,
+                FileMode::REGULAR | FileMode::EXECUTABLE | FileMode::SYMLINK
+            )
     })
 }
 
@@ -2037,7 +2041,7 @@ mod tests {
             &dir.path().join("t/inv/in"),
             b"t/inv/in",
             link_oid,
-            crate::index::MODE_SYMLINK,
+            crate::objects::FileMode::SYMLINK,
         )
         .expect("link entry");
         index.add_or_replace(link_entry);
@@ -2117,7 +2121,7 @@ mod tests {
             &dir.path().join("d/README.md"),
             b"d/README.md",
             oid,
-            crate::index::MODE_REGULAR,
+            crate::objects::FileMode::REGULAR,
         )
         .expect("entry");
         index.add_or_replace(readme_entry);
@@ -2171,7 +2175,7 @@ mod tests {
                 &work_tree.join("d/README.md"),
                 b"d/README.md",
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry"),
         );
@@ -2187,7 +2191,7 @@ mod tests {
                     &work_tree.join(&rel),
                     rel.as_bytes(),
                     file_oid,
-                    crate::index::MODE_REGULAR,
+                    crate::objects::FileMode::REGULAR,
                 )
                 .expect("entry"),
             );
@@ -2318,7 +2322,7 @@ mod tests {
                     .write(ObjectKind::Blob, format!("body {d} {f}\n").as_bytes())
                     .expect("blob");
                 index.add_or_replace(
-                    entry_from_stat(&abs, rel.as_bytes(), oid, crate::index::MODE_REGULAR)
+                    entry_from_stat(&abs, rel.as_bytes(), oid, crate::objects::FileMode::REGULAR)
                         .expect("entry"),
                 );
                 delete_paths.insert(rel);
@@ -2373,7 +2377,7 @@ mod tests {
             &wt.join("tracked.txt"),
             b"tracked.txt",
             oid,
-            crate::index::MODE_REGULAR,
+            crate::objects::FileMode::REGULAR,
         )
         .expect("entry");
         index.add_or_replace(entry);
@@ -2398,7 +2402,7 @@ mod tests {
             &wt.join("other.txt"),
             b"other.txt",
             other_oid,
-            crate::index::MODE_REGULAR,
+            crate::objects::FileMode::REGULAR,
         )
         .expect("entry");
         index2.add_or_replace(other_entry);
@@ -2430,7 +2434,8 @@ mod tests {
     }
 
     fn gitlink_index_entry(path: &str, oid: ObjectId) -> crate::index::IndexEntry {
-        use crate::index::{IndexEntry, MODE_GITLINK};
+        use crate::index::IndexEntry;
+        use crate::objects::FileMode;
         IndexEntry {
             ctime_sec: 0,
             ctime_nsec: 0,
@@ -2438,7 +2443,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             uid: 0,
             gid: 0,
             size: 0,
@@ -2568,9 +2573,13 @@ mod tests {
         let mut index = repo.load_index().expect("index");
         let abs = root.join("tracked.txt");
         let oid_a = repo.odb().write(ObjectKind::Blob, b"AAAA\n").expect("blob");
-        let entry_a =
-            crate::index::entry_from_stat(&abs, b"tracked.txt", oid_a, crate::index::MODE_REGULAR)
-                .expect("entry");
+        let entry_a = crate::index::entry_from_stat(
+            &abs,
+            b"tracked.txt",
+            oid_a,
+            crate::objects::FileMode::REGULAR,
+        )
+        .expect("entry");
         index.add_or_replace(entry_a.clone());
         index.sort();
         let tree_a = write_tree_update_index(&repo.odb(), &mut index, "", WriteTreeFlags::silent())
@@ -2609,8 +2618,13 @@ mod tests {
             .expect("blob b");
         let mut index_b = repo.load_index().expect("index for b");
         index_b.add_or_replace(
-            crate::index::entry_from_stat(&abs, b"tracked.txt", oid_b, crate::index::MODE_REGULAR)
-                .expect("entry b"),
+            crate::index::entry_from_stat(
+                &abs,
+                b"tracked.txt",
+                oid_b,
+                crate::objects::FileMode::REGULAR,
+            )
+            .expect("entry b"),
         );
         index_b.sort();
         let tree_b =
@@ -2637,8 +2651,13 @@ mod tests {
         std::fs::write(&abs, b"AAAA\n").expect("back to first branch content");
         let mut index_back = repo.load_index().expect("index back on first");
         index_back.add_or_replace(
-            crate::index::entry_from_stat(&abs, b"tracked.txt", oid_a, crate::index::MODE_REGULAR)
-                .expect("entry a again"),
+            crate::index::entry_from_stat(
+                &abs,
+                b"tracked.txt",
+                oid_a,
+                crate::objects::FileMode::REGULAR,
+            )
+            .expect("entry a again"),
         );
         index_back.sort();
         repo.write_index(&mut index_back)
@@ -2746,8 +2765,13 @@ mod tests {
         let abs = root.join("tracked.txt");
         let oid = repo.odb().write(ObjectKind::Blob, b"v1\n").expect("blob");
         index.add_or_replace(
-            crate::index::entry_from_stat(&abs, b"tracked.txt", oid, crate::index::MODE_REGULAR)
-                .expect("entry"),
+            crate::index::entry_from_stat(
+                &abs,
+                b"tracked.txt",
+                oid,
+                crate::objects::FileMode::REGULAR,
+            )
+            .expect("entry"),
         );
         index.sort();
         let head_tree =
@@ -2849,7 +2873,7 @@ mod tests {
                 &abs,
                 rel.as_bytes(),
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry");
             index.add_or_replace(entry);
@@ -2953,7 +2977,7 @@ mod tests {
                 &abs,
                 rel.as_bytes(),
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry");
             index.add_or_replace(entry);
@@ -2993,7 +3017,7 @@ mod tests {
                 &abs,
                 rel.as_bytes(),
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry");
             target_index.add_or_replace(entry);
@@ -3034,7 +3058,7 @@ mod tests {
                 &abs,
                 rel.as_bytes(),
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry");
             index_on_main.add_or_replace(entry);
@@ -3147,7 +3171,7 @@ mod tests {
                 &abs,
                 rel.as_bytes(),
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry");
             index.add_or_replace(entry);
@@ -3186,7 +3210,7 @@ mod tests {
                 &abs,
                 rel.as_bytes(),
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry");
             target_index.add_or_replace(entry);
@@ -3235,7 +3259,7 @@ mod tests {
             &wt.join("tracked.txt"),
             b"tracked.txt",
             oid,
-            crate::index::MODE_REGULAR,
+            crate::objects::FileMode::REGULAR,
         )
         .expect("entry");
         index.add_or_replace(entry);
@@ -3341,7 +3365,8 @@ mod tests {
 
     #[test]
     fn count_indexed_paths_under_root_ignores_lexicographic_sibling_prefixes() {
-        use crate::index::{Index, IndexEntry, MODE_REGULAR};
+        use crate::index::{Index, IndexEntry};
+        use crate::objects::FileMode;
         let mut index = Index::new();
         for path in ["dir-old/f.txt", "dir/f.txt", "dir/nested/g.txt"] {
             index.add_or_replace(IndexEntry {
@@ -3351,7 +3376,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_REGULAR,
+                mode: FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -3387,7 +3412,7 @@ mod tests {
                 .write(ObjectKind::Blob, format!("v{i}\n").as_bytes())
                 .expect("blob");
             index.add_or_replace(
-                entry_from_stat(&abs, rel.as_bytes(), oid, crate::index::MODE_REGULAR)
+                entry_from_stat(&abs, rel.as_bytes(), oid, crate::objects::FileMode::REGULAR)
                     .expect("entry"),
             );
             if i < 30 {
@@ -3436,8 +3461,13 @@ mod tests {
                 .write(ObjectKind::Blob, format!("v{i}\n").as_bytes())
                 .expect("blob");
             index.add_or_replace(
-                entry_from_stat(&abs, scheduled.as_bytes(), oid, crate::index::MODE_REGULAR)
-                    .expect("entry"),
+                entry_from_stat(
+                    &abs,
+                    scheduled.as_bytes(),
+                    oid,
+                    crate::objects::FileMode::REGULAR,
+                )
+                .expect("entry"),
             );
             delete_paths.insert(scheduled);
         }

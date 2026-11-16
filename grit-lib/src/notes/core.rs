@@ -45,8 +45,8 @@ const NOTES_MERGE_WORKTREE: &str = "NOTES_MERGE_WORKTREE";
 /// One leaf entry in a notes fanout tree (blob pointing at a note object).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct NotesTreeEntry {
-    /// Git tree entry mode for the note blob (typically `100644`).
-    pub mode: u32,
+    /// Git tree entry mode for the note blob (typically [`FileMode::REGULAR`]).
+    pub mode: FileMode,
     /// Fanout path segments ending in the annotated object's hex id.
     pub path: Vec<u8>,
     /// Note blob object id stored at this path.
@@ -59,7 +59,7 @@ type NoteBlobChange = (ObjectId, Option<ObjectId>, Option<ObjectId>);
 enum NotesTreeChild {
     Blob {
         /// Tree entry mode for the note blob.
-        mode: u32,
+        mode: FileMode,
         /// Note blob object id.
         oid: ObjectId,
     },
@@ -127,7 +127,7 @@ fn collect_notes_tree_entries(
             let counts = note_object_name(&path).is_some();
             if max_listable_notes.is_none() || counts {
                 out.push(NotesTreeEntry {
-                    mode: entry.mode.bits(),
+                    mode: entry.mode,
                     path,
                     oid: entry.oid,
                 });
@@ -736,11 +736,7 @@ fn write_notes_subtree(repo: &Repository, entries: &[NotesTreeEntry]) -> Result<
     let mut tree_entries = Vec::with_capacity(children.len());
     for (name, child) in children {
         match child {
-            NotesTreeChild::Blob { mode, oid } => tree_entries.push(TreeEntry {
-                mode: FileMode::new(mode),
-                name,
-                oid,
-            }),
+            NotesTreeChild::Blob { mode, oid } => tree_entries.push(TreeEntry { mode, name, oid }),
             NotesTreeChild::Tree(child_entries) => {
                 let oid = write_notes_subtree(repo, &child_entries)?;
                 tree_entries.push(TreeEntry {
@@ -1547,7 +1543,7 @@ fn merge_one_note_change(
 pub fn upsert_note_entry(entries: &mut Vec<NotesTreeEntry>, hex: &str, blob: ObjectId) {
     remove_entry(entries, hex);
     entries.push(NotesTreeEntry {
-        mode: 0o100644,
+        mode: FileMode::REGULAR,
         path: hex.as_bytes().to_vec(),
         oid: blob,
     });
@@ -2179,7 +2175,7 @@ mod tests {
         let blob = repo.odb().write(ObjectKind::Blob, b"hello\n").unwrap();
         upsert_note_entry(&mut vec![], &commit.to_hex(), blob);
         let entries = vec![NotesTreeEntry {
-            mode: 0o100644,
+            mode: FileMode::REGULAR,
             path: commit.to_hex().into_bytes(),
             oid: blob,
         }];

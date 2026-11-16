@@ -9,10 +9,10 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::revwalk::history::{CommitEdit, HistoryEdits, RewriteOptions};
+use grit_lib::revwalk::history::{CommitEdit, CommitRewrite, HistoryEdits, RewriteOptions};
 
 use s7::HistoryBenchFixtures;
 
@@ -99,7 +99,9 @@ fn bench_history_rewrite(c: &mut Criterion) {
             let mut edits = HistoryEdits::new();
             edits.insert(
                 oldest,
-                CommitEdit::rewrite(None, Some("reworded oldest subject\n".into()), None, None),
+                CommitEdit::rewrite(
+                    CommitRewrite::default().with_message("reworded oldest subject\n"),
+                ),
             );
             let plan = repo
                 .history()

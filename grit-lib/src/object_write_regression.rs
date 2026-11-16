@@ -10,7 +10,8 @@ use filetime::{set_file_mtime, FileTime};
 use tempfile::TempDir;
 
 use crate::hot_path_test_metrics::HotPathMetricsScope;
-use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
+use crate::index::{entry_from_stat, Index, IndexEntry};
+use crate::objects::FileMode;
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::porcelain::add::{stage, StageOptions};
@@ -39,7 +40,7 @@ fn make_index_entry(path: &str, seed: u32) -> IndexEntry {
         mtime_nsec: INDEX_MTIME.1,
         dev: 1,
         ino: seed,
-        mode: MODE_REGULAR,
+        mode: FileMode::REGULAR,
         uid: 1000,
         gid: 1000,
         size: 64,
@@ -252,7 +253,7 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
         fs::create_dir_all(abs.parent().unwrap()).unwrap();
         fs::write(&abs, &data).unwrap();
         pin_mtime(&abs, INDEX_MTIME.0, INDEX_MTIME.1);
-        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).unwrap();
+        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).unwrap();
         index.add_or_replace(entry);
     }
     repo.write_index(&mut index).unwrap();
@@ -286,8 +287,13 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
         .write(ObjectKind::Blob, b"updated-content")
         .unwrap();
     let mut index = repo.load_index().unwrap();
-    let entry =
-        entry_from_stat(&changed_path, b"top/mid/changed.txt", new_oid, MODE_REGULAR).unwrap();
+    let entry = entry_from_stat(
+        &changed_path,
+        b"top/mid/changed.txt",
+        new_oid,
+        FileMode::REGULAR,
+    )
+    .unwrap();
     index.add_or_replace(entry);
     repo.write_index(&mut index).unwrap();
 
@@ -502,7 +508,8 @@ fn pack_signature_not_restatted_per_object() {
     fs::write(&target, b"pack:changed").unwrap();
     pin_mtime(&target, INDEX_MTIME.0 + 2, INDEX_MTIME.1);
     let new_oid = repo.odb().write(ObjectKind::Blob, b"pack:changed").unwrap();
-    let entry = entry_from_stat(&target, target_rel.as_bytes(), new_oid, MODE_REGULAR).unwrap();
+    let entry =
+        entry_from_stat(&target, target_rel.as_bytes(), new_oid, FileMode::REGULAR).unwrap();
     let mut index = repo.load_index().unwrap();
     index.add_or_replace(entry);
     repo.write_index(&mut index).unwrap();

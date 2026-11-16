@@ -32,7 +32,7 @@ fn commit_file(repo: &Repository, path: &str, contents: &str) -> grit_lib::objec
         &work_tree.join(path),
         path.as_bytes(),
         oid,
-        grit_lib::index::MODE_REGULAR,
+        grit_lib::objects::FileMode::REGULAR,
     )
     .expect("entry");
     index.add_or_replace(entry);
@@ -148,7 +148,7 @@ fn hard_reset_at_head_restores_chmod_only_change() {
             &path,
             b"exec.sh",
             oid,
-            grit_lib::index::MODE_EXECUTABLE,
+            grit_lib::objects::FileMode::EXECUTABLE,
         )
         .expect("entry");
         index.add_or_replace(entry);

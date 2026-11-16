@@ -2,7 +2,8 @@
 
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{entry_from_stat, Index, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::porcelain::status::StatusOptions;
@@ -40,10 +41,12 @@ fn build_nfc_nfd_collision_tree(repo: &Repository) -> grit_lib::objects::ObjectI
     fs::write(wt.join(nfd), b"NFC\n").expect("nfd file for index stat");
     let mut index = Index::new();
     index.add_or_replace(
-        entry_from_stat(&wt.join(nfc), nfc.as_bytes(), oid_nfc, MODE_REGULAR).expect("nfc entry"),
+        entry_from_stat(&wt.join(nfc), nfc.as_bytes(), oid_nfc, FileMode::REGULAR)
+            .expect("nfc entry"),
     );
     index.add_or_replace(
-        entry_from_stat(&wt.join(nfd), nfd.as_bytes(), oid_nfd, MODE_REGULAR).expect("nfd entry"),
+        entry_from_stat(&wt.join(nfd), nfd.as_bytes(), oid_nfd, FileMode::REGULAR)
+            .expect("nfd entry"),
     );
     fs::write(wt.join("ok.txt"), b"ok\n").expect("ok file");
     let oid_ok = repo
@@ -51,7 +54,7 @@ fn build_nfc_nfd_collision_tree(repo: &Repository) -> grit_lib::objects::ObjectI
         .write(ObjectKind::Blob, b"ok\n")
         .expect("ok blob");
     index.add_or_replace(
-        entry_from_stat(&wt.join("ok.txt"), b"ok.txt", oid_ok, MODE_REGULAR).expect("ok"),
+        entry_from_stat(&wt.join("ok.txt"), b"ok.txt", oid_ok, FileMode::REGULAR).expect("ok"),
     );
     index.sort();
     write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent()).expect("tree")

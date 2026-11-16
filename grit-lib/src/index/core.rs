@@ -94,21 +94,10 @@ fn gitattributes_index_path(path: &[u8]) -> bool {
     path == b".gitattributes" || path.ends_with(b"/.gitattributes")
 }
 
-/// File mode for a regular (non-executable) file.
-pub const MODE_REGULAR: u32 = 0o100644;
-/// File mode for an executable file.
-pub const MODE_EXECUTABLE: u32 = 0o100755;
-/// File mode for a symbolic link.
-pub const MODE_SYMLINK: u32 = 0o120000;
-/// File mode for a gitlink (submodule).
-pub const MODE_GITLINK: u32 = 0o160000;
-/// File mode for a directory (tree) entry — only used in tree objects, not index.
-pub const MODE_TREE: u32 = 0o040000;
-
 /// Whether `mode` is a tree (directory) by Git type bits, including `040755`.
 #[must_use]
-pub(crate) fn is_tree_mode(mode: u32) -> bool {
-    (mode & 0o170000) == MODE_TREE
+pub(crate) const fn is_tree_mode(mode: FileMode) -> bool {
+    mode.is_tree()
 }
 
 /// Canonical index/tree-entry mode, mirroring Git's `canon_mode` / `create_ce_from_modes`.
@@ -116,23 +105,21 @@ pub(crate) fn is_tree_mode(mode: u32) -> bool {
 /// Legacy tree object modes such as `100664` and `100775` collapse to `100644` / `100755`.
 /// Only canonical modes may be stored in the index.
 #[must_use]
-pub(crate) fn canon_mode(mode: u32) -> u32 {
-    const S_IFMT: u32 = 0o170000;
-    const S_IFREG: u32 = 0o100000;
-    const S_IFLNK: u32 = 0o120000;
-    const S_IFGITLINK: u32 = 0o160000;
-    match mode & S_IFMT {
-        S_IFREG => {
-            if mode & 0o111 != 0 {
-                MODE_EXECUTABLE
-            } else {
-                MODE_REGULAR
-            }
+pub(crate) const fn canon_mode(mode: FileMode) -> FileMode {
+    if mode.is_regular() {
+        if mode.is_executable() {
+            FileMode::EXECUTABLE
+        } else {
+            FileMode::REGULAR
         }
-        S_IFLNK => MODE_SYMLINK,
-        S_IFGITLINK => MODE_GITLINK,
-        MODE_TREE => MODE_TREE,
-        _ => MODE_REGULAR,
+    } else if mode.is_symlink() {
+        FileMode::SYMLINK
+    } else if mode.is_gitlink() {
+        FileMode::GITLINK
+    } else if mode.is_tree() {
+        FileMode::TREE
+    } else {
+        FileMode::REGULAR
     }
 }
 
@@ -335,8 +322,9 @@ pub struct IndexEntry {
     pub dev: u32,
     /// Inode number.
     pub ino: u32,
-    /// Unix file mode (`MODE_REGULAR`, `MODE_EXECUTABLE`, `MODE_SYMLINK`, …).
-    pub mode: u32,
+    /// Git file mode ([`FileMode::REGULAR`], [`FileMode::EXECUTABLE`], [`FileMode::SYMLINK`],
+    /// [`FileMode::GITLINK`], or [`FileMode::TREE`] for a sparse-directory placeholder).
+    pub mode: FileMode,
     /// Owner UID.
     pub uid: u32,
     /// Owner GID.
@@ -387,7 +375,7 @@ impl serde::Serialize for IndexEntry {
     {
         use serde::ser::SerializeStruct;
 
-        let mode = FileMode::new(self.mode);
+        let mode = self.mode;
         let mut out = serializer.serialize_struct("IndexEntry", 14)?;
         out.serialize_field("ctime_sec", &self.ctime_sec)?;
         out.serialize_field("ctime_nsec", &self.ctime_nsec)?;
@@ -433,7 +421,7 @@ impl IndexEntry {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: mode.bits(),
+            mode,
             uid: 0,
             gid: 0,
             size: 0,
@@ -558,7 +546,7 @@ impl IndexEntry {
     /// Sparse-index placeholder: tree mode, stage 0, and `SKIP_WORKTREE` set.
     #[must_use]
     pub fn is_sparse_directory_placeholder(&self) -> bool {
-        self.mode == MODE_TREE && self.stage() == 0 && self.skip_worktree()
+        self.mode == FileMode::TREE && self.stage() == 0 && self.skip_worktree()
     }
 
     /// In-memory only: `ls-files --with-tree` hides stage-1 overlay rows that duplicate stage 0.
@@ -1278,7 +1266,7 @@ impl Index {
         Ok(idx)
     }
 
-    /// Returns true if the index contains sparse-index tree placeholders (`MODE_TREE` + skip-worktree).
+    /// Returns true if the index contains sparse-index tree placeholders (`FileMode::TREE` + skip-worktree).
     #[must_use]
     pub fn has_sparse_directory_placeholders(&self) -> bool {
         self.entries
@@ -1348,7 +1336,7 @@ impl Index {
         let mut prefixes = BTreeSet::<Vec<u8>>::new();
         let mut last_dir: &[u8] = &[];
         for e in &self.entries {
-            if e.stage() != 0 || e.mode == MODE_TREE || !e.skip_worktree() {
+            if e.stage() != 0 || e.mode == FileMode::TREE || !e.skip_worktree() {
                 continue;
             }
             // Sorted rows share their directory with their neighbours; every ancestor of a
@@ -1425,7 +1413,7 @@ impl Index {
             let matched: Vec<&IndexEntry> = rows
                 .iter()
                 .filter(|e| {
-                    e.mode != MODE_TREE && !(nested && collapsed.covers(&e.path, &mut scratch))
+                    e.mode != FileMode::TREE && !(nested && collapsed.covers(&e.path, &mut scratch))
                 })
                 .collect();
             if matched.len() != expected.len() {
@@ -1445,8 +1433,8 @@ impl Index {
             // Git's convert_to_sparse_rec refuses to collapse a directory that contains a
             // submodule (gitlink); the sparse-directory entry could not faithfully represent
             // the gitlink's committed OID. Leave such directories expanded.
-            if matched.iter().any(|e| e.mode == MODE_GITLINK)
-                || expected.iter().any(|e| e.mode == MODE_GITLINK)
+            if matched.iter().any(|e| e.mode == FileMode::GITLINK)
+                || expected.iter().any(|e| e.mode == FileMode::GITLINK)
             {
                 continue;
             }
@@ -2438,7 +2426,7 @@ impl Index {
     ///
     /// Binary search on sorted indexes; a linear scan otherwise.
     pub(crate) fn has_gitlink_at(&self, path: &[u8]) -> bool {
-        let is_gitlink = |e: &IndexEntry| e.mode == MODE_GITLINK;
+        let is_gitlink = |e: &IndexEntry| e.mode == FileMode::GITLINK;
         if self.entries_sorted {
             let (start, end) = self.path_run_range_sorted(path);
             return self.entries[start..end].iter().any(is_gitlink);
@@ -3076,7 +3064,7 @@ impl Index {
         }
         for stage in 1u8..=3u8 {
             let i = (stage - 1) as usize;
-            if record.modes[i] == 0 {
+            if record.modes[i] == FileMode::ABSENT {
                 continue;
             }
             let entry = IndexEntry {
@@ -3506,7 +3494,7 @@ fn read_tree_into_overlay(
         if !prefix_under_or_equal(prefix, &path) {
             continue;
         }
-        crate::path_population::validate_tree_walk_entry(rel_base, &name, mode.bits(), protect)?;
+        crate::path_population::validate_tree_walk_entry(rel_base, &name, mode, protect)?;
         if mode == FileMode::TREE {
             read_tree_into_overlay(repo, &oid, prefix, &path, use_replace_path, protect, out)?;
             continue;
@@ -3514,7 +3502,7 @@ fn read_tree_into_overlay(
         if mode == FileMode::GITLINK {
             continue;
         }
-        let entry = synthetic_stage1_index_entry(mode.bits(), &path, oid);
+        let entry = synthetic_stage1_index_entry(mode, &path, oid);
         if use_replace_path {
             if let Some(pos) = out.iter().position(|e| e.path == path && e.stage() == 1) {
                 out[pos] = entry;
@@ -3601,7 +3589,7 @@ fn merge_padding_index_entry() -> IndexEntry {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: 0,
+        mode: FileMode::ABSENT,
         uid: 0,
         gid: 0,
         size: 0,
@@ -3735,7 +3723,7 @@ fn prefix_under_or_equal(prefix: &[u8], path: &[u8]) -> bool {
     path.len() > prefix.len() && path.starts_with(prefix) && path[prefix.len()] == b'/'
 }
 
-fn synthetic_stage1_index_entry(mode: u32, path: &[u8], oid: ObjectId) -> IndexEntry {
+fn synthetic_stage1_index_entry(mode: FileMode, path: &[u8], oid: ObjectId) -> IndexEntry {
     let path_len = path.len().min(0xFFF) as u16;
     let flags = (1u16 << 12) | path_len;
     IndexEntry {
@@ -3897,7 +3885,7 @@ impl CollapsedDirectories {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_TREE,
+                mode: FileMode::TREE,
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -4077,7 +4065,7 @@ fn walk_sparse_aware(
 ) -> Result<()> {
     // Switch and checkout have usually just diffed these trees, so share the handle's cache.
     let tree = odb.cached_tree_for_walk(tree_oid)?;
-    let mut visit = |name: &[u8], mode: u32, oid: ObjectId| -> Result<()> {
+    let mut visit = |name: &[u8], mode: FileMode, oid: ObjectId| -> Result<()> {
         let path = if prefix.is_empty() {
             name.to_vec()
         } else {
@@ -4088,7 +4076,7 @@ fn walk_sparse_aware(
             p
         };
         crate::path_population::validate_tree_walk_entry(&path, name, mode, protect)?;
-        if mode == MODE_TREE {
+        if mode == FileMode::TREE {
             let mut path_slash = path.clone();
             path_slash.push(b'/');
             if view.has_placeholder(&path_slash, &oid, scratch) {
@@ -4108,7 +4096,7 @@ fn walk_sparse_aware(
     match &tree {
         crate::odb::SessionTree::Parsed(entries) => {
             for te in entries.iter() {
-                visit(&te.name, te.mode.bits(), te.oid)?;
+                visit(&te.name, te.mode, te.oid)?;
             }
         }
         crate::odb::SessionTree::Raw(data) => {
@@ -4124,7 +4112,7 @@ fn walk_sparse_aware(
 /// A blob a collapsible sparse directory must hold, from the `HEAD` tree.
 struct ExpectedBlob {
     path: Vec<u8>,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
 }
 
@@ -4151,13 +4139,8 @@ fn flatten_tree_blobs(
             p.extend_from_slice(&te.name);
             p
         };
-        crate::path_population::validate_tree_walk_entry(
-            prefix,
-            &te.name,
-            te.mode.bits(),
-            protect,
-        )?;
-        if is_tree_mode(te.mode.bits()) {
+        crate::path_population::validate_tree_walk_entry(prefix, &te.name, te.mode, protect)?;
+        if is_tree_mode(te.mode) {
             let sub = flatten_tree_blobs(odb, &te.oid, &path, protect)?;
             out.extend(sub);
         } else {
@@ -4169,7 +4152,7 @@ fn flatten_tree_blobs(
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: canon_mode(te.mode.bits()),
+                mode: canon_mode(te.mode),
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -4444,7 +4427,7 @@ pub(crate) fn parse_entry(
     let mtime_nsec = read_u32!();
     let dev = read_u32!();
     let ino = read_u32!();
-    let mode = read_u32!();
+    let mode = FileMode::new(read_u32!());
     let uid = read_u32!();
     let gid = read_u32!();
     let size = read_u32!();
@@ -4591,7 +4574,7 @@ fn serialize_entry_v4(entry: &IndexEntry, previous_path: &mut Vec<u8>, out: &mut
     write_u32(out, entry.mtime_nsec);
     write_u32(out, entry.dev);
     write_u32(out, entry.ino);
-    write_u32(out, entry.mode);
+    write_u32(out, entry.mode.bits());
     write_u32(out, entry.uid);
     write_u32(out, entry.gid);
     write_u32(out, entry.size);
@@ -4640,7 +4623,7 @@ fn serialize_entry(entry: &IndexEntry, version: u32, out: &mut Vec<u8>) {
     write_u32(out, entry.mtime_nsec);
     write_u32(out, entry.dev);
     write_u32(out, entry.ino);
-    write_u32(out, entry.mode);
+    write_u32(out, entry.mode.bits());
     write_u32(out, entry.uid);
     write_u32(out, entry.gid);
     write_u32(out, entry.size);
@@ -4687,7 +4670,7 @@ fn serialize_entry(entry: &IndexEntry, version: u32, out: &mut Vec<u8>) {
 /// - `path` — absolute path to the file.
 /// - `rel_path` — path relative to the repo root (stored in the index).
 /// - `oid` — the object ID of the file's blob.
-/// - `mode` — file mode (use [`MODE_REGULAR`], [`MODE_EXECUTABLE`], etc.).
+/// - `mode` — file mode (use [`FileMode::REGULAR`], [`FileMode::EXECUTABLE`], etc.).
 ///
 /// # Errors
 ///
@@ -4696,7 +4679,7 @@ pub fn entry_from_stat(
     path: &Path,
     rel_path: &[u8],
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
 ) -> Result<IndexEntry> {
     let meta = fs::symlink_metadata(path)?;
     Ok(entry_from_metadata(&meta, rel_path, oid, mode))
@@ -5077,7 +5060,7 @@ impl IndexStatFields {
 
     /// Build a stage-0 index entry using cached stat fields.
     #[must_use]
-    pub fn index_entry(self, rel_path: &[u8], oid: ObjectId, mode: u32) -> IndexEntry {
+    pub fn index_entry(self, rel_path: &[u8], oid: ObjectId, mode: FileMode) -> IndexEntry {
         IndexEntry {
             ctime_sec: self.ctime_sec,
             ctime_nsec: self.ctime_nsec,
@@ -5229,7 +5212,7 @@ pub fn entry_from_metadata(
     meta: &fs::Metadata,
     rel_path: &[u8],
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
 ) -> IndexEntry {
     #[cfg(unix)]
     {
@@ -5277,7 +5260,7 @@ pub fn entry_from_metadata(
 }
 
 /// Convert a `stat` mode to the Git index mode, normalised to one of the
-/// known constants ([`MODE_REGULAR`], [`MODE_EXECUTABLE`], [`MODE_SYMLINK`]).
+/// known modes ([`FileMode::REGULAR`], [`FileMode::EXECUTABLE`], [`FileMode::SYMLINK`]).
 ///
 /// Only the `S_IFMT` and execute bits are inspected; all other permission bits
 /// are discarded (Git stores only 644 or 755 for regular files).
@@ -5286,24 +5269,16 @@ pub fn entry_from_metadata(
 ///
 /// - `raw_mode` — the raw `st_mode` value from `stat(2)`.
 #[must_use]
-pub fn normalize_mode(raw_mode: u32) -> u32 {
-    const S_IFMT: u32 = 0o170000;
-    const S_IFLNK: u32 = 0o120000;
-    const S_IFREG: u32 = 0o100000;
-
-    let fmt = raw_mode & S_IFMT;
-    if fmt == S_IFLNK {
-        return MODE_SYMLINK;
+pub const fn normalize_mode(raw_mode: u32) -> FileMode {
+    let raw = FileMode::new(raw_mode);
+    if raw.is_symlink() {
+        FileMode::SYMLINK
+    } else if raw.is_executable() {
+        FileMode::EXECUTABLE
+    } else {
+        // Regular files without an execute bit, and everything else (devices, etc.).
+        FileMode::REGULAR
     }
-    if fmt == S_IFREG {
-        // Executable if any execute bit is set
-        if raw_mode & 0o111 != 0 {
-            return MODE_EXECUTABLE;
-        }
-        return MODE_REGULAR;
-    }
-    // Fallback for everything else (devices, etc.) — treat as regular
-    MODE_REGULAR
 }
 
 #[cfg(test)]
@@ -5377,7 +5352,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,
@@ -6192,7 +6167,7 @@ mod tests {
     fn has_gitlink_at_matches_any_stage_sorted_and_unsorted() {
         let gitlink = |path: &str, stage: u16| {
             let mut e = make_entry(path);
-            e.mode = MODE_GITLINK;
+            e.mode = FileMode::GITLINK;
             e.flags |= stage << 12;
             e
         };
@@ -6557,7 +6532,7 @@ mod tests {
         assert!(e.assume_unchanged());
         e.set_skip_worktree(true);
         assert!(e.skip_worktree());
-        e.mode = MODE_TREE;
+        e.mode = FileMode::TREE;
         e.set_skip_worktree(true);
         assert!(e.is_sparse_directory_placeholder());
         e.set_overlay_tree_skip_output(true);
@@ -6694,7 +6669,7 @@ mod tests {
         idx.resolve_undo = Some(BTreeMap::from([(
             b"f.txt".to_vec(),
             ResolveUndoRecord {
-                modes: [MODE_REGULAR, MODE_REGULAR, 0],
+                modes: [FileMode::REGULAR, FileMode::REGULAR, FileMode::ABSENT],
                 oids: [oid1, oid2, ObjectId::zero()],
             },
         )]));
@@ -6787,7 +6762,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         fs::write(dir.path().join("f.txt"), b"payload").unwrap();
         let oid = dummy_oid();
-        let entry = entry_from_stat(dir.path(), b"f.txt", oid, MODE_REGULAR).unwrap();
+        let entry = entry_from_stat(dir.path(), b"f.txt", oid, FileMode::REGULAR).unwrap();
         assert_eq!(entry.path, b"f.txt");
         assert!(entry.size > 0);
     }
@@ -7158,14 +7133,14 @@ mod tests {
         }
 
         /// Write a tree holding `files` (`path`, `mode`, blob body) and return its OID.
-        fn write_tree(odb: &Odb, files: &[(&str, u32, &str)]) -> ObjectId {
-            let mut here: BTreeMap<Vec<u8>, (u32, ObjectId)> = BTreeMap::new();
-            let mut subdirs: BTreeMap<&str, Vec<(&str, u32, &str)>> = BTreeMap::new();
+        fn write_tree(odb: &Odb, files: &[(&str, FileMode, &str)]) -> ObjectId {
+            let mut here: BTreeMap<Vec<u8>, (FileMode, ObjectId)> = BTreeMap::new();
+            let mut subdirs: BTreeMap<&str, Vec<(&str, FileMode, &str)>> = BTreeMap::new();
             for (path, mode, body) in files {
                 match path.split_once('/') {
                     Some((dir, rest)) => subdirs.entry(dir).or_default().push((rest, *mode, body)),
                     None => {
-                        let oid = if *mode == MODE_GITLINK {
+                        let oid = if *mode == FileMode::GITLINK {
                             ObjectId::from_bytes(&[7u8; 20]).unwrap()
                         } else {
                             odb.write(ObjectKind::Blob, body.as_bytes()).unwrap()
@@ -7177,13 +7152,13 @@ mod tests {
             for (dir, children) in subdirs {
                 here.insert(
                     dir.as_bytes().to_vec(),
-                    (MODE_TREE, write_tree(odb, &children)),
+                    (FileMode::TREE, write_tree(odb, &children)),
                 );
             }
             let mut entries: Vec<TreeEntry> = here
                 .into_iter()
                 .map(|(name, (mode, oid))| TreeEntry {
-                    mode: FileMode::new(mode),
+                    mode: mode,
                     name,
                     oid,
                 })
@@ -7238,7 +7213,7 @@ mod tests {
                 .unwrap();
         }
 
-        fn rows(index: &Index) -> Vec<(String, u32, ObjectId)> {
+        fn rows(index: &Index) -> Vec<(String, FileMode, ObjectId)> {
             index
                 .entries()
                 .iter()
@@ -7255,15 +7230,15 @@ mod tests {
                 .collect()
         }
 
-        const FILES: [(&str, u32, &str); 8] = [
-            ("a/in", 0o100644, "in\n"),
-            ("top", 0o100644, "top\n"),
-            ("w/f4", 0o100644, "f4\n"),
-            ("w/f5", 0o100755, "f5\n"),
-            ("x/f1", 0o100644, "f1\n"),
-            ("x/y/f2", 0o100644, "f2\n"),
-            ("x/y/z/f3", 0o100644, "f3\n"),
-            ("x/y-z", 0o100644, "dash\n"),
+        const FILES: [(&str, FileMode, &str); 8] = [
+            ("a/in", FileMode::REGULAR, "in\n"),
+            ("top", FileMode::REGULAR, "top\n"),
+            ("w/f4", FileMode::REGULAR, "f4\n"),
+            ("w/f5", FileMode::EXECUTABLE, "f5\n"),
+            ("x/f1", FileMode::REGULAR, "f1\n"),
+            ("x/y/f2", FileMode::REGULAR, "f2\n"),
+            ("x/y/z/f3", FileMode::REGULAR, "f3\n"),
+            ("x/y-z", FileMode::REGULAR, "dash\n"),
         ];
 
         #[test]
@@ -7277,10 +7252,10 @@ mod tests {
             assert_eq!(
                 rows(&index),
                 vec![
-                    ("a/in".to_owned(), 0o100644, index.entries()[0].oid),
-                    ("top".to_owned(), 0o100644, index.entries()[1].oid),
-                    ("w/".to_owned(), MODE_TREE, subtree(&odb, &root, "w")),
-                    ("x/".to_owned(), MODE_TREE, subtree(&odb, &root, "x")),
+                    ("a/in".to_owned(), FileMode::REGULAR, index.entries()[0].oid),
+                    ("top".to_owned(), FileMode::REGULAR, index.entries()[1].oid),
+                    ("w/".to_owned(), FileMode::TREE, subtree(&odb, &root, "w")),
+                    ("x/".to_owned(), FileMode::TREE, subtree(&odb, &root, "x")),
                 ]
             );
             assert!(index.sparse_directories);
@@ -7316,8 +7291,8 @@ mod tests {
             let dir = TempDir::new().unwrap();
             let odb = Odb::new(dir.path());
             let mut files = FILES.to_vec();
-            files.push(("v/sub", MODE_GITLINK, ""));
-            files.push(("u/f6", 0o100644, "f6\n"));
+            files.push(("v/sub", FileMode::GITLINK, ""));
+            files.push(("u/f6", FileMode::REGULAR, "f6\n"));
             let root = write_tree(&odb, &files);
             let mut index = expanded_index(&odb, &root);
             let pos = index.find_entry_pos(b"w/f4", 0).unwrap();
@@ -7351,7 +7326,7 @@ mod tests {
                 index.entries_mut().retain(|e| !e.path.starts_with(b"x/y/"));
                 let mut placeholder = index.entries()[0].clone();
                 placeholder.path = b"x/y/".to_vec();
-                placeholder.mode = MODE_TREE;
+                placeholder.mode = FileMode::TREE;
                 placeholder.oid = oid;
                 placeholder.flags = 4;
                 placeholder.set_skip_worktree(true);

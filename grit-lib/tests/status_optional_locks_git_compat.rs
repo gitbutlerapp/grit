@@ -158,9 +158,12 @@ fn grit_cli_no_optional_locks_leaves_index_unchanged() {
 #[test]
 fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     use grit_lib::index::write_tree::write_tree_from_index;
-    use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+    use grit_lib::index::{Index, IndexEntry};
+    use grit_lib::objects::FileMode;
     use grit_lib::objects::{parse_commit, parse_tree, ObjectKind};
-    use grit_lib::revwalk::history::{ApplyOptions, CommitEdit, HistoryEdits, RewriteOptions};
+    use grit_lib::revwalk::history::{
+        ApplyOptions, CommitEdit, CommitRewrite, HistoryEdits, RewriteOptions,
+    };
 
     use support::{build_commit_dag, git_rev_parse, HistoryRepo};
 
@@ -213,7 +216,11 @@ fn status_read_only_reports_pending_rewrite_without_touching_journal() {
     let mut edits = HistoryEdits::new();
     edits.insert(
         target,
-        CommitEdit::rewrite(Some(new_tree), Some("tree change\n".into()), None, None),
+        CommitEdit::rewrite(
+            CommitRewrite::default()
+                .with_tree(new_tree)
+                .with_message("tree change\n"),
+        ),
     );
     let plan = grit
         .history()

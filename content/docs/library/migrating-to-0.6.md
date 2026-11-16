@@ -176,6 +176,24 @@ let entry = TreeEntry::new("README", FileMode::REGULAR, blob);
 let ours = IndexEntry::new("README", blob, FileMode::REGULAR).with_stage(2);
 ```
 
+### File modes are `FileMode` everywhere
+
+Every public file-mode field and parameter is a [`FileMode`](rustdoc:grit_lib::objects::FileMode) instead of a raw `u32`: `IndexEntry::mode`, `TreeEntryRef::mode`, `NotesTreeEntry::mode`, `FlatTreeEntry::mode`, `MergeTreeStage::mode`, `CombinedDiffPath::merge_mode`, `CombinedParentSide::mode`, `ResolveUndoRecord::modes`, `FsckIssue::BrokenLink::mode` and `IndexChmodReason::InvalidTargetMode::mode`, plus functions such as `entry_from_stat`, `entry_from_metadata`, `normalize_mode`, `mode_from_metadata`, `WorktreeModePolicy::index_mode_for_worktree` and `Pathspec::matches_entry`. The `MODE_REGULAR`, `MODE_EXECUTABLE`, `MODE_SYMLINK`, `MODE_GITLINK` and `MODE_TREE` constants in `index` are gone; use `FileMode::REGULAR`, `FileMode::EXECUTABLE`, `FileMode::SYMLINK`, `FileMode::GITLINK` and `FileMode::TREE`. `path_validate::EntryMode` is replaced by `FileMode` as well.
+
+`FileMode` is `#[repr(transparent)]` over `u32`, so the change costs nothing at run time. Test a mode's type with `is_tree()`, `is_regular()` (both `100644` and `100755`), `is_executable()`, `is_symlink()` and `is_gitlink()` instead of masking with `0o170000`; use `bits()` (or `u32::from`) where you need the raw value, and `{:o}` / `{:06o}` format it in octal.
+
+```rust
+use grit_lib::index::IndexEntry;
+use grit_lib::objects::{FileMode, ObjectId};
+
+let blob = ObjectId::from_hex("e69de29bb2d1d6434b8b29ae775ad8c2e48c5391")?;
+// 0.5.x: IndexEntry::new("run.sh", blob, FileMode::new(MODE_EXECUTABLE))
+let entry = IndexEntry::new("run.sh", blob, FileMode::EXECUTABLE);
+// 0.5.x: entry.mode & 0o170000 == 0o100000 && entry.mode & 0o111 != 0
+assert!(entry.mode.is_executable());
+assert_eq!(format!("{:o}", entry.mode), "100755");
+```
+
 ### Options and request structs are `#[non_exhaustive]`
 
 Input structs that grow with new flags are `#[non_exhaustive]`, so struct literals and `..Default::default()` no longer compile outside grit-lib. Start from `default()`, or from `new(…)` when a field has no sensible default, and chain one `with_<field>` setter per field you change:
@@ -197,7 +215,7 @@ Input structs that grow with new flags are `#[non_exhaustive]`, so struct litera
 | [`RestoreOptions`](rustdoc:grit_lib::porcelain::restore::RestoreOptions) | `new(pathspecs)` |
 | [`MergeOptions`](rustdoc:grit_lib::merge::MergeOptions), [`StatusOptions`](rustdoc:grit_lib::status::StatusOptions), [`OwnershipContext`](rustdoc:grit_lib::ownership_check::OwnershipContext) | `default()` |
 | [`CommandEnvironment`](rustdoc:grit_lib::command_runner::CommandEnvironment), [`CommitHookEnv`](rustdoc:grit_lib::command_runner::hooks::CommitHookEnv), [`ProtocolPolicyInputs`](rustdoc:grit_lib::remote::protocol::ProtocolPolicyInputs), [`GitDaemonTransport`](rustdoc:grit_lib::remote::transport::GitDaemonTransport) | `default()` |
-| [`Credential`](rustdoc:grit_lib::remote::credentials::Credential) | `default()` (its `Debug` output redacts the password, including one embedded in `url`) |
+| [`Credential`](rustdoc:grit_lib::remote::credentials::Credential) | `default()` and the `with_*` setters; read fields with [`password()`](rustdoc:grit_lib::remote::credentials::Credential::password), `username()`, `host()` and the other getters (the fields are no longer public, and `Debug` redacts the password, including one embedded in `url`) |
 | [`RefSort`](rustdoc:grit_lib::refs::listing::RefSort), [`RefQueryOptions`](rustdoc:grit_lib::refs::listing::RefQueryOptions), [`IgnoreRevsSources`](rustdoc:grit_lib::blame::IgnoreRevsSources), [`ReachableWalkCommitterCutoffs`](rustdoc:grit_lib::revwalk::merge_base::ReachableWalkCommitterCutoffs) | `default()` |
 | [`TreeMergeConflictPresentation`](rustdoc:grit_lib::merge::merge_trees::TreeMergeConflictPresentation), [`RenameDetection`](rustdoc:grit_lib::status::RenameDetection) (status) | `default()` |
 | [`DateMode`](rustdoc:grit_lib::config::git_date::DateMode) | `from_type(ty)` or `parse_date_format(format, output_is_terminal)` (the caller now says whether output is a terminal for `auto:` formats) |
@@ -258,7 +276,7 @@ Input structs that grow with new flags are `#[non_exhaustive]`, so struct litera
 
 `OwnershipContext` is no longer `Copy`; clone it where you need a second copy.
 
-The struct-like variants of [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) are `#[non_exhaustive]` too. Build them with [`CommitEdit::rewrite`](rustdoc:grit_lib::revwalk::history::CommitEdit::rewrite), [`CommitEdit::split_before`](rustdoc:grit_lib::revwalk::history::CommitEdit::split_before), [`CommitEdit::reparent`](rustdoc:grit_lib::revwalk::history::CommitEdit::reparent) and [`CommitEdit::reuse`](rustdoc:grit_lib::revwalk::history::CommitEdit::reuse), and end patterns on them with `..`.
+The struct-like variants of [`CommitEdit`](rustdoc:grit_lib::revwalk::history::CommitEdit) are `#[non_exhaustive]` too. `CommitEdit::Rewrite` wraps a [`CommitRewrite`](rustdoc:grit_lib::revwalk::history::CommitRewrite) that you fill with its `with_tree`, `with_message`, `with_author` and `with_parents` setters (0.5.x: `CommitEdit::rewrite(None, Some(msg), None, None)`; now `CommitRewrite::default().with_message(msg).into()`). Build the other variants with [`CommitEdit::split_before`](rustdoc:grit_lib::revwalk::history::CommitEdit::split_before), [`CommitEdit::reparent`](rustdoc:grit_lib::revwalk::history::CommitEdit::reparent) and [`CommitEdit::reuse`](rustdoc:grit_lib::revwalk::history::CommitEdit::reuse), and end patterns on them with `..`.
 
 ```rust
 // 0.5.x
@@ -504,6 +522,11 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::index::IndexStatFields::from` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::index::IndexStatFields::from_metadata` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::index::IndexStatFields::index_entry` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
+| `grit_lib::index::MODE_EXECUTABLE` | `grit_lib::objects::FileMode::EXECUTABLE` |  |
+| `grit_lib::index::MODE_GITLINK` | `grit_lib::objects::FileMode::GITLINK` |  |
+| `grit_lib::index::MODE_REGULAR` | `grit_lib::objects::FileMode::REGULAR` |  |
+| `grit_lib::index::MODE_SYMLINK` | `grit_lib::objects::FileMode::SYMLINK` |  |
+| `grit_lib::index::MODE_TREE` | `grit_lib::objects::FileMode::TREE` |  |
 | `grit_lib::lockfile::SystemLockClock` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::lockfile::SystemLockClock::clone` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::lockfile::SystemLockClock::default` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
@@ -554,6 +577,12 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::objects::remove_header_lines` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::objects::tag_header_field` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::parallel::parallel_worthwhile` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
+| `grit_lib::path_validate::EntryMode` | `grit_lib::objects::FileMode` |  |
+| `grit_lib::path_validate::EntryMode::clone` | `grit_lib::objects::FileMode::clone` |  |
+| `grit_lib::path_validate::EntryMode::eq` | `grit_lib::objects::FileMode::eq` |  |
+| `grit_lib::path_validate::EntryMode::fmt` | `grit_lib::objects::FileMode::fmt` |  |
+| `grit_lib::path_validate::EntryMode::is_symlink` | `grit_lib::objects::FileMode::is_symlink` |  |
+| `grit_lib::path_validate::EntryMode::new` | `grit_lib::objects::FileMode::new` |  |
 | `grit_lib::path_validate::component_is_dotgit_alias` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::porcelain::add::stage` | `grit_lib::index::IndexFile::stage` |  |
 | `grit_lib::porcelain::add::stage_for_commit` | `grit_lib::index::IndexFile::stage_for_commit` |  |
@@ -1664,6 +1693,10 @@ The table below is generated from `grit-lib/public-api.txt` at **v0.5.31** vs th
 | `grit_lib::repo_handles::configured_remote_names_in_config_order` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::repo_handles::configured_remotes` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::repo_handles::remote_skip_fetch_all` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
+| `grit_lib::revwalk::history::CommitEdit::Rewrite::author` | `grit_lib::revwalk::history::CommitRewrite::author` |  |
+| `grit_lib::revwalk::history::CommitEdit::Rewrite::message` | `grit_lib::revwalk::history::CommitRewrite::message` |  |
+| `grit_lib::revwalk::history::CommitEdit::Rewrite::parents` | `grit_lib::revwalk::history::CommitRewrite::parents` |  |
+| `grit_lib::revwalk::history::CommitEdit::Rewrite::tree` | `grit_lib::revwalk::history::CommitRewrite::tree` |  |
 | `grit_lib::revwalk::history::DEFAULT_ABSORB_STACK_LIMIT` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::revwalk::history::commit_message_subject_line` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |
 | `grit_lib::revwalk::history::resolve_rebase_use_fork_point` | `removed (crate-internal in 0.6: no callers outside grit-lib)` |  |

@@ -1,14 +1,11 @@
 //! Parsed-tree cache and per-side directory metadata for three-way tree merges.
 
-use crate::objects::FileMode;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use super::merge_trees_walk::PathPrefixIndex;
-use crate::objects::{ObjectId, TreeEntry};
+use crate::objects::{FileMode, ObjectId, TreeEntry};
 use crate::odb::Odb;
-
-const MODE_DIR: u32 = 0o040000;
 
 /// Which root tree a side-specific helper refers to.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,7 +72,7 @@ fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> crate::index::IndexEntry 
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: te.mode.bits(),
+        mode: te.mode,
         uid: 0,
         gid: 0,
         size: 0,
@@ -187,7 +184,7 @@ pub(crate) fn side_tree_has_descendant_at_cached(
         return Ok(true);
     }
     if let Some(entry) = lookup_index_entry_at_path_cached(cache, odb, tree_oid, prefix)? {
-        if entry.mode == MODE_DIR {
+        if entry.mode == FileMode::TREE {
             let children = cache.tree_entries(odb, &entry.oid)?;
             if !children.is_empty() {
                 return Ok(true);

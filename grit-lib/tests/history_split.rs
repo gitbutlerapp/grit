@@ -562,9 +562,9 @@ fn tree_has_path(grit: &Repository, tree: ObjectId, path: &str) -> bool {
             return false;
         };
         if i + 1 == parts.len() {
-            return entry.mode != FileMode::new(grit_lib::index::MODE_TREE);
+            return entry.mode != FileMode::TREE;
         }
-        if entry.mode != FileMode::new(grit_lib::index::MODE_TREE) {
+        if entry.mode != FileMode::TREE {
             return false;
         }
         current = entry.oid;

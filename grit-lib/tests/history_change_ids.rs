@@ -13,7 +13,7 @@ use grit_lib::change_id::{set_change_id, ChangeId, ChangeIdError, ChangeIdGenera
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diff::{hunk_ids, DiffSide};
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::hunk_select::HunkSelection;
 use grit_lib::progress::CancelToken;

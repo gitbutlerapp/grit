@@ -6,10 +6,11 @@ use std::path::Path;
 use std::time::Instant;
 
 use crate::error::{Error, Result};
-use crate::index::{Index, IndexEntry, MODE_REGULAR};
+use crate::index::{Index, IndexEntry};
 use crate::objects::pack_write::{
     install_pack_stream, whole_pack_uncompressed_size, InstallPackOptions,
 };
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::objects::{serialize_commit, serialize_tag, CommitData, ObjectKind, TagData};
 use crate::odb::Odb;
@@ -628,7 +629,7 @@ fn synth_index_entry(path: &[u8], oid: ObjectId, size: usize) -> IndexEntry {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: MODE_REGULAR,
+        mode: FileMode::REGULAR,
         uid: 0,
         gid: 0,
         size: size as u32,

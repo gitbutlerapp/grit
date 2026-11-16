@@ -11,11 +11,6 @@ use crate::git_path::CanonicalizeExt;
 #[cfg(unix)]
 use crate::index::normalize_mode;
 use crate::index::Index;
-use crate::index::MODE_EXECUTABLE;
-use crate::index::MODE_GITLINK;
-use crate::index::MODE_REGULAR;
-use crate::index::MODE_SYMLINK;
-use crate::index::MODE_TREE;
 use crate::objects::parse_tree;
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
@@ -1519,19 +1514,19 @@ pub fn builtin_objectmode_index(index: &Index, rel_path: &str) -> Option<String>
     let key = rel_path.as_bytes();
     let e = index.get(key, 0)?;
     let m = e.mode;
-    if m == MODE_SYMLINK {
+    if m == FileMode::SYMLINK {
         return Some("120000".to_string());
     }
-    if m == MODE_GITLINK {
+    if m == FileMode::GITLINK {
         return Some("160000".to_string());
     }
-    if m == MODE_TREE {
+    if m == FileMode::TREE {
         return Some("040000".to_string());
     }
-    if m == MODE_EXECUTABLE {
+    if m == FileMode::EXECUTABLE {
         return Some("100755".to_string());
     }
-    if m == MODE_REGULAR {
+    if m == FileMode::REGULAR {
         return Some("100644".to_string());
     }
     Some(format!("{:06o}", m))

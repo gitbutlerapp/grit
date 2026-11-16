@@ -7,7 +7,7 @@ use crate::repo::Repository;
 
 use super::error::HistoryError;
 use super::plan::plan_rewrite;
-use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
+use super::types::{CommitEdit, CommitRewrite, HistoryEdits, RewriteOptions, RewritePlan};
 
 /// Fields to change when rewriting one commit's message and/or author with
 /// [`History::reword`](super::History::reword).
@@ -106,12 +106,12 @@ pub(crate) fn reword(
     let mut edits = HistoryEdits::new();
     edits.insert(
         commit,
-        CommitEdit::Rewrite {
+        CommitEdit::Rewrite(CommitRewrite {
             tree: None,
             message,
             author,
             parents: None,
-        },
+        }),
     );
     plan_rewrite(repo, &edits, opts)
 }

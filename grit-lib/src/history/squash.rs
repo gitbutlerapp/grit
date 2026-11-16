@@ -20,7 +20,7 @@ use super::message::{
 use super::plan::{plan_fold_range_at_head, plan_rewrite};
 use super::reword::normalize_rewrite_message;
 use super::types::RefScope;
-use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
+use super::types::{CommitEdit, CommitRewrite, HistoryEdits, RewriteOptions, RewritePlan};
 use super::PlanningError;
 
 /// How to choose the message on the squashed commit.
@@ -119,12 +119,12 @@ pub(crate) fn squash(
         if oid == resolved.oldest {
             edits.insert(
                 oid,
-                CommitEdit::Rewrite {
+                CommitEdit::Rewrite(CommitRewrite {
                     tree: Some(tip_commit.tree),
                     message: Some(message.clone()),
                     author: None,
                     parents: None,
-                },
+                }),
             );
         } else {
             edits.insert(oid, CommitEdit::Drop);

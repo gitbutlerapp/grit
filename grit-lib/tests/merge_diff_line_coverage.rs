@@ -20,7 +20,7 @@ use grit_lib::diff::merge_diff::{
 use grit_lib::diff::zero_oid;
 use grit_lib::diff::PathQuoting;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::objects::{FileMode, ObjectId, ObjectKind};
 use tempfile::tempdir;
 
 fn write_tree(odb: &Odb, entries: &[(&str, ObjectId)]) -> ObjectId {
@@ -78,11 +78,11 @@ fn combined_paths_and_formatters() {
     let p1_oid = blob_oid_at_path(&odb, &p1_tree, "file.txt").expect("p1 blob");
     let mut path = CombinedDiffPath::new(
         "file.txt",
-        0o100644,
+        FileMode::REGULAR,
         blob_oid_at_path(&odb, &merge_tree, "file.txt").expect("merge blob"),
         vec![
-            CombinedParentSide::new(0, zero_oid(), CombinedParentStatus::Added),
-            CombinedParentSide::new(0o100644, p1_oid, CombinedParentStatus::Modified),
+            CombinedParentSide::new(FileMode::ABSENT, zero_oid(), CombinedParentStatus::Added),
+            CombinedParentSide::new(FileMode::REGULAR, p1_oid, CombinedParentStatus::Modified),
         ],
     );
     enrich_combined_path_renames(&odb, &mut path, &parents, &merge_tree, 50);

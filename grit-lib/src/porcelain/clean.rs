@@ -9,7 +9,8 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::{Error, PathIoError, Result, WorktreePathOperation};
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::Index;
+use crate::objects::FileMode;
 use crate::porcelain::stash::remove_empty_dirs;
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
@@ -684,7 +685,7 @@ fn index_gitlink_at(index: &Index, stored: &str) -> bool {
     let rel = crate::repo_relpath::storage_bytes(stored);
     index
         .find_entry_pos(&rel, 0)
-        .is_some_and(|pos| index.entries()[pos].mode == MODE_GITLINK)
+        .is_some_and(|pos| index.entries()[pos].mode == FileMode::GITLINK)
 }
 
 fn has_stage0_descendant_under_stored(index: &Index, stored: &str) -> bool {

@@ -363,19 +363,19 @@ fn write_structured_unified_body<W: Write>(
     out: &mut W,
     git_old: &str,
     git_new: &str,
-    old_mode: u32,
-    new_mode: u32,
+    old_mode: FileMode,
+    new_mode: FileMode,
     structured: &StructuredFileDiff,
     old_content: &str,
     funcname_matcher: Option<&FuncnameMatcher>,
 ) -> Result<()> {
     const QUOTE_FULLY: bool = true;
-    let old_path = if old_mode == 0 {
+    let old_path = if old_mode == FileMode::ABSENT {
         "/dev/null".to_owned()
     } else {
         format_diff_path_with_prefix("a/", git_old, QUOTE_FULLY)
     };
-    let new_path = if new_mode == 0 {
+    let new_path = if new_mode == FileMode::ABSENT {
         "/dev/null".to_owned()
     } else {
         format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
@@ -429,8 +429,8 @@ fn write_diff_entry_patch_from_structured<W: Write>(
     config: &ConfigSet,
 ) -> Result<()> {
     write_diff_entry_patch_headers(out, repo, entry, opts, abbrev_cache, is_binary)?;
-    let old_mode = entry.old_mode.bits();
-    let new_mode = entry.new_mode.bits();
+    let old_mode = entry.old_mode;
+    let new_mode = entry.new_mode;
     let git_old = entry
         .old_path
         .as_deref()
@@ -451,7 +451,13 @@ fn write_diff_entry_patch_from_structured<W: Write>(
         && !structured.old_encoding_lossy
         && !structured.new_encoding_lossy;
     if use_structured {
-        let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0, path, force_read)?;
+        let old_bytes = read_blob_side(
+            odb,
+            entry.old_oid,
+            old_mode == FileMode::ABSENT,
+            path,
+            force_read,
+        )?;
         let old_text = std::str::from_utf8(&old_bytes).map_err(|_| {
             crate::error::Error::Object(ObjectError::Corrupt {
                 detail: "blob is not valid UTF-8".into(),
@@ -470,8 +476,20 @@ fn write_diff_entry_patch_from_structured<W: Write>(
         )?;
         return Ok(());
     }
-    let old_bytes = read_blob_side(odb, entry.old_oid, old_mode == 0, path, force_read)?;
-    let new_bytes = read_blob_side(odb, entry.new_oid, new_mode == 0, path, force_read)?;
+    let old_bytes = read_blob_side(
+        odb,
+        entry.old_oid,
+        old_mode == FileMode::ABSENT,
+        path,
+        force_read,
+    )?;
+    let new_bytes = read_blob_side(
+        odb,
+        entry.new_oid,
+        new_mode == FileMode::ABSENT,
+        path,
+        force_read,
+    )?;
     if old_bytes == new_bytes {
         return Ok(());
     }
@@ -501,8 +519,8 @@ fn write_patch_unified_body_from_bytes<W: Write>(
     new_bytes: &[u8],
     git_old: &str,
     git_new: &str,
-    old_mode: u32,
-    new_mode: u32,
+    old_mode: FileMode,
+    new_mode: FileMode,
     opts: &LogPatchOptions,
     funcname_matcher: Option<&FuncnameMatcher>,
 ) -> Result<()> {
@@ -527,12 +545,12 @@ fn write_patch_unified_body_from_bytes<W: Write>(
         })?;
         (old_s.to_owned(), new_s.to_owned())
     };
-    let old_path = if old_mode == 0 {
+    let old_path = if old_mode == FileMode::ABSENT {
         "/dev/null".to_owned()
     } else {
         git_old.to_owned()
     };
-    let new_path = if new_mode == 0 {
+    let new_path = if new_mode == FileMode::ABSENT {
         "/dev/null".to_owned()
     } else {
         git_new.to_owned()
@@ -931,12 +949,12 @@ fn write_diff_entry_patch_headers<W: Write>(
         format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
     )?;
 
-    let old_mode = entry.old_mode.bits();
-    let new_mode = entry.new_mode.bits();
+    let old_mode = entry.old_mode;
+    let new_mode = entry.new_mode;
 
-    if old_mode == 0 {
+    if old_mode == FileMode::ABSENT {
         writeln!(out, "new file mode {}", entry.new_mode)?;
-    } else if new_mode == 0 {
+    } else if new_mode == FileMode::ABSENT {
         writeln!(out, "deleted file mode {}", entry.old_mode)?;
     }
 
@@ -959,7 +977,10 @@ fn write_diff_entry_patch_headers<W: Write>(
                 writeln!(out, "copy to {path}")?;
             }
         }
-        _ if old_mode != 0 && new_mode != 0 && old_mode != new_mode => {
+        _ if old_mode != FileMode::ABSENT
+            && new_mode != FileMode::ABSENT
+            && old_mode != new_mode =>
+        {
             writeln!(out, "old mode {}", entry.old_mode)?;
             writeln!(out, "new mode {}", entry.new_mode)?;
         }
@@ -967,7 +988,7 @@ fn write_diff_entry_patch_headers<W: Write>(
     }
 
     if entry.old_oid != entry.new_oid {
-        let index_mode = if new_mode != 0 {
+        let index_mode = if new_mode != FileMode::ABSENT {
             entry.new_mode
         } else {
             entry.old_mode
@@ -1013,14 +1034,24 @@ fn write_diff_entry_patch<W: Write>(
     binary_format: LogPatchBinaryFormat,
     config: &ConfigSet,
 ) -> Result<()> {
-    let old_mode = entry.old_mode.bits();
-    let new_mode = entry.new_mode.bits();
+    let old_mode = entry.old_mode;
+    let new_mode = entry.new_mode;
     let path = entry.new_path.as_deref().or(entry.old_path.as_deref());
     let force_read = binary_format == LogPatchBinaryFormat::GitApplyBinaryPatch;
-    let (old_bytes, old_bin) =
-        load_patch_blob_side(odb, entry.old_oid, old_mode == 0, path, force_read)?;
-    let (new_bytes, new_bin) =
-        load_patch_blob_side(odb, entry.new_oid, new_mode == 0, path, force_read)?;
+    let (old_bytes, old_bin) = load_patch_blob_side(
+        odb,
+        entry.old_oid,
+        old_mode == FileMode::ABSENT,
+        path,
+        force_read,
+    )?;
+    let (new_bytes, new_bin) = load_patch_blob_side(
+        odb,
+        entry.new_oid,
+        new_mode == FileMode::ABSENT,
+        path,
+        force_read,
+    )?;
     write_diff_entry_patch_with_resolved_bytes(
         out,
         repo,
@@ -1061,8 +1092,8 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
         .as_deref()
         .or(entry.old_path.as_deref())
         .unwrap_or("dev/null");
-    let old_mode = entry.old_mode.bits();
-    let new_mode = entry.new_mode.bits();
+    let old_mode = entry.old_mode;
+    let new_mode = entry.new_mode;
     let is_binary =
         side_known_binary || merge_file::is_binary(old_bytes) || merge_file::is_binary(new_bytes);
     let index_full_oid = is_binary && binary_format == LogPatchBinaryFormat::GitApplyBinaryPatch;
@@ -1075,12 +1106,12 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
     if is_binary {
         match binary_format {
             LogPatchBinaryFormat::LogShortMessage => {
-                let old_side = if old_mode == 0 {
+                let old_side = if old_mode == FileMode::ABSENT {
                     "/dev/null".to_owned()
                 } else {
                     format_diff_path_with_prefix("a/", git_old, QUOTE_FULLY)
                 };
-                let new_side = if new_mode == 0 {
+                let new_side = if new_mode == FileMode::ABSENT {
                     "/dev/null".to_owned()
                 } else {
                     format_diff_path_with_prefix("b/", git_new, QUOTE_FULLY)
@@ -1129,12 +1160,12 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
         })?;
         (old_s.to_owned(), new_s.to_owned())
     };
-    let old_path = if old_mode == 0 {
+    let old_path = if old_mode == FileMode::ABSENT {
         "/dev/null".to_owned()
     } else {
         git_old.to_owned()
     };
-    let new_path = if new_mode == 0 {
+    let new_path = if new_mode == FileMode::ABSENT {
         "/dev/null".to_owned()
     } else {
         git_new.to_owned()
@@ -1359,7 +1390,7 @@ impl<'r> WorktreeSideReader<'r> {
         })
     }
 
-    fn read(&self, odb: &Odb, path: &str, mode: u32) -> Result<Vec<u8>> {
+    fn read(&self, odb: &Odb, path: &str, mode: FileMode) -> Result<Vec<u8>> {
         let index_entry = self.index.get(&crate::repo_relpath::storage_bytes(path), 0);
         Ok(load_worktree_side_for_diff(
             odb,
@@ -1383,8 +1414,7 @@ fn resolve_patch_side<'f, 'r>(
     worktree: &mut Option<WorktreeSideReader<'r>>,
 ) -> Result<Cow<'f, [u8]>> {
     let (source, mode, oid) = side.of(file);
-    let mode = mode.bits();
-    if mode == 0 {
+    if mode.is_absent() {
         return Ok(Cow::Borrowed(&[]));
     }
     match source {

@@ -5,18 +5,17 @@ use crate::diff::{
 };
 use crate::error::{Error, ErrorSummary, PathOutsideRepoError, Result};
 use crate::git_path::CanonicalizeExt;
-use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE};
+use crate::index::{index_file_mtime, Index, IndexEntry};
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::path_icase::{paths_equal, worktree_filesystem_case_insensitive};
-use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
+use crate::path_validate::{validate_path, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
     is_plain_literal_pathspec, literal_spec_for_lookup, matches_pathspec_list_with_context,
     pathspec_is_exclude, PathspecMatchContext,
 };
 use crate::porcelain::checkout::remove_empty_parent_dirs_batch;
-use crate::porcelain::pathspec_match::{
-    index_stage0_path_modes, RepositoryPathspecFilter, REGULAR_FILE_MODE,
-};
+use crate::porcelain::pathspec_match::{index_stage0_path_modes, RepositoryPathspecFilter};
 use crate::progress::{poll_cancel, CancelToken, NullProgress};
 use crate::repo::{Repository, RepositoryError};
 use crate::worktree::WorktreeError;
@@ -1029,7 +1028,7 @@ fn collect_pathspec_matched_removal(
     filter: &RepositoryPathspecFilter<'_>,
     pathspec_ctx: PathspecMatchContext,
     resolved: &str,
-    path_modes: &std::collections::HashMap<String, u32>,
+    path_modes: &std::collections::HashMap<String, FileMode>,
     opts: &RemoveOptions,
     selected: &mut BTreeSet<String>,
 ) -> Result<bool> {
@@ -1045,7 +1044,7 @@ fn collect_pathspec_matched_removal(
         let mode = path_modes
             .get(path.as_ref())
             .copied()
-            .unwrap_or(REGULAR_FILE_MODE);
+            .unwrap_or(FileMode::REGULAR);
         if filter.matches_entry(path.as_ref(), mode) {
             matches.push(path.into_owned());
         }
@@ -1181,9 +1180,9 @@ fn blocked_removals(
 
 /// A tracked file that has vanished from the work tree, or turned into a directory, has
 /// nothing left on disk to lose, so its removal is never refused.
-fn worktree_still_has_file(work_tree: &Path, path: &str, mode: u32) -> bool {
+fn worktree_still_has_file(work_tree: &Path, path: &str, mode: FileMode) -> bool {
     match fs::symlink_metadata(work_tree.join(path)) {
-        Ok(meta) => !meta.is_dir() || mode == MODE_GITLINK,
+        Ok(meta) => !meta.is_dir() || mode == FileMode::GITLINK,
         Err(_) => false,
     }
 }
@@ -1452,7 +1451,7 @@ fn normalize_and_validate_repo_relative(
     let opts = ProtectOptions::from_config(&*repo.config().snapshot()?);
     validate_path(
         rel.as_bytes(),
-        EntryMode::new(0o100644),
+        FileMode::REGULAR,
         opts,
         PathValidationKind::Worktree,
     )
@@ -1494,7 +1493,7 @@ fn resolve_move_destination(
     let src_is_dir = worktree_dentry_is_directory(work_tree, src)
         || index
             .get(src.as_bytes(), 0)
-            .is_some_and(|e| e.mode == MODE_TREE)
+            .is_some_and(|e| e.mode == FileMode::TREE)
         || !index_paths_under(index, src, false).is_empty();
 
     let same_case_directory = src_is_dir
@@ -1509,7 +1508,7 @@ fn resolve_move_destination(
             || index_has_paths_under(index, dst, false)
             || index
                 .get(dst.as_bytes(), 0)
-                .is_some_and(|e| e.mode == MODE_TREE));
+                .is_some_and(|e| e.mode == FileMode::TREE));
 
     if dst_had_trailing_slash && !dst_is_dir {
         if single_source && src_is_dir {
@@ -1901,7 +1900,7 @@ fn entry_with_relpath(mut entry: IndexEntry, path: &str) -> IndexEntry {
 #[cfg(test)]
 mod remove_block_reason_tests {
     use super::{worktree_still_has_file, BlockedRemoval, RemoveBlockReason};
-    use crate::index::{MODE_GITLINK, MODE_REGULAR};
+    use crate::objects::FileMode;
 
     #[test]
     fn classify_without_cached_refuses_any_difference() {
@@ -1965,10 +1964,10 @@ mod remove_block_reason_tests {
         let wt = tmp.path();
         std::fs::write(wt.join("file"), b"x\n").unwrap();
         std::fs::create_dir(wt.join("dir")).unwrap();
-        assert!(worktree_still_has_file(wt, "file", MODE_REGULAR));
-        assert!(!worktree_still_has_file(wt, "missing", MODE_REGULAR));
-        assert!(!worktree_still_has_file(wt, "dir", MODE_REGULAR));
-        assert!(worktree_still_has_file(wt, "dir", MODE_GITLINK));
+        assert!(worktree_still_has_file(wt, "file", FileMode::REGULAR));
+        assert!(!worktree_still_has_file(wt, "missing", FileMode::REGULAR));
+        assert!(!worktree_still_has_file(wt, "dir", FileMode::REGULAR));
+        assert!(worktree_still_has_file(wt, "dir", FileMode::GITLINK));
     }
 }
 
@@ -2319,7 +2318,7 @@ mod index_has_paths_under_tests {
     use super::index_has_paths_under;
 
     use crate::index::{Index, IndexEntry};
-    use crate::objects::ObjectId;
+    use crate::objects::{FileMode, ObjectId};
 
     fn dummy_entry(path: &str) -> IndexEntry {
         IndexEntry {
@@ -2329,7 +2328,7 @@ mod index_has_paths_under_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: 0o100644,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,
@@ -2385,7 +2384,7 @@ mod destination_exists_tests {
     };
     use crate::index::Index;
     use crate::index::IndexEntry;
-    use crate::objects::ObjectId;
+    use crate::objects::{FileMode, ObjectId};
 
     fn dummy_entry(path: &str) -> IndexEntry {
         IndexEntry {
@@ -2395,7 +2394,7 @@ mod destination_exists_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: 0o100644,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

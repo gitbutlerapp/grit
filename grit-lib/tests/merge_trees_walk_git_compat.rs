@@ -5,7 +5,6 @@ use grit_lib::objects::FileMode;
 
 use std::fs;
 
-use grit_lib::index::MODE_REGULAR;
 use grit_lib::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 
 use support::git as hist_git;

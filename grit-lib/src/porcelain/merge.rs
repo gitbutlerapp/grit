@@ -45,7 +45,7 @@ use crate::merge_trees::{
     DirectoryRenameMode, MergeTreeCache, TheirsConflictLabel, TreeMergeConflictPresentation,
     TreeMergeOutput, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tree, CommitData, FileMode, ObjectId, ObjectKind};
 use crate::operation::{conflicts_from_tree_merge, tree_merge_has_conflicts, Conflict};
 use crate::path_population::validate_tree_walk_entry;
 use crate::path_validate::ProtectOptions;
@@ -132,9 +132,9 @@ fn tree_to_index_entries_with_protect(
 
     for te in entries {
         let path_bytes = crate::repo_relpath::join_rel(prefix, &te.name);
-        validate_tree_walk_entry(prefix, &te.name, te.mode.bits(), protect)?;
+        validate_tree_walk_entry(prefix, &te.name, te.mode, protect)?;
 
-        if crate::index::is_tree_mode(te.mode.bits()) {
+        if crate::index::is_tree_mode(te.mode) {
             let sub = tree_to_index_entries_with_protect(repo, &te.oid, &path_bytes, protect)?;
             result.extend(sub);
         } else {
@@ -145,7 +145,7 @@ fn tree_to_index_entries_with_protect(
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: crate::index::canon_mode(te.mode.bits()),
+                mode: crate::index::canon_mode(te.mode),
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -551,8 +551,9 @@ pub(crate) fn predict_merge(
 /// rows `git merge-tree --write-tree` prints after the tree id.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MergeTreeStage {
-    /// Git file mode of this side (`0o100644`, `0o100755`, `0o120000`, `0o160000`).
-    pub mode: u32,
+    /// Git file mode of this side ([`FileMode::REGULAR`], [`FileMode::EXECUTABLE`],
+    /// [`FileMode::SYMLINK`] or [`FileMode::GITLINK`]).
+    pub mode: FileMode,
     /// Blob (or gitlink commit) of this side; already in the object database.
     pub oid: ObjectId,
     /// `1` for the merge base, `2` for ours (`into`), `3` for theirs (`other`).
@@ -1812,7 +1813,7 @@ fn resolved_not_staged_paths(repo: &Repository, index: &Index, unmerged: &[Strin
             .iter()
             .find(|e| e.path == raw_path && e.stage() != 0)
             .map(|e| e.mode)
-            .unwrap_or(0o100644);
+            .unwrap_or(FileMode::REGULAR);
         if !crate::rerere::worktree_metadata_needs_conflict_marker_inspection(&meta, idx_mode) {
             continue;
         }
@@ -2334,7 +2335,8 @@ mod integrate_tests {
 
     use super::*;
     use crate::environment::RepositoryOptions;
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use std::collections::BTreeMap;
 
     fn index_entry(path: &str, stage: u8) -> IndexEntry {
@@ -2345,7 +2347,7 @@ mod integrate_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

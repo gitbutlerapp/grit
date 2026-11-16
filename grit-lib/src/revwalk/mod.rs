@@ -104,13 +104,14 @@ pub mod history {
     pub use crate::history_root::HistoryLastRecord;
     pub use crate::history_root::{
         format_hunk_range_header, normalize_rewrite_message, AbsorbOptions, AbsorbPlan,
-        AppliedRewrite, ApplyOptions, CommitEdit, EmptyPolicy, ExecReport, ExecRunRecord, ExecSpec,
-        FixupOptions, HeadEffect, History, HistoryEdits, HistoryError, HunkAssignment, HunkRange,
-        NewCommit, Pathspec, Placement, PlannedRefUpdate, PlanningError, PreRebase, RebaseAbort,
-        RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
-        RebaseSessionError, RebaseStop, RefScope, RewordOptions, RewriteApplyRecovery,
-        RewriteOptions, RewritePlan, RewrittenCommit, SplitOptions, SquashMessage, SquashOptions,
-        StartRebaseOptions, UnassignedHunk, UnassignedReason, UndoMode, UndoOutcome,
+        AppliedRewrite, ApplyOptions, CommitEdit, CommitRewrite, EmptyPolicy, ExecReport,
+        ExecRunRecord, ExecSpec, FixupOptions, HeadEffect, History, HistoryEdits, HistoryError,
+        HunkAssignment, HunkRange, NewCommit, Pathspec, Placement, PlannedRefUpdate, PlanningError,
+        PreRebase, RebaseAbort, RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan,
+        RebaseRequest, RebaseSessionError, RebaseStop, RefScope, RewordOptions,
+        RewriteApplyRecovery, RewriteOptions, RewritePlan, RewrittenCommit, SplitOptions,
+        SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk, UnassignedReason,
+        UndoMode, UndoOutcome,
     };
     pub(crate) use crate::history_root::{
         plan_rebase_check, rebase_request_after_fetch, start_rebase,

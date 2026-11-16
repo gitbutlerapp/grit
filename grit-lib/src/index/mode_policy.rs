@@ -2,7 +2,7 @@
 
 use crate::config::ConfigSet;
 
-use super::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+use crate::objects::FileMode;
 
 /// What the worktree filesystem can express about a tracked path's mode.
 ///
@@ -49,7 +49,7 @@ impl WorktreeModePolicy {
     /// Rules, in order:
     ///
     /// 1. Without symlink support, a regular file standing in for a recorded symlink
-    ///    ([`MODE_SYMLINK`]) stays a symlink: the file holds the link target.
+    ///    ([`FileMode::SYMLINK`]) stays a symlink: the file holds the link target.
     /// 2. Without a trusted executable bit, a regular file over a recorded regular file keeps the
     ///    recorded `100644`/`100755`.
     /// 3. Otherwise the worktree mode wins (including real type changes such as a directory, a
@@ -65,15 +65,19 @@ impl WorktreeModePolicy {
     ///
     /// The Git mode to compare against or store in the index.
     #[must_use]
-    pub fn index_mode_for_worktree(self, worktree_mode: u32, recorded_mode: Option<u32>) -> u32 {
+    pub fn index_mode_for_worktree(
+        self,
+        worktree_mode: FileMode,
+        recorded_mode: Option<FileMode>,
+    ) -> FileMode {
         let Some(recorded) = recorded_mode else {
             return worktree_mode;
         };
         if !is_regular_file_mode(worktree_mode) {
             return worktree_mode;
         }
-        if !self.has_symlinks && recorded == MODE_SYMLINK {
-            return MODE_SYMLINK;
+        if !self.has_symlinks && recorded == FileMode::SYMLINK {
+            return FileMode::SYMLINK;
         }
         if !self.trust_filemode && is_regular_file_mode(recorded) {
             return recorded;
@@ -85,7 +89,7 @@ impl WorktreeModePolicy {
     ///
     /// Equivalent to `index_mode_for_worktree(worktree_mode, Some(recorded_mode)) == recorded_mode`.
     #[must_use]
-    pub fn worktree_mode_matches(self, worktree_mode: u32, recorded_mode: u32) -> bool {
+    pub fn worktree_mode_matches(self, worktree_mode: FileMode, recorded_mode: FileMode) -> bool {
         self.index_mode_for_worktree(worktree_mode, Some(recorded_mode)) == recorded_mode
     }
 
@@ -104,14 +108,14 @@ impl WorktreeModePolicy {
     }
 }
 
-fn is_regular_file_mode(mode: u32) -> bool {
-    mode == MODE_REGULAR || mode == MODE_EXECUTABLE
+/// Exactly [`FileMode::REGULAR`] or [`FileMode::EXECUTABLE`] (index modes are canonical).
+const fn is_regular_file_mode(mode: FileMode) -> bool {
+    matches!(mode, FileMode::REGULAR | FileMode::EXECUTABLE)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::{MODE_GITLINK, MODE_TREE};
 
     const NO_SYMLINKS: WorktreeModePolicy = WorktreeModePolicy {
         trust_filemode: true,
@@ -126,55 +130,55 @@ mod tests {
     fn default_trusts_worktree() {
         let p = WorktreeModePolicy::default();
         assert_eq!(
-            p.index_mode_for_worktree(MODE_REGULAR, Some(MODE_SYMLINK)),
-            MODE_REGULAR
+            p.index_mode_for_worktree(FileMode::REGULAR, Some(FileMode::SYMLINK)),
+            FileMode::REGULAR
         );
         assert_eq!(
-            p.index_mode_for_worktree(MODE_EXECUTABLE, Some(MODE_REGULAR)),
-            MODE_EXECUTABLE
+            p.index_mode_for_worktree(FileMode::EXECUTABLE, Some(FileMode::REGULAR)),
+            FileMode::EXECUTABLE
         );
-        assert!(!p.worktree_mode_matches(MODE_REGULAR, MODE_SYMLINK));
+        assert!(!p.worktree_mode_matches(FileMode::REGULAR, FileMode::SYMLINK));
     }
 
     #[test]
     fn no_symlinks_keeps_recorded_symlink_for_regular_file() {
-        for wt in [MODE_REGULAR, MODE_EXECUTABLE] {
+        for wt in [FileMode::REGULAR, FileMode::EXECUTABLE] {
             assert_eq!(
-                NO_SYMLINKS.index_mode_for_worktree(wt, Some(MODE_SYMLINK)),
-                MODE_SYMLINK
+                NO_SYMLINKS.index_mode_for_worktree(wt, Some(FileMode::SYMLINK)),
+                FileMode::SYMLINK
             );
-            assert!(NO_SYMLINKS.worktree_mode_matches(wt, MODE_SYMLINK));
+            assert!(NO_SYMLINKS.worktree_mode_matches(wt, FileMode::SYMLINK));
         }
         // The executable bit is still trusted for real regular files.
         assert_eq!(
-            NO_SYMLINKS.index_mode_for_worktree(MODE_EXECUTABLE, Some(MODE_REGULAR)),
-            MODE_EXECUTABLE
+            NO_SYMLINKS.index_mode_for_worktree(FileMode::EXECUTABLE, Some(FileMode::REGULAR)),
+            FileMode::EXECUTABLE
         );
         // A real symlink on disk is still a symlink.
         assert_eq!(
-            NO_SYMLINKS.index_mode_for_worktree(MODE_SYMLINK, Some(MODE_REGULAR)),
-            MODE_SYMLINK
+            NO_SYMLINKS.index_mode_for_worktree(FileMode::SYMLINK, Some(FileMode::REGULAR)),
+            FileMode::SYMLINK
         );
     }
 
     #[test]
     fn no_filemode_keeps_recorded_regular_mode() {
         assert_eq!(
-            NO_FILEMODE.index_mode_for_worktree(MODE_EXECUTABLE, Some(MODE_REGULAR)),
-            MODE_REGULAR
+            NO_FILEMODE.index_mode_for_worktree(FileMode::EXECUTABLE, Some(FileMode::REGULAR)),
+            FileMode::REGULAR
         );
         assert_eq!(
-            NO_FILEMODE.index_mode_for_worktree(MODE_REGULAR, Some(MODE_EXECUTABLE)),
-            MODE_EXECUTABLE
+            NO_FILEMODE.index_mode_for_worktree(FileMode::REGULAR, Some(FileMode::EXECUTABLE)),
+            FileMode::EXECUTABLE
         );
         // Symlink support is trusted: a file over a symlink entry is a type change.
         assert_eq!(
-            NO_FILEMODE.index_mode_for_worktree(MODE_REGULAR, Some(MODE_SYMLINK)),
-            MODE_REGULAR
+            NO_FILEMODE.index_mode_for_worktree(FileMode::REGULAR, Some(FileMode::SYMLINK)),
+            FileMode::REGULAR
         );
         assert_eq!(
-            NO_FILEMODE.index_mode_for_worktree(MODE_REGULAR, Some(MODE_GITLINK)),
-            MODE_REGULAR
+            NO_FILEMODE.index_mode_for_worktree(FileMode::REGULAR, Some(FileMode::GITLINK)),
+            FileMode::REGULAR
         );
     }
 
@@ -185,16 +189,16 @@ mod tests {
             has_symlinks: false,
         };
         assert_eq!(
-            none.index_mode_for_worktree(MODE_EXECUTABLE, None),
-            MODE_EXECUTABLE
+            none.index_mode_for_worktree(FileMode::EXECUTABLE, None),
+            FileMode::EXECUTABLE
         );
         assert_eq!(
-            none.index_mode_for_worktree(MODE_TREE, Some(MODE_SYMLINK)),
-            MODE_TREE
+            none.index_mode_for_worktree(FileMode::TREE, Some(FileMode::SYMLINK)),
+            FileMode::TREE
         );
         assert_eq!(
-            none.index_mode_for_worktree(MODE_GITLINK, Some(MODE_REGULAR)),
-            MODE_GITLINK
+            none.index_mode_for_worktree(FileMode::GITLINK, Some(FileMode::REGULAR)),
+            FileMode::GITLINK
         );
     }
 

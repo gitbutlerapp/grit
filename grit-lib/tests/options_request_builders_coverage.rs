@@ -741,7 +741,7 @@ fn branch_merge_and_history_input_setters_set_each_field() {
     use grit_lib::merge::{MergeSource, MergeSourceKind};
     use grit_lib::porcelain::branch::StartPoint;
     use grit_lib::porcelain::hunk_select::LineRange;
-    use grit_lib::revwalk::history::{CommitEdit, NewCommit};
+    use grit_lib::revwalk::history::{CommitEdit, CommitRewrite, NewCommit};
 
     let start = StartPoint::new(oid(1), "main");
     assert_eq!((start.oid, start.label.as_str()), (oid(1), "main"));
@@ -808,18 +808,18 @@ fn branch_merge_and_history_input_setters_set_each_field() {
     assert_eq!(insert.message, "other\n");
 
     match CommitEdit::rewrite(
-        Some(oid(9)),
-        Some("m\n".to_owned()),
-        None,
-        Some(vec![oid(1)]),
+        CommitRewrite::default()
+            .with_tree(oid(9))
+            .with_message("m\n".to_owned())
+            .with_parents(vec![oid(1)]),
     ) {
-        CommitEdit::Rewrite {
+        CommitEdit::Rewrite(CommitRewrite {
             tree,
             message,
             author,
             parents,
             ..
-        } => {
+        }) => {
             assert_eq!(tree, Some(oid(9)));
             assert_eq!(message.as_deref(), Some("m\n"));
             assert_eq!(author, None);
@@ -898,13 +898,13 @@ fn transport_and_credential_input_setters_set_each_field() {
             ),
             ("capability[]".to_owned(), "authtype".to_owned()),
         ]);
-    assert_eq!(cred.protocol.as_deref(), Some("https"));
-    assert_eq!(cred.host.as_deref(), Some("example.com"));
-    assert_eq!(cred.path.as_deref(), Some("repo.git"));
-    assert_eq!(cred.username.as_deref(), Some("ada"));
-    assert_eq!(cred.password.as_deref(), Some("hunter2"));
-    assert_eq!(cred.url.as_deref(), Some("https://example.com/repo.git"));
-    assert_eq!(cred.extra.len(), 2);
+    assert_eq!(cred.protocol(), Some("https"));
+    assert_eq!(cred.host(), Some("example.com"));
+    assert_eq!(cred.path(), Some("repo.git"));
+    assert_eq!(cred.username(), Some("ada"));
+    assert_eq!(cred.password(), Some("hunter2"));
+    assert_eq!(cred.url(), Some("https://example.com/repo.git"));
+    assert_eq!(cred.extra().len(), 2);
     let debug = format!("{cred:?}");
     assert!(!debug.contains("hunter2"), "password leaked: {debug}");
     assert!(!debug.contains("refresh-secret"), "token leaked: {debug}");

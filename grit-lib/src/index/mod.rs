@@ -33,8 +33,7 @@ pub(crate) use core::{
 pub use core::{
     entry_from_metadata, entry_from_stat, index_entries_stat_equivalent, index_file_mtime,
     munge_index_size, normalize_mode, worktree_path_from_index_rel, Index, IndexEntry, IndexLock,
-    IndexParseContext, IndexParseOptions, StatMatchPolicy, MODE_EXECUTABLE, MODE_GITLINK,
-    MODE_REGULAR, MODE_SYMLINK, MODE_TREE,
+    IndexParseContext, IndexParseOptions, StatMatchPolicy,
 };
 pub use error::{IndexChmodReason, IndexCorrupt, IndexCorruptReason, IndexError};
 pub use handle::{IndexFile, IndexLoadOptions, IndexWriteOptions, SparseIndexLoad};

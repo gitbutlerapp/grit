@@ -722,15 +722,13 @@ enum TreeChild {
 }
 
 impl TreeChild {
-    const TYPE_MASK: u32 = 0o170000;
-    const TREE: u32 = 0o040000;
-    const GITLINK: u32 = 0o160000;
-
-    fn from_mode(mode: u32) -> Self {
-        match mode & Self::TYPE_MASK {
-            Self::TREE => Self::Tree,
-            Self::GITLINK => Self::Gitlink,
-            _ => Self::Blob,
+    fn from_mode(mode: crate::objects::FileMode) -> Self {
+        if mode.is_tree() {
+            Self::Tree
+        } else if mode.is_gitlink() {
+            Self::Gitlink
+        } else {
+            Self::Blob
         }
     }
 }
@@ -1207,6 +1205,7 @@ fn write_lookup_table(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objects::FileMode;
 
     #[test]
     fn history_sample_plan_increases_stride_with_rank() {
@@ -1218,9 +1217,10 @@ mod tests {
 
     #[test]
     fn tree_child_kind_comes_from_mode_bits() {
-        assert_eq!(TreeChild::from_mode(0o040000), TreeChild::Tree);
-        assert_eq!(TreeChild::from_mode(0o160000), TreeChild::Gitlink);
+        assert_eq!(TreeChild::from_mode(FileMode::TREE), TreeChild::Tree);
+        assert_eq!(TreeChild::from_mode(FileMode::GITLINK), TreeChild::Gitlink);
         for mode in [0o100644, 0o100755, 0o120000, 0o100664] {
+            let mode = FileMode::new(mode);
             assert_eq!(TreeChild::from_mode(mode), TreeChild::Blob, "{mode:o}");
         }
     }

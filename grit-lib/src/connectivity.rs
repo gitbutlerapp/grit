@@ -3,13 +3,10 @@
 use std::collections::{HashSet, VecDeque};
 
 use crate::error::Result;
-use crate::objects::{oid_hash_set, parse_commit, ObjectId, ObjectKind, TreeRefIter};
+use crate::objects::{oid_hash_set, parse_commit, FileMode, ObjectId, ObjectKind, TreeRefIter};
 use crate::refs;
 use crate::repo::Repository;
 use crate::shallow;
-
-const TREE_MODE: u32 = 0o040000;
-const TYPE_MASK: u32 = 0o170000;
 
 /// Returns every commit reachable from all refs under `refs/` (not `HEAD` alone).
 ///
@@ -134,11 +131,11 @@ fn walk_tree_objects(repo: &Repository, root: ObjectId, oid_len: usize) -> Resul
         }
         for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
             let entry = entry?;
-            if entry.mode & TYPE_MASK == TREE_MODE {
+            if entry.mode.is_tree() {
                 stack.push(entry.oid);
                 continue;
             }
-            if entry.mode == 0o160000 {
+            if entry.mode == FileMode::GITLINK {
                 continue;
             }
             if repo.odb().read(&entry.oid).is_err() {

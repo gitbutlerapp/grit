@@ -8,7 +8,7 @@ use std::process::Command;
 
 use grit_lib::error::Error;
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::commit_graph::BloomFilterSettings;
 use grit_lib::objects::commit_graph::{build_commit_graph_bytes, load_commit_graph_commit_info};
 use grit_lib::objects::commit_graph::{

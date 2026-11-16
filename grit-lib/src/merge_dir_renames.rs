@@ -26,11 +26,9 @@ use super::{
 };
 use crate::index::{Index, IndexEntry};
 use crate::merge_file::MergeFavor;
-use crate::objects::ObjectId;
+use crate::objects::{FileMode, ObjectId};
 use crate::odb::Odb;
 use std::collections::{BTreeMap, HashMap, HashSet};
-
-const MODE_DIR: u32 = 0o040000;
 
 /// One side's changes relative to the merge base, as directory rename detection needs them.
 pub(super) struct SideChanges<'a> {
@@ -160,7 +158,9 @@ pub(super) fn plan_directory_renames(
                 continue;
             }
             let renamer_at = lookup_index_entry_at_path_cached(cache, odb, &renamer.tree, &to)?;
-            let existing = renamer_at.as_ref().is_some_and(|e| e.mode == MODE_DIR)
+            let existing = renamer_at
+                .as_ref()
+                .is_some_and(|e| e.mode == FileMode::TREE)
                 || lookup_index_entry_at_path_cached(cache, odb, &adding.tree, &to)?.is_some();
             if existing || sources.len() > 1 {
                 reported.insert(to_key);
@@ -192,7 +192,7 @@ pub(super) fn plan_directory_renames(
                 })
             });
             let base_at = lookup_index_entry_at_path_cached(cache, odb, &base_tree, &to)?
-                .filter(|e| e.mode != MODE_DIR);
+                .filter(|e| e.mode != FileMode::TREE);
             let occupied = (base_at.is_some() || renamer_at.is_some()).then_some(Occupant {
                 base: base_at,
                 renamer: renamer_at,
@@ -357,7 +357,7 @@ impl RelevanceLookup<'_, '_> {
         if let Some(&removed) = self.removed.get(dir) {
             return Ok(removed);
         }
-        let is_dir = |entry: Option<IndexEntry>| entry.is_some_and(|e| e.mode == MODE_DIR);
+        let is_dir = |entry: Option<IndexEntry>| entry.is_some_and(|e| e.mode == FileMode::TREE);
         let removed = is_dir(lookup_index_entry_at_path_cached(
             self.cache,
             self.odb,
@@ -620,8 +620,9 @@ mod tests {
         merge_trees_three_way, DirectoryRenameConflict, DirectoryRenameMode, MergeSide,
         TreeMergeConflictPresentation, TreeMergeOutput,
     };
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
     use crate::merge_file::MergeFavor;
+    use crate::objects::FileMode;
     use crate::objects::{ObjectId, ObjectKind};
     use crate::operation::{conflicts_from_tree_merge, tree_merge_has_conflicts, ConflictKind};
     use crate::repo::{init_repository, Repository};
@@ -650,7 +651,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_REGULAR,
+                mode: FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: 0,

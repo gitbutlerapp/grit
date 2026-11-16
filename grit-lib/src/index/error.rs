@@ -3,7 +3,7 @@
 use std::path::{Path, PathBuf};
 
 use crate::error::{GitDirPathOperation, LockHeldError, PathIoError, PathIoOperation};
-use crate::objects::HashAlgo;
+use crate::objects::{FileMode, HashAlgo};
 use thiserror::Error;
 
 /// Why index bytes or an extension payload could not be parsed.
@@ -193,7 +193,7 @@ pub enum IndexChmodReason {
     /// Target mode is not `100644` or `100755`.
     InvalidTargetMode {
         /// Mode the caller requested.
-        mode: u32,
+        mode: FileMode,
     },
 }
 

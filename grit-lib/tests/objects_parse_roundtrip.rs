@@ -7,7 +7,7 @@ use std::process::{Command, Stdio};
 use grit_lib::error::Error;
 use grit_lib::objects::{
     parse_commit, parse_tag, parse_tree, serialize_commit, serialize_tag, serialize_tree,
-    tree_entry_cmp, CommitData, HashAlgo, ObjectId, ObjectKind, TagData, TreeEntry,
+    tree_entry_cmp, CommitData, FileMode, HashAlgo, ObjectId, ObjectKind, TagData, TreeEntry,
 };
 use grit_test_support::objects::{git_supports_sha256, HashAlgo as FixtureAlgo, RepoFixture};
 
@@ -445,11 +445,11 @@ type not-a-kind\ntag t\n\n"
 #[test]
 fn tree_entry_cmp_matches_git_directory_ordering() {
     assert_eq!(
-        tree_entry_cmp(b"foo", 0o040000, b"foo-bar", 0o100644),
+        tree_entry_cmp(b"foo", FileMode::TREE, b"foo-bar", FileMode::REGULAR),
         std::cmp::Ordering::Greater
     );
     assert_eq!(
-        tree_entry_cmp(b"foo", 0o100644, b"foo", 0o040000),
+        tree_entry_cmp(b"foo", FileMode::REGULAR, b"foo", FileMode::TREE),
         std::cmp::Ordering::Less
     );
 }

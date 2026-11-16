@@ -13,7 +13,8 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::config::parse_path;
 use crate::error::{Error, Result};
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::Index;
+use crate::objects::FileMode;
 use crate::objects::ObjectKind;
 use crate::repo::Repository;
 use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
@@ -1454,7 +1455,7 @@ pub(crate) fn submodule_containing_path(repo_rel_path: &str, index: &Index) -> O
         };
         end += slash;
         if let Some(entry) = index.get(&bytes[..end], 0) {
-            if entry.mode == MODE_GITLINK {
+            if entry.mode == FileMode::GITLINK {
                 best = Some(String::from_utf8_lossy(&bytes[..end]).into_owned());
             }
         }
@@ -2140,7 +2141,8 @@ mod ignore_case_matcher_tests {
 #[cfg(test)]
 mod index_lookup_scaling_tests {
     use super::*;
-    use crate::index::{index_path_cmp, Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{index_path_cmp, Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::ObjectId;
     use crate::repo::init_repository;
     use crate::RefStorageFormat;
@@ -2158,7 +2160,7 @@ mod index_lookup_scaling_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

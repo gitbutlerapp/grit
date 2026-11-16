@@ -16,7 +16,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use crate::index::{entry_from_metadata, IndexEntry, MODE_GITLINK};
+use crate::index::{entry_from_metadata, IndexEntry};
 use crate::lockfile::{LockFile, LockWait};
 use crate::objects::HashAlgo;
 use crate::objects::{ObjectId, ObjectKind};
@@ -39,14 +39,14 @@ const FORMAT_VERSION: u32 = 1;
 /// store, so `data` stays empty and is never read or written as a blob.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct IndexBlob {
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
     data: Vec<u8>,
 }
 
 impl IndexBlob {
     fn is_gitlink(&self) -> bool {
-        self.mode == MODE_GITLINK
+        self.mode == FileMode::GITLINK
     }
 }
 
@@ -66,7 +66,7 @@ pub(crate) struct PathState {
 /// Comparable fingerprint of a [`PathState`]: modes, kinds and blob ids instead of bytes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct PathDigest {
-    index: Option<(u32, ObjectId)>,
+    index: Option<(FileMode, ObjectId)>,
     worktree: WorktreeDigest,
 }
 
@@ -106,7 +106,7 @@ pub(crate) fn capture_path_states(
     for path in paths {
         let entry = index.get(path.as_bytes(), 0);
         let index_blob = match entry {
-            Some(e) if e.mode == MODE_GITLINK => Some(IndexBlob {
+            Some(e) if e.mode == FileMode::GITLINK => Some(IndexBlob {
                 mode: e.mode,
                 oid: e.oid,
                 data: Vec::new(),
@@ -382,7 +382,7 @@ fn install_worktree(abs: &Path, state: &WorktreePathSnapshot) -> std::io::Result
 }
 
 /// Entry with an unset stat cache ([`IndexEntry::stat_cache_unset`]), which forces a rehash.
-fn unstatted_entry(key: &[u8], oid: ObjectId, mode: u32) -> IndexEntry {
+fn unstatted_entry(key: &[u8], oid: ObjectId, mode: FileMode) -> IndexEntry {
     IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
@@ -421,7 +421,7 @@ fn tree_blob_at_path(
         odb.read(&entry.oid).map_err(apply_err)?.data
     };
     Ok(Some(IndexBlob {
-        mode: entry.mode.bits(),
+        mode: entry.mode,
         oid: entry.oid,
         data,
     }))
@@ -580,7 +580,7 @@ fn parse(bytes: &[u8]) -> crate::error::Result<UndoWork> {
         let index = match header.as_slice() {
             ["none"] => None,
             [mode, oid, len] => Some(IndexBlob {
-                mode: parse_mode(mode)?,
+                mode: FileMode::new(parse_mode(mode)?),
                 oid: parse_oid(oid)?,
                 data: cur.payload(len)?,
             }),
@@ -599,7 +599,7 @@ fn parse(bytes: &[u8]) -> crate::error::Result<UndoWork> {
         let header = cur.expect_keyword("expect-index")?;
         let expect_index = match header.as_slice() {
             ["none"] => None,
-            [mode, oid] => Some((parse_mode(mode)?, parse_oid(oid)?)),
+            [mode, oid] => Some((FileMode::new(parse_mode(mode)?), parse_oid(oid)?)),
             _ => return Err(parse_err("bad expect-index")),
         };
         let header = cur.expect_keyword("expect-worktree")?;
@@ -667,14 +667,17 @@ mod tests {
                     restore: PathState {
                         path: "dir/with space.txt".into(),
                         index: Some(IndexBlob {
-                            mode: 0o100644,
+                            mode: FileMode::REGULAR,
                             oid: oid(9),
                             data: b"a\nb\n\0binary\n".to_vec(),
                         }),
-                        worktree: WorktreePathSnapshot::file(0o100755, b"no newline".to_vec()),
+                        worktree: WorktreePathSnapshot::file(
+                            FileMode::EXECUTABLE,
+                            b"no newline".to_vec(),
+                        ),
                     },
                     expect: PathDigest {
-                        index: Some((0o100644, oid(1))),
+                        index: Some((FileMode::REGULAR, oid(1))),
                         worktree: WorktreeDigest::File {
                             executable: true,
                             oid: oid(2),
@@ -696,11 +699,11 @@ mod tests {
                     restore: PathState {
                         path: "link".into(),
                         index: Some(IndexBlob {
-                            mode: 0o120000,
+                            mode: FileMode::SYMLINK,
                             oid: oid(8),
                             data: b"target".to_vec(),
                         }),
-                        worktree: WorktreePathSnapshot::file(0o120000, b"target".to_vec()),
+                        worktree: WorktreePathSnapshot::file(FileMode::SYMLINK, b"target".to_vec()),
                     },
                     expect: PathDigest {
                         index: None,
@@ -711,14 +714,14 @@ mod tests {
                     restore: PathState {
                         path: "sub".into(),
                         index: Some(IndexBlob {
-                            mode: MODE_GITLINK,
+                            mode: FileMode::GITLINK,
                             oid: oid(7),
                             data: Vec::new(),
                         }),
                         worktree: submodule_worktree(),
                     },
                     expect: PathDigest {
-                        index: Some((MODE_GITLINK, oid(6))),
+                        index: Some((FileMode::GITLINK, oid(6))),
                         worktree: WorktreeDigest::Directory,
                     },
                 },

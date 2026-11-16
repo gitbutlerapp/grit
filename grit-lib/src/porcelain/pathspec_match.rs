@@ -4,7 +4,7 @@ use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
 use crate::git_path::pathspec_traverses_symlink_dir;
 use crate::index::Index;
-use crate::objects::{parse_tree, ObjectId};
+use crate::objects::{parse_tree, FileMode, ObjectId};
 use crate::pathspec::{
     has_glob_chars, pathspec_has_attr_magic, pathspec_is_exclude, sorted_paths_match_pathspec,
     PathspecListMatcher, PathspecMatchContext, PathspecMatcher,
@@ -164,7 +164,7 @@ impl<'a> RepositoryPathspecFilter<'a> {
 
     /// Honors index/tree entry `mode` for directory, submodule, and `builtin_objectmode` specs.
     #[must_use]
-    pub(crate) fn matches_entry(&self, path: &str, mode: u32) -> bool {
+    pub(crate) fn matches_entry(&self, path: &str, mode: FileMode) -> bool {
         match self {
             Self::List(m) => m.matches(path),
             Self::Attr(m) => m.matches_entry(path, mode),
@@ -172,16 +172,16 @@ impl<'a> RepositoryPathspecFilter<'a> {
     }
 }
 
-pub(crate) const REGULAR_FILE_MODE: u32 = 0o100644;
-
 /// Path and index/tree mode for attribute-aware pathspec matching.
 pub(crate) struct PathspecMatchEntry<'a> {
     pub path: &'a str,
-    pub mode: u32,
+    pub mode: FileMode,
 }
 
 /// Stage-0 index paths with their object modes (last stage 0 wins on duplicates).
-pub(crate) fn index_stage0_path_modes(index: &Index) -> std::collections::HashMap<String, u32> {
+pub(crate) fn index_stage0_path_modes(
+    index: &Index,
+) -> std::collections::HashMap<String, FileMode> {
     let mut out = std::collections::HashMap::new();
     for entry in &index.entries {
         if entry.stage() == 0 {
@@ -192,39 +192,39 @@ pub(crate) fn index_stage0_path_modes(index: &Index) -> std::collections::HashMa
     out
 }
 
-/// Stage-0 mode for `path`, or [`REGULAR_FILE_MODE`] when the path is not in the index.
+/// Stage-0 mode for `path`, or [`FileMode::REGULAR`] when the path is not in the index.
 #[must_use]
-pub(crate) fn index_stage0_mode_or_regular(index: &Index, path: &str) -> u32 {
+pub(crate) fn index_stage0_mode_or_regular(index: &Index, path: &str) -> FileMode {
     index
         .get(path.as_bytes(), 0)
         .map(|e| e.mode)
-        .unwrap_or(REGULAR_FILE_MODE)
+        .unwrap_or(FileMode::REGULAR)
 }
 
 /// Mode for `path` from the index, preferring stage 0 then merge stages (for unmerged paths).
 #[must_use]
-pub(crate) fn index_path_mode_for_pathspec(index: &Index, path: &str) -> u32 {
+pub(crate) fn index_path_mode_for_pathspec(index: &Index, path: &str) -> FileMode {
     let path_bytes = path.as_bytes();
     for stage in [0u8, 2, 3, 1] {
         if let Some(entry) = index.get(path_bytes, stage) {
             return entry.mode;
         }
     }
-    REGULAR_FILE_MODE
+    FileMode::REGULAR
 }
 
 /// Object mode to use when matching a diff entry against a pathspec.
 #[must_use]
-pub(crate) fn diff_entry_path_mode(entry: &DiffEntry) -> u32 {
-    let new_mode = entry.new_mode.bits();
-    if new_mode != 0 {
+pub(crate) fn diff_entry_path_mode(entry: &DiffEntry) -> FileMode {
+    let new_mode = entry.new_mode;
+    if new_mode != FileMode::ABSENT {
         new_mode
     } else {
-        entry.old_mode.bits()
+        entry.old_mode
     }
 }
 
-/// Pairs each of `paths` with its stage-0 mode in `index` ([`REGULAR_FILE_MODE`] when absent).
+/// Pairs each of `paths` with its stage-0 mode in `index` ([`FileMode::REGULAR`] when absent).
 ///
 /// Lookups gallop forward through the index, so byte-sorted `paths` cost about one comparison
 /// each; any order is still correct.
@@ -242,7 +242,7 @@ pub(crate) fn pathspec_entries_from_paths<'a>(
                     idx.find_stage0_pos_from(path.as_bytes(), &mut cursor)
                         .map(|pos| idx.entries[pos].mode)
                 })
-                .unwrap_or(REGULAR_FILE_MODE),
+                .unwrap_or(FileMode::REGULAR),
         })
         .collect()
 }
@@ -547,7 +547,7 @@ mod tests {
         assert!(pathspec_matches_known_in_repository(&repo, "tracked.txt").expect("check"));
     }
 
-    fn index_entry(path: &str, mode: u32) -> crate::index::IndexEntry {
+    fn index_entry(path: &str, mode: FileMode) -> crate::index::IndexEntry {
         crate::index::IndexEntry {
             ctime_sec: 0,
             ctime_nsec: 0,
@@ -569,12 +569,12 @@ mod tests {
 
     #[test]
     fn pathspec_entries_take_stage0_modes_in_any_order() {
-        use crate::index::{MODE_EXECUTABLE, MODE_GITLINK, MODE_SYMLINK};
+        use crate::objects::FileMode;
         let mut index = Index::new();
-        index.add_or_replace(index_entry("a/run.sh", MODE_EXECUTABLE));
-        index.add_or_replace(index_entry("b/link", MODE_SYMLINK));
-        index.add_or_replace(index_entry("c/sub", MODE_GITLINK));
-        let modes = |paths: &[&str]| -> Vec<u32> {
+        index.add_or_replace(index_entry("a/run.sh", FileMode::EXECUTABLE));
+        index.add_or_replace(index_entry("b/link", FileMode::SYMLINK));
+        index.add_or_replace(index_entry("c/sub", FileMode::GITLINK));
+        let modes = |paths: &[&str]| -> Vec<FileMode> {
             pathspec_entries_from_paths(paths, Some(&index))
                 .iter()
                 .map(|e| e.mode)
@@ -583,26 +583,26 @@ mod tests {
         assert_eq!(
             modes(&["a/run.sh", "b/link", "b/missing", "c/sub"]),
             [
-                MODE_EXECUTABLE,
-                MODE_SYMLINK,
-                REGULAR_FILE_MODE,
-                MODE_GITLINK
+                FileMode::EXECUTABLE,
+                FileMode::SYMLINK,
+                FileMode::REGULAR,
+                FileMode::GITLINK
             ]
         );
         assert_eq!(
             modes(&["c/sub", "a/run.sh", "zzz", "b/link"]),
             [
-                MODE_GITLINK,
-                MODE_EXECUTABLE,
-                REGULAR_FILE_MODE,
-                MODE_SYMLINK
+                FileMode::GITLINK,
+                FileMode::EXECUTABLE,
+                FileMode::REGULAR,
+                FileMode::SYMLINK
             ]
         );
-        let without_index: Vec<u32> = pathspec_entries_from_paths(&["a/run.sh"], None)
+        let without_index: Vec<FileMode> = pathspec_entries_from_paths(&["a/run.sh"], None)
             .iter()
             .map(|e| e.mode)
             .collect();
-        assert_eq!(without_index, [REGULAR_FILE_MODE]);
+        assert_eq!(without_index, [FileMode::REGULAR]);
     }
 
     /// Stash push and restore check every pathspec against all tracked paths; a plain spec must
@@ -617,7 +617,7 @@ mod tests {
         let mut index = Index::new();
         let owned: Vec<String> = (0..N).map(|i| format!("d/f{i:06}.txt")).collect();
         for path in &owned {
-            index.add_or_replace(index_entry(path, REGULAR_FILE_MODE));
+            index.add_or_replace(index_entry(path, FileMode::REGULAR));
         }
         let paths: Vec<&str> = owned.iter().map(String::as_str).collect();
         let ctx = repo.pathspec_match_context();

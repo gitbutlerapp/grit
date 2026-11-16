@@ -1016,7 +1016,8 @@ mod tests {
     static ATOMIC_REPLACE_INJECT: Mutex<()> = Mutex::new(());
 
     use crate::bloom::BloomFilterSettings;
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::{oid_hash_map, serialize_commit, CommitData, ObjectId, ObjectKind};
 
     fn commit_infos_std(
@@ -1176,7 +1177,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 2,

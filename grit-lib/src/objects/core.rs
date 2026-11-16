@@ -575,8 +575,26 @@ impl FromStr for ObjectId {
 /// assert_eq!(FileMode::ABSENT.to_string(), "000000");
 /// assert_eq!(FileMode::new(0o120000), FileMode::SYMLINK);
 /// assert!(FileMode::SYMLINK.is_symlink());
+///
+/// // The type predicates look only at the object-type bits, so they also
+/// // classify legacy modes found in old trees (`100664`, `040755`).
+/// assert!(FileMode::TREE.is_tree());
+/// assert!(FileMode::new(0o040755).is_tree());
+/// assert!(FileMode::REGULAR.is_regular());
+/// assert!(FileMode::EXECUTABLE.is_regular());
+/// assert!(FileMode::EXECUTABLE.is_executable());
+/// assert!(!FileMode::REGULAR.is_executable());
+/// assert!(!FileMode::SYMLINK.is_regular());
+/// assert!(FileMode::GITLINK.is_gitlink());
+/// assert!(!FileMode::ABSENT.is_regular() && !FileMode::ABSENT.is_tree());
+///
+/// // `u32` conversions are free: `FileMode` is a transparent wrapper.
+/// assert_eq!(u32::from(FileMode::REGULAR), 0o100644);
+/// assert_eq!(FileMode::from(0o100755), FileMode::EXECUTABLE);
+/// assert_eq!(FileMode::GITLINK.bits(), 0o160000);
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord, Default)]
+#[repr(transparent)]
 pub struct FileMode(u32);
 
 impl FileMode {
@@ -617,16 +635,48 @@ impl FileMode {
         (!self.is_absent()).then(|| self.to_string())
     }
 
+    /// Mask selecting the object-type bits (`S_IFMT`).
+    const TYPE_MASK: u32 = 0o170000;
+    /// Object-type bits of a regular file (`S_IFREG`), executable or not.
+    const TYPE_REGULAR: u32 = 0o100000;
+
     /// Whether the object-type bits name a symbolic link.
     #[must_use]
     pub const fn is_symlink(self) -> bool {
-        self.0 & 0o170000 == 0o120000
+        self.0 & Self::TYPE_MASK == Self::SYMLINK.0
     }
 
     /// Whether the object-type bits name a gitlink (submodule commit).
     #[must_use]
     pub const fn is_gitlink(self) -> bool {
-        self.0 & 0o170000 == 0o160000
+        self.0 & Self::TYPE_MASK == Self::GITLINK.0
+    }
+
+    /// Whether the object-type bits name a tree (directory).
+    ///
+    /// Only the type bits are checked, so legacy tree modes such as `040755` also count.
+    #[must_use]
+    pub const fn is_tree(self) -> bool {
+        self.0 & Self::TYPE_MASK == Self::TREE.0
+    }
+
+    /// Whether the object-type bits name a regular file (blob), executable or not.
+    ///
+    /// Both [`Self::REGULAR`] (`100644`) and [`Self::EXECUTABLE`] (`100755`) are regular
+    /// files, as are legacy blob modes such as `100664`; use [`Self::is_executable`] to
+    /// tell them apart. Symlinks, gitlinks, trees and [`Self::ABSENT`] are not.
+    #[must_use]
+    pub const fn is_regular(self) -> bool {
+        self.0 & Self::TYPE_MASK == Self::TYPE_REGULAR
+    }
+
+    /// Whether this is a regular file with any execute bit set.
+    ///
+    /// True for [`Self::EXECUTABLE`] and legacy executable blob modes such as `100775`;
+    /// false for every non-regular mode, so a symlink or tree is never "executable".
+    #[must_use]
+    pub const fn is_executable(self) -> bool {
+        self.is_regular() && self.0 & 0o111 != 0
     }
 }
 
@@ -645,6 +695,21 @@ impl From<FileMode> for u32 {
 impl fmt::Display for FileMode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:06o}", self.0)
+    }
+}
+
+/// Formats the raw mode bits in octal, honoring width and fill flags, so `{:o}` prints the
+/// minimal digits tree objects use (`40000`) and `{:06o}` the padded form (`040000`).
+///
+/// ```
+/// use grit_lib::objects::FileMode;
+///
+/// assert_eq!(format!("{:o}", FileMode::TREE), "40000");
+/// assert_eq!(format!("{:06o}", FileMode::TREE), "040000");
+/// ```
+impl fmt::Octal for FileMode {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Octal::fmt(&self.0, f)
     }
 }
 
@@ -1065,8 +1130,8 @@ impl TreeEntry {
 /// A single tree entry borrowing name bytes from the tree object payload.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TreeEntryRef<'a> {
-    /// Unix file mode (e.g. `0o100644` for a regular file, `0o040000` for a tree).
-    pub mode: u32,
+    /// Entry mode (e.g. [`FileMode::REGULAR`] for a file, [`FileMode::TREE`] for a subtree).
+    pub mode: FileMode,
     /// Entry name (file or directory name only, no path separators).
     pub name: &'a [u8],
     /// The object ID of the blob or sub-tree.
@@ -1078,7 +1143,7 @@ impl TreeEntryRef<'_> {
     #[must_use]
     pub fn to_owned(&self) -> TreeEntry {
         TreeEntry {
-            mode: FileMode::new(self.mode),
+            mode: self.mode,
             name: self.name.to_vec(),
             oid: self.oid,
         }
@@ -1236,7 +1301,11 @@ fn parse_tree_entry_at<'a>(
     let oid = ObjectId::from_bytes(&data[*pos..*pos + oid_len])?;
     *pos += oid_len;
 
-    Ok(Some(TreeEntryRef { mode, name, oid }))
+    Ok(Some(TreeEntryRef {
+        mode: FileMode::new(mode),
+        name,
+        oid,
+    }))
 }
 
 impl<'a> Iterator for TreeRefIter<'a> {
@@ -1270,7 +1339,7 @@ pub(crate) fn collect_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<V
     let mut entries = Vec::with_capacity(data.len() / 32);
     while let Some(entry) = parse_tree_entry_at(data, &mut pos, oid_len)? {
         entries.push(TreeEntry {
-            mode: FileMode::new(entry.mode),
+            mode: entry.mode,
             name: entry.name.to_vec(),
             oid: entry.oid,
         });
@@ -1362,11 +1431,16 @@ fn push_tree_mode(out: &mut Vec<u8>, mode: u32) {
 #[inline]
 pub fn tree_entry_cmp(
     a_name: &[u8],
-    a_mode: u32,
+    a_mode: FileMode,
     b_name: &[u8],
-    b_mode: u32,
+    b_mode: FileMode,
 ) -> std::cmp::Ordering {
-    tree_name_cmp(a_name, a_mode == 0o040000, b_name, b_mode == 0o040000)
+    tree_name_cmp(
+        a_name,
+        a_mode == FileMode::TREE,
+        b_name,
+        b_mode == FileMode::TREE,
+    )
 }
 
 /// [`tree_entry_cmp`] with each entry's sub-tree flag already computed.
@@ -2780,7 +2854,7 @@ mod commit_parse_tests {
         while let Some(entry) = iter.next() {
             let entry = entry.unwrap();
             let span = tree_entry_span(&data, pos, 20).expect("well-formed entry");
-            assert_eq!(span.mode, entry.mode);
+            assert_eq!(FileMode::new(span.mode), entry.mode);
             assert_eq!(&data[span.name], entry.name);
             assert_eq!(span.end, iter.position());
             assert_eq!(&data[span.end - 20..span.end], entry.oid.as_bytes());

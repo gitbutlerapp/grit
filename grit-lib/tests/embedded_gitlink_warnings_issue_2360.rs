@@ -5,7 +5,7 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::index::MODE_GITLINK;
+use grit_lib::objects::FileMode;
 use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::NullProgress;
@@ -103,7 +103,7 @@ fn add_and_commit_report_new_embedded_gitlink() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     let entry = index.get(b"vendor-hello", 0).expect("gitlink indexed");
-    assert_eq!(entry.mode, MODE_GITLINK);
+    assert_eq!(entry.mode, FileMode::GITLINK);
 
     let ls = git(root, &["ls-files", "-s"]);
     assert!(ls.contains("160000") && ls.contains("vendor-hello"));
@@ -156,7 +156,7 @@ fn symlink_to_repo_root_is_not_embedded_repository() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     let entry = index.get(b"loop", 0).expect("symlink indexed");
-    assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
+    assert_eq!(entry.mode, grit_lib::objects::FileMode::SYMLINK);
 
     let ls = git(root, &["ls-files", "-s"]);
     assert!(ls.contains("120000") && ls.contains("loop"));
@@ -208,7 +208,7 @@ fn symlink_to_other_repository_directory_is_not_embedded() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     let entry = index.get(b"ext", 0).expect("symlink indexed");
-    assert_eq!(entry.mode, grit_lib::index::MODE_SYMLINK);
+    assert_eq!(entry.mode, grit_lib::objects::FileMode::SYMLINK);
 }
 
 #[cfg(unix)]

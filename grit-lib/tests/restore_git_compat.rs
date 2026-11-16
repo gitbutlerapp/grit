@@ -7,7 +7,6 @@ use std::os::unix::fs::symlink;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::index::{MODE_EXECUTABLE, MODE_SYMLINK};
 use grit_lib::porcelain::restore::{RestoreOptions, RestoreSource};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::Repository;
@@ -616,8 +615,8 @@ fn restore_symlink_and_executable() {
         .unwrap();
     let run = idx.get(b"run.sh", 0).unwrap();
     let link = idx.get(b"link.sh", 0).unwrap();
-    assert_eq!(run.mode, MODE_EXECUTABLE);
-    assert_eq!(link.mode, MODE_SYMLINK);
+    assert_eq!(run.mode, FileMode::EXECUTABLE);
+    assert_eq!(link.mode, FileMode::SYMLINK);
     git_fsck(dir.path());
     git_cmd(dir.path(), &["ls-files", "-s"]);
 }

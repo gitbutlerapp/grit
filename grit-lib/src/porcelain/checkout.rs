@@ -27,10 +27,7 @@ use crate::crlf::{self, ConversionConfig};
 use crate::diff::{diff_tree_path_change_count, diff_trees, zero_oid, DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedCheckoutError, DelayedProcessCheckout, FilterSmudgeMeta};
-use crate::index::{
-    entry_from_metadata, entry_from_stat, Index, IndexEntry, IndexLock, MODE_EXECUTABLE,
-    MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK, MODE_TREE,
-};
+use crate::index::{entry_from_metadata, entry_from_stat, Index, IndexEntry, IndexLock};
 use crate::objects::FileMode;
 use crate::objects::{Object, ObjectId, TreeEntry};
 use crate::odb::{BoundedRead, Odb};
@@ -107,7 +104,7 @@ fn remove_checkout_files_parallel_cancellable(
 pub(crate) struct CheckoutRollbackRestore {
     pub path: String,
     pub oid: ObjectId,
-    pub mode: u32,
+    pub mode: FileMode,
 }
 
 /// Remove paths the checkout created, using the checkout delete pool when the list is large.
@@ -200,7 +197,7 @@ pub(crate) fn restore_checkout_rollback_paths(
             old_path: None,
             new_path: Some(target.path.clone()),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(target.mode),
+            new_mode: target.mode,
             old_oid: zero_oid(),
             new_oid: target.oid,
             score: None,
@@ -237,7 +234,7 @@ fn restore_checkout_rollback_chunk(
         let Some(path) = change.new_path.as_deref() else {
             continue;
         };
-        let mode = change.new_mode.bits();
+        let mode = change.new_mode;
         let file_attrs = Arc::new(rules.file_attrs(path, false));
         if let Some(cmd) = file_attrs.filter_process.as_deref() {
             if reset_filters.insert(cmd.to_string()) {
@@ -457,8 +454,8 @@ fn restore_checkout_rollback_chunk_serial(
         let Some(path) = change.new_path.as_deref() else {
             continue;
         };
-        let mode = change.new_mode.bits();
-        if mode == MODE_GITLINK {
+        let mode = change.new_mode;
+        if mode == FileMode::GITLINK {
             if materialize_gitlink_worktree(work_tree, path, dir_cache).is_err() {
                 failed.push(path.to_owned());
             }
@@ -539,7 +536,7 @@ fn remove_wholesale_dirs_parallel_cancellable(
 /// One blob entry while walking a tree for populated checkout (no full diff list).
 struct PopulatedTreeBlob {
     path: String,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
 }
 
@@ -590,10 +587,10 @@ impl<'a> PopulatedTreeWalk<'a> {
             validate_tree_walk_entry(
                 frame.prefix.as_bytes(),
                 &entry.name,
-                entry.mode.bits(),
+                entry.mode,
                 self.protect,
             )?;
-            if crate::index::is_tree_mode(entry.mode.bits()) {
+            if crate::index::is_tree_mode(entry.mode) {
                 let entries = (*self.odb.cached_tree_entries(&entry.oid)?).clone();
                 self.stack.push(PopulatedTreeWalkFrame {
                     prefix: path,
@@ -604,7 +601,7 @@ impl<'a> PopulatedTreeWalk<'a> {
             }
             return Ok(Some(PopulatedTreeBlob {
                 path,
-                mode: crate::index::canon_mode(entry.mode.bits()),
+                mode: crate::index::canon_mode(entry.mode),
                 oid: entry.oid,
             }));
         }
@@ -635,7 +632,7 @@ fn tree_contains_dot_gitattributes(
             return Ok(true);
         }
         if entry.mode == FileMode::TREE {
-            validate_tree_walk_entry(prefix.as_bytes(), &entry.name, entry.mode.bits(), protect)?;
+            validate_tree_walk_entry(prefix.as_bytes(), &entry.name, entry.mode, protect)?;
             let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
             if tree_contains_dot_gitattributes(odb, &entry.oid, &path, protect)? {
                 return Ok(true);
@@ -686,7 +683,7 @@ fn populated_blob_to_added_diff(blob: &PopulatedTreeBlob) -> DiffEntry {
         old_path: None,
         new_path: Some(blob.path.clone()),
         old_mode: FileMode::ABSENT,
-        new_mode: FileMode::new(blob.mode),
+        new_mode: blob.mode,
         old_oid: zero_oid(),
         new_oid: blob.oid,
         score: None,
@@ -752,7 +749,7 @@ fn stage0_gitlink_paths(index: &Index) -> Vec<String> {
     index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+        .filter(|e| e.stage() == 0 && e.mode == FileMode::GITLINK)
         .map(|e| String::from_utf8_lossy(&e.path).into_owned())
         .collect()
 }
@@ -1075,7 +1072,7 @@ fn checkout_hard_to_tree_journaled(
     let tree_deleted: HashSet<Vec<u8>> = changes
         .iter()
         .filter(|change| change.status == DiffStatus::Deleted)
-        .filter(|change| !crate::index::is_tree_mode(change.old_mode.bits()))
+        .filter(|change| !crate::index::is_tree_mode(change.old_mode))
         .filter_map(|change| change.old_path.as_deref())
         .map(checkout_stored_index_path_bytes)
         .collect();
@@ -1130,7 +1127,7 @@ fn checkout_hard_to_tree_journaled(
         if !trees_differ {
             staged_index_changes = hard_reset_align_plan_diff_entries(&index, &align_plan);
         }
-        let index_only_removals: Vec<(Vec<u8>, u32)> = align_plan
+        let index_only_removals: Vec<(Vec<u8>, FileMode)> = align_plan
             .remove_paths
             .iter()
             .filter(|path| {
@@ -1177,7 +1174,7 @@ fn checkout_hard_to_tree_journaled(
         if change.status == DiffStatus::Deleted {
             continue;
         }
-        if crate::index::is_tree_mode(change.new_mode.bits()) {
+        if crate::index::is_tree_mode(change.new_mode) {
             continue;
         }
         if let Some(path) = &change.new_path {
@@ -1268,7 +1265,7 @@ fn checkout_hard_to_tree_journaled(
                 continue;
             }
             let rel = crate::repo_relpath::storage_string(&path);
-            let abs = if mode == MODE_GITLINK {
+            let abs = if mode == FileMode::GITLINK {
                 journal.remove_uninitialized_gitlink(&rel)
             } else {
                 journal.spool_remove(&rel)?;
@@ -1348,7 +1345,7 @@ fn checkout_hard_to_tree_journaled(
             {
                 return HardResetEntryAction::SkipWorktree;
             }
-            if te.mode == MODE_GITLINK {
+            if te.mode == FileMode::GITLINK {
                 return HardResetEntryAction::Gitlink;
             }
             if trees_differ
@@ -1422,7 +1419,7 @@ fn checkout_hard_to_tree_journaled(
     let attributes = index.entries.iter().filter(|entry| {
         entry.stage() == 0
             && (entry.path == b".gitattributes" || entry.path.ends_with(b"/.gitattributes"))
-            && entry.mode != MODE_GITLINK
+            && entry.mode != FileMode::GITLINK
             && plan_positions.iter().zip(&actions).any(|(&pos, action)| {
                 prefetch_action(action)
                     && index.entries[pos]
@@ -1439,7 +1436,7 @@ fn checkout_hard_to_tree_journaled(
             continue;
         }
         let rel = crate::repo_relpath::storage_string(&path);
-        let abs = if mode == MODE_GITLINK {
+        let abs = if mode == FileMode::GITLINK {
             journal.remove_uninitialized_gitlink(&rel)
         } else {
             journal.spool_remove(&rel)?;
@@ -1530,20 +1527,21 @@ fn checkout_hard_to_tree_journaled(
             | HardResetEntryAction::Write
             | HardResetEntryAction::Verify => {}
         }
-        if mode == MODE_GITLINK {
+        if mode == FileMode::GITLINK {
             if trees_differ && written_by_tree_diff.contains(path) {
-                let mut entry = entry_from_stat(&abs, path.as_slice(), oid, MODE_GITLINK)?;
+                let mut entry = entry_from_stat(&abs, path.as_slice(), oid, FileMode::GITLINK)?;
                 entry.size = 0;
                 index.entries[pos] = entry;
                 continue;
             }
             if let Some(existing) = index.get(path.as_slice(), 0) {
                 if existing.oid == oid
-                    && existing.mode == MODE_GITLINK
+                    && existing.mode == FileMode::GITLINK
                     && gitlink_worktree_matches_index(&abs)
                 {
                     let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-                    let mut entry = entry_from_metadata(&meta, path.as_slice(), oid, MODE_GITLINK);
+                    let mut entry =
+                        entry_from_metadata(&meta, path.as_slice(), oid, FileMode::GITLINK);
                     entry.size = 0;
                     index.entries[pos] = entry;
                     continue;
@@ -1552,7 +1550,7 @@ fn checkout_hard_to_tree_journaled(
             let rel = crate::repo_relpath::storage_string(path);
             journal.preserve_before_write(&rel)?;
             materialize_gitlink_worktree(work_tree, &rel, &mut dir_cache)?;
-            let mut entry = entry_from_stat(&abs, path.as_slice(), oid, MODE_GITLINK)?;
+            let mut entry = entry_from_stat(&abs, path.as_slice(), oid, FileMode::GITLINK)?;
             entry.size = 0;
             index.entries[pos] = entry;
             continue;
@@ -1722,7 +1720,7 @@ fn hard_reset_align_plan_diff_entries(
             status: DiffStatus::Deleted,
             old_path: Some(path_str.clone()),
             new_path: None,
-            old_mode: FileMode::new(entry.mode),
+            old_mode: entry.mode,
             new_mode: FileMode::ABSENT,
             old_oid: entry.oid,
             new_oid: zero_oid(),
@@ -1733,9 +1731,7 @@ fn hard_reset_align_plan_diff_entries(
         let path_str = crate::repo_relpath::storage_string(path);
         let (old_oid, old_mode) = index
             .get(path, 0)
-            .map_or((zero_oid(), FileMode::ABSENT), |e| {
-                (e.oid, FileMode::new(e.mode))
-            });
+            .map_or((zero_oid(), FileMode::ABSENT), |e| (e.oid, e.mode));
         let status = if old_mode == FileMode::ABSENT {
             DiffStatus::Added
         } else {
@@ -1746,7 +1742,7 @@ fn hard_reset_align_plan_diff_entries(
             old_path: Some(path_str.clone()),
             new_path: Some(path_str),
             old_mode,
-            new_mode: FileMode::new(*mode),
+            new_mode: *mode,
             old_oid,
             new_oid: *oid,
             score: None,
@@ -1759,7 +1755,7 @@ fn hard_reset_align_plan_diff_entries(
             old_path: None,
             new_path: Some(path_str),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(entry.mode),
+            new_mode: entry.mode,
             old_oid: zero_oid(),
             new_oid: entry.oid,
             score: None,
@@ -1845,7 +1841,7 @@ fn hard_reset_tree_diff_filled_all_entries(
         if entry.is_sparse_directory_placeholder() || entry.skip_worktree() {
             return true;
         }
-        if entry.mode == MODE_GITLINK {
+        if entry.mode == FileMode::GITLINK {
             return true;
         }
         if sparse.is_some_and(|sparse| !sparse.includes_index_path(&entry.path)) {
@@ -1941,7 +1937,7 @@ fn hard_reset_stat_probe_positions(
         }) {
             continue;
         }
-        if entry.mode == MODE_GITLINK {
+        if entry.mode == FileMode::GITLINK {
             continue;
         }
         if trees_differ
@@ -2034,13 +2030,13 @@ impl HardResetWorktreeStats {
 
 fn hard_reset_journal_index_only_removals(
     work_tree: &Path,
-    paths: &[(Vec<u8>, u32)],
+    paths: &[(Vec<u8>, FileMode)],
     journal: &mut CheckoutJournal,
 ) -> Result<Vec<PathBuf>> {
     let mut removed = Vec::new();
     for (path, mode) in paths {
         let rel = crate::repo_relpath::storage_string(path);
-        if *mode == MODE_GITLINK {
+        if *mode == FileMode::GITLINK {
             removed.push(journal.remove_uninitialized_gitlink(&rel));
         } else {
             let _ = journal.spool_remove(&rel);
@@ -2127,7 +2123,7 @@ fn hard_reset_apply_skip_worktree_snapshot(
     }
 }
 
-type AssumeUnchangedSnapshot = BTreeMap<Vec<u8>, (ObjectId, u32)>;
+type AssumeUnchangedSnapshot = BTreeMap<Vec<u8>, (ObjectId, FileMode)>;
 
 fn hard_reset_assume_unchanged_snapshot(index: &Index) -> AssumeUnchangedSnapshot {
     index
@@ -2286,10 +2282,10 @@ fn hard_reset_unrecorded_tree_diff_paths(
     let mut unrecorded = Vec::new();
     let mut probes: Vec<(usize, String)> = Vec::new();
     for change in changes {
-        if change.status == DiffStatus::Added || change.old_mode.bits() == MODE_GITLINK {
+        if change.status == DiffStatus::Added || change.old_mode == FileMode::GITLINK {
             continue;
         }
-        if crate::index::is_tree_mode(change.old_mode.bits()) {
+        if crate::index::is_tree_mode(change.old_mode) {
             if change.status != DiffStatus::Deleted {
                 continue;
             }
@@ -2731,13 +2727,13 @@ impl CoalescedSubtreeDiffPaths {
         let mut out = Self::default();
         for change in changes {
             match change.status {
-                DiffStatus::Deleted if crate::index::is_tree_mode(change.old_mode.bits()) => {
+                DiffStatus::Deleted if crate::index::is_tree_mode(change.old_mode) => {
                     if let Some(path) = &change.old_path {
                         out.deleted_prefixes
                             .push(crate::repo_relpath::storage_bytes(path).into_owned());
                     }
                 }
-                DiffStatus::Added if crate::index::is_tree_mode(change.new_mode.bits()) => {
+                DiffStatus::Added if crate::index::is_tree_mode(change.new_mode) => {
                     if let Some(path) = &change.new_path {
                         out.added_prefixes
                             .push(crate::repo_relpath::storage_bytes(path).into_owned());
@@ -2773,8 +2769,8 @@ impl CoalescedSubtreeDiffPaths {
 }
 
 fn diff_entry_is_coalesced_subtree(change: &DiffEntry) -> bool {
-    matches!(change.status, DiffStatus::Deleted if crate::index::is_tree_mode(change.old_mode.bits()))
-        || matches!(change.status, DiffStatus::Added if crate::index::is_tree_mode(change.new_mode.bits()))
+    matches!(change.status, DiffStatus::Deleted if crate::index::is_tree_mode(change.old_mode))
+        || matches!(change.status, DiffStatus::Added if crate::index::is_tree_mode(change.new_mode))
 }
 
 /// Worktree paths scheduled for removal by a coalesced tree delete (from the old subtree OID).
@@ -2782,7 +2778,7 @@ fn coalesced_delete_scheduled_paths(odb: &Odb, change: &DiffEntry) -> Result<Vec
     let Some(root) = change.old_path.as_deref() else {
         return Ok(Vec::new());
     };
-    if !crate::index::is_tree_mode(change.old_mode.bits()) {
+    if !crate::index::is_tree_mode(change.old_mode) {
         return Ok(vec![root.to_owned()]);
     }
     if change.old_oid.is_zero() {
@@ -2851,7 +2847,7 @@ fn coalesced_subtree_wholesale_delete_safe(
             else {
                 return Ok(false);
             };
-            if entry.mode == MODE_TREE {
+            if entry.mode == FileMode::TREE {
                 return Ok(false);
             }
         }
@@ -2909,7 +2905,7 @@ fn checkout_coalesced_subtree_changes(
         let Some(dir) = &change.old_path else {
             continue;
         };
-        let wholesale_safe = if crate::index::is_tree_mode(change.old_mode.bits())
+        let wholesale_safe = if crate::index::is_tree_mode(change.old_mode)
             && !change.old_oid.is_zero()
         {
             if ignorecase {
@@ -3619,7 +3615,7 @@ fn split_sparse_tree_changes<'a>(
         if matches!(
             change.status,
             DiffStatus::Added | DiffStatus::Modified | DiffStatus::TypeChanged
-        ) && crate::index::is_tree_mode(change.new_mode.bits())
+        ) && crate::index::is_tree_mode(change.new_mode)
         {
             let lookup = path.strip_suffix('/').unwrap_or(path);
             let mut dir = crate::repo_relpath::storage_bytes(lookup).into_owned();
@@ -3648,7 +3644,7 @@ fn split_sparse_tree_changes<'a>(
                 .push(checkout_stored_index_path_bytes(path));
             continue;
         }
-        let mode = change.new_mode.bits();
+        let mode = change.new_mode;
         let mut entry = prospective_index_entry(path, change.new_oid, mode);
         entry.path = if crate::index::is_tree_mode(mode) {
             sparse_directory_index_path_bytes(path)
@@ -3710,8 +3706,8 @@ fn checkout_dir_to_file_replacement_roots(changes: &[DiffEntry]) -> HashSet<Stri
         let Some(path) = change.new_path.as_deref().or(change.old_path.as_deref()) else {
             continue;
         };
-        let mode = change.new_mode.bits();
-        if mode == MODE_TREE || mode == MODE_GITLINK {
+        let mode = change.new_mode;
+        if mode == FileMode::TREE || mode == FileMode::GITLINK {
             continue;
         }
         if deleted_paths
@@ -3796,8 +3792,8 @@ fn bulk_write_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRules) ->
             let Some(path) = change.new_path.as_deref() else {
                 return false;
             };
-            let mode = change.new_mode.bits();
-            mode != MODE_GITLINK
+            let mode = change.new_mode;
+            mode != FileMode::GITLINK
                 && is_eligible_for_parallel_checkout(mode, &rules.file_attrs(path, false))
         })
 }
@@ -3818,8 +3814,8 @@ fn bulk_mod_delete_checkout_eligible(changes: &[DiffEntry], rules: &WorktreeRule
         let Some(path) = change.new_path.as_deref() else {
             return false;
         };
-        let mode = change.new_mode.bits();
-        if mode == MODE_GITLINK
+        let mode = change.new_mode;
+        if mode == FileMode::GITLINK
             || !is_eligible_for_parallel_checkout(mode, &rules.file_attrs(path, false))
         {
             return false;
@@ -3856,7 +3852,7 @@ fn execute_checkout_write_changes_chunk(
         let Some(path) = change.new_path.as_deref() else {
             continue;
         };
-        let mode = change.new_mode.bits();
+        let mode = change.new_mode;
         let file_attrs = Arc::new(rules.file_attrs(path, false));
         write_jobs.push(CheckoutWriteJob::new(
             path.to_owned(),
@@ -4037,7 +4033,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         .iter()
         .filter_map(|c| {
             let path = c.old_path.as_ref()?;
-            (c.old_mode.bits() == MODE_GITLINK).then(|| path.clone())
+            (c.old_mode == FileMode::GITLINK).then(|| path.clone())
         })
         .collect();
     let wholesale_blocked = resolve_wholesale_blocked_dirs(&apply, changes);
@@ -4083,7 +4079,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         let Some(path) = &change.old_path else {
             continue;
         };
-        if change.old_mode.bits() == MODE_GITLINK
+        if change.old_mode == FileMode::GITLINK
             || path_under_wholesale_directory(path, &wholesale_index_prefixes)
         {
             continue;
@@ -4111,11 +4107,11 @@ fn checkout_bulk_mod_delete_tree_changes(
         let Some(path) = &change.old_path else {
             continue;
         };
-        let old_mode = change.old_mode.bits();
-        if old_mode == MODE_GITLINK
+        let old_mode = change.old_mode;
+        if old_mode == FileMode::GITLINK
             || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
         {
-            if old_mode == MODE_GITLINK {
+            if old_mode == FileMode::GITLINK {
                 deleted_abs_paths.push(journal.remove_uninitialized_gitlink(path));
             } else if !parallel_deleted_paths.contains(path) {
                 journal.spool_remove(path)?;
@@ -4211,8 +4207,9 @@ fn checkout_bulk_deleted_tree_changes(
         let Some(path) = &change.old_path else {
             continue;
         };
-        let old_mode = change.old_mode.bits();
-        if old_mode == MODE_GITLINK || path_under_wholesale_directory(path, wholesale_dirs_removed)
+        let old_mode = change.old_mode;
+        if old_mode == FileMode::GITLINK
+            || path_under_wholesale_directory(path, wholesale_dirs_removed)
         {
             continue;
         }
@@ -4242,10 +4239,11 @@ fn checkout_bulk_deleted_tree_changes(
         let Some(path) = &change.old_path else {
             continue;
         };
-        let old_mode = change.old_mode.bits();
-        if old_mode == MODE_GITLINK || !path_under_wholesale_directory(path, wholesale_dirs_removed)
+        let old_mode = change.old_mode;
+        if old_mode == FileMode::GITLINK
+            || !path_under_wholesale_directory(path, wholesale_dirs_removed)
         {
-            if old_mode == MODE_GITLINK {
+            if old_mode == FileMode::GITLINK {
                 deleted_abs_paths.push(journal.remove_uninitialized_gitlink(path));
             } else if !parallel_deleted_paths.contains(path) {
                 journal.spool_remove(path)?;
@@ -4295,8 +4293,12 @@ fn checkout_written_blobs(changes: &[DiffEntry]) -> impl Iterator<Item = ObjectI
         if change.status == DiffStatus::Deleted {
             return None;
         }
-        let mode = change.new_mode.bits();
-        matches!(mode, MODE_REGULAR | MODE_EXECUTABLE | MODE_SYMLINK).then_some(change.new_oid)
+        let mode = change.new_mode;
+        matches!(
+            mode,
+            FileMode::REGULAR | FileMode::EXECUTABLE | FileMode::SYMLINK
+        )
+        .then_some(change.new_oid)
     })
 }
 
@@ -4319,7 +4321,7 @@ fn prefetch_promisor_blobs_before_checkout_rules(
     let attribute_blobs = index
         .entries
         .iter()
-        .filter(|entry| entry.stage() == 0 && entry.mode == MODE_REGULAR)
+        .filter(|entry| entry.stage() == 0 && entry.mode == FileMode::REGULAR)
         .filter(|entry| entry.path.rsplit(|&b| b == b'/').next() == Some(b".gitattributes"))
         .map(|entry| entry.oid);
     prefetch_promisor_blobs(repo, attribute_blobs.chain(checkout_written_blobs(changes)))?;
@@ -4640,7 +4642,7 @@ fn apply_tree_changes(
                 .filter(|c| c.status == DiffStatus::Deleted)
                 .filter_map(|c| {
                     let path = c.old_path.as_ref()?;
-                    (c.old_mode.bits() == MODE_GITLINK).then(|| path.clone())
+                    (c.old_mode == FileMode::GITLINK).then(|| path.clone())
                 })
                 .collect();
             let wholesale_candidates = if apply.wholesale_safety_precomputed {
@@ -4719,7 +4721,7 @@ fn apply_tree_changes(
         .filter(|c| c.status == DiffStatus::Deleted)
         .filter_map(|c| {
             let path = c.old_path.as_ref()?;
-            (c.old_mode.bits() == MODE_GITLINK).then(|| path.clone())
+            (c.old_mode == FileMode::GITLINK).then(|| path.clone())
         })
         .collect();
     let wholesale_candidates = if apply.wholesale_safety_precomputed {
@@ -4764,8 +4766,9 @@ fn apply_tree_changes(
         let Some(path) = &change.old_path else {
             continue;
         };
-        let old_mode = change.old_mode.bits();
-        if old_mode == MODE_GITLINK || path_under_wholesale_directory(path, &wholesale_dirs_removed)
+        let old_mode = change.old_mode;
+        if old_mode == FileMode::GITLINK
+            || path_under_wholesale_directory(path, &wholesale_dirs_removed)
         {
             continue;
         }
@@ -4792,11 +4795,11 @@ fn apply_tree_changes(
             if change.status == DiffStatus::Deleted {
                 crate::progress::poll_cancel(&mut progress, cancel)?;
                 if let Some(path) = &change.old_path {
-                    let old_mode = change.old_mode.bits();
-                    if old_mode == MODE_GITLINK
+                    let old_mode = change.old_mode;
+                    if old_mode == FileMode::GITLINK
                         || !path_under_wholesale_directory(path, &wholesale_dirs_removed)
                     {
-                        if old_mode == MODE_GITLINK {
+                        if old_mode == FileMode::GITLINK {
                             deleted_abs_paths.push(journal.remove_uninitialized_gitlink(path));
                         } else if !parallel_deleted_paths.contains(path) {
                             journal.spool_remove(path)?;
@@ -4838,18 +4841,22 @@ fn apply_tree_changes(
             if conv.is_none() {
                 conv = Some(rules.conversion().clone());
             }
-            let mode = change.new_mode.bits();
-            if mode == MODE_GITLINK {
+            let mode = change.new_mode;
+            if mode == FileMode::GITLINK {
                 let index_path = checkout_stored_index_path_bytes(path);
                 let abs = checkout_stored_worktree_abs(work_tree, path);
                 if let Some(existing) = index.get(&index_path, 0) {
                     if existing.oid == change.new_oid
-                        && existing.mode == MODE_GITLINK
+                        && existing.mode == FileMode::GITLINK
                         && gitlink_worktree_matches_index(&abs)
                     {
                         let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
-                        let mut entry =
-                            entry_from_metadata(&meta, &index_path, change.new_oid, MODE_GITLINK);
+                        let mut entry = entry_from_metadata(
+                            &meta,
+                            &index_path,
+                            change.new_oid,
+                            FileMode::GITLINK,
+                        );
                         entry.size = 0;
                         plan.push(CheckoutPlanSlot::Ready(entry));
                         progress.inc(1);
@@ -4859,13 +4866,14 @@ fn apply_tree_changes(
                 // Moving a gitlink to another commit never touches the submodule directory,
                 // populated or not: files inside an uninitialized one are kept.
                 let keep_existing_dir = change.status == DiffStatus::Modified
-                    && change.old_mode.bits() == MODE_GITLINK
+                    && change.old_mode == FileMode::GITLINK
                     && fs::symlink_metadata(&abs).is_ok_and(|meta| meta.is_dir());
                 if !keep_existing_dir {
                     journal.record_write(change);
                     materialize_gitlink_worktree(work_tree, path, &mut dir_cache)?;
                 }
-                let mut entry = entry_from_stat(&abs, &index_path, change.new_oid, MODE_GITLINK)?;
+                let mut entry =
+                    entry_from_stat(&abs, &index_path, change.new_oid, FileMode::GITLINK)?;
                 entry.size = 0;
                 plan.push(CheckoutPlanSlot::Ready(entry));
                 progress.inc(1);
@@ -5035,7 +5043,7 @@ fn apply_tree_changes(
 #[derive(Clone)]
 struct DelayedCheckoutTarget {
     path: String,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
     change: DiffEntry,
 }
@@ -5086,14 +5094,14 @@ fn prospective_index_for_checkout(index: &Index, changes: &[DiffEntry]) -> Index
                 paths_to_remove.push(checkout_stored_index_path_bytes(old));
             }
         }
-        let mode = change.new_mode.bits();
+        let mode = change.new_mode;
         replacements.push(prospective_index_entry(path, change.new_oid, mode));
     }
     idx.remove_paths_and_insert(paths_to_remove.iter().map(|p| p.as_slice()), replacements);
     idx
 }
 
-fn prospective_index_entry(path: &str, oid: ObjectId, mode: u32) -> IndexEntry {
+fn prospective_index_entry(path: &str, oid: ObjectId, mode: FileMode) -> IndexEntry {
     IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
@@ -5126,11 +5134,11 @@ pub(crate) fn smudge_bytes_for_worktree_path(
     repo: &Repository,
     rules: &WorktreeRules,
     rel_path: &str,
-    mode: u32,
+    mode: FileMode,
     blob: &[u8],
     oid: &ObjectId,
 ) -> Result<Vec<u8>> {
-    if mode == MODE_SYMLINK {
+    if mode == FileMode::SYMLINK {
         return Ok(blob.to_vec());
     }
     match worktree_bytes_from_index_blob(repo, rules, rel_path, mode, blob, oid, None, None)? {
@@ -5148,7 +5156,7 @@ pub(crate) fn write_smudged_blob_to_worktree(
     rules: &WorktreeRules,
     rel_path: &str,
     oid: &ObjectId,
-    mode: u32,
+    mode: FileMode,
 ) -> Result<()> {
     let mut dir_cache = LeadingDirCache::for_config(rules.config());
     let written =
@@ -5166,13 +5174,13 @@ pub(crate) fn worktree_bytes_from_index_blob(
     repo: &Repository,
     rules: &WorktreeRules,
     rel_path: &str,
-    mode: u32,
+    mode: FileMode,
     blob: &[u8],
     oid: &ObjectId,
     smudge_meta: Option<&crate::filter_process::FilterSmudgeMeta>,
     delayed_checkout: Option<&mut DelayedProcessCheckout>,
 ) -> Result<Option<Vec<u8>>> {
-    if mode == MODE_SYMLINK {
+    if mode == FileMode::SYMLINK {
         return Ok(Some(blob.to_vec()));
     }
     let oid_hex = oid.to_string();
@@ -5297,7 +5305,7 @@ fn diff_entry_for_worktree_blob_refresh(
     work_tree: &Path,
     rel_path: &str,
     oid: ObjectId,
-    target_mode: u32,
+    target_mode: FileMode,
 ) -> DiffEntry {
     let abs = work_tree.join(rel_path);
     let old_mode = fs::symlink_metadata(&abs)
@@ -5309,8 +5317,8 @@ fn diff_entry_for_worktree_blob_refresh(
         status: DiffStatus::Modified,
         old_path: Some(rel_path.to_owned()),
         new_path: Some(rel_path.to_owned()),
-        old_mode: FileMode::new(old_mode),
-        new_mode: FileMode::new(target_mode),
+        old_mode,
+        new_mode: target_mode,
         old_oid: oid,
         new_oid: oid,
         score: None,
@@ -5328,7 +5336,7 @@ fn validate_diff_changes_for_worktree(
         if path.ends_with('/') {
             continue;
         }
-        let mode = change.new_mode.bits();
+        let mode = change.new_mode;
         validate_worktree_path(path.as_bytes(), mode, protect)?;
     }
     Ok(())
@@ -5425,14 +5433,14 @@ pub(crate) fn materialize_gitlink_worktree(
     Ok(())
 }
 
-fn is_regular_git_mode(mode: u32) -> bool {
-    mode == MODE_REGULAR || mode == MODE_EXECUTABLE
+fn is_regular_git_mode(mode: FileMode) -> bool {
+    mode == FileMode::REGULAR || mode == FileMode::EXECUTABLE
 }
 
 fn can_overwrite_regular_in_place(change: &DiffEntry) -> bool {
     change.status == DiffStatus::Modified
-        && is_regular_git_mode(change.old_mode.bits())
-        && is_regular_git_mode(change.new_mode.bits())
+        && is_regular_git_mode(change.old_mode)
+        && is_regular_git_mode(change.new_mode)
 }
 
 /// Blobs larger than this are streamed from the object database into the work tree when
@@ -5466,7 +5474,7 @@ fn spool_checkout_blob_with_smudge(
     dir: &Path,
     rel_path: &str,
     reader: &mut dyn Read,
-    mode: u32,
+    mode: FileMode,
     conv: &crlf::ConversionConfig,
     attrs: &crlf::FileAttrs,
 ) -> Result<tempfile::NamedTempFile> {
@@ -5515,7 +5523,7 @@ fn spool_stream_to_temp(
     dir: &Path,
     rel_path: &str,
     reader: &mut dyn Read,
-    mode: u32,
+    mode: FileMode,
 ) -> Result<tempfile::NamedTempFile> {
     let write_error = |e: std::io::Error| {
         crate::worktree::map_worktree_io(rel_path, WorktreePathOperation::Replace, e)
@@ -5559,7 +5567,7 @@ pub(crate) fn read_blob_unless_streamed(
     repo: &Repository,
     conv: &crlf::ConversionConfig,
     attrs: &crlf::FileAttrs,
-    mode: u32,
+    mode: FileMode,
     oid: &ObjectId,
     cache_small: bool,
 ) -> Result<Option<Object>> {
@@ -5593,7 +5601,7 @@ pub(crate) fn stream_checkout_entry(
     repo: &Repository,
     work_tree: &Path,
     rel_path: &str,
-    mode: u32,
+    mode: FileMode,
     change: &DiffEntry,
     dir_cache: &mut LeadingDirCache,
     oid: ObjectId,
@@ -5631,7 +5639,7 @@ pub(crate) fn write_blob_to_worktree(
     work_tree: &Path,
     rel_path: &str,
     oid: &ObjectId,
-    mode: u32,
+    mode: FileMode,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<Option<fs::Metadata>> {
     let has_symlinks = dir_cache.has_symlinks();
@@ -5671,7 +5679,7 @@ fn write_checkout_entry(
     work_tree: &Path,
     rel_path: &str,
     content: WorktreeFileContent<'_>,
-    mode: u32,
+    mode: FileMode,
     change: &DiffEntry,
     dir_cache: &mut LeadingDirCache,
     oid: ObjectId,
@@ -5679,7 +5687,7 @@ fn write_checkout_entry(
     let index_path = crate::repo_relpath::storage_bytes(rel_path).into_owned();
     let in_place_bytes = match content {
         WorktreeFileContent::Bytes(data)
-            if mode != MODE_SYMLINK && can_overwrite_regular_in_place(change) =>
+            if mode != FileMode::SYMLINK && can_overwrite_regular_in_place(change) =>
         {
             Some(data)
         }
@@ -5699,14 +5707,14 @@ fn write_checkout_entry(
                 })
             })?;
             drop(file);
-            let old_mode = change.old_mode.bits();
+            let old_mode = change.old_mode;
             apply_in_place_git_mode_transition_at_path(&abs_path, old_mode, mode)?;
             let meta = written_file_symlink_metadata(&abs_path)?;
             return Ok(checked_out_entry(&meta, &index_path, oid, mode, None));
         }
     }
 
-    let symlink_target_len = (mode == MODE_SYMLINK).then_some(match &content {
+    let symlink_target_len = (mode == FileMode::SYMLINK).then_some(match &content {
         WorktreeFileContent::Bytes(data) => data.len(),
         WorktreeFileContent::Stream { .. } => 0,
     });
@@ -5726,7 +5734,7 @@ pub(crate) fn index_entry_from_worktree_write(
     meta: &fs::Metadata,
     index_path: &[u8],
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
     symlink_target_len: Option<usize>,
 ) -> IndexEntry {
     checked_out_entry(meta, index_path, oid, mode, symlink_target_len)
@@ -5741,11 +5749,11 @@ fn checked_out_entry(
     meta: &fs::Metadata,
     index_path: &[u8],
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
     #[cfg_attr(not(windows), allow(unused_variables))] symlink_target_len: Option<usize>,
 ) -> IndexEntry {
     let mut entry = entry_from_metadata(meta, index_path, oid, mode);
-    if mode == MODE_SYMLINK {
+    if mode == FileMode::SYMLINK {
         #[cfg(windows)]
         if let Some(len) = symlink_target_len.filter(|len| *len > 0) {
             if entry.size == 0 {
@@ -5762,12 +5770,12 @@ fn checked_out_entry(
 #[cfg(unix)]
 fn apply_in_place_git_mode_transition_at_path(
     abs_path: &Path,
-    old_mode: u32,
-    new_mode: u32,
+    old_mode: FileMode,
+    new_mode: FileMode,
 ) -> Result<()> {
     use std::os::unix::fs::PermissionsExt;
-    let old_exec = old_mode == MODE_EXECUTABLE;
-    let new_exec = new_mode == MODE_EXECUTABLE;
+    let old_exec = old_mode == FileMode::EXECUTABLE;
+    let new_exec = new_mode == FileMode::EXECUTABLE;
     if old_exec == new_exec {
         return Ok(());
     }
@@ -5788,8 +5796,8 @@ fn apply_in_place_git_mode_transition_at_path(
 #[cfg(not(unix))]
 fn apply_in_place_git_mode_transition_at_path(
     _abs_path: &Path,
-    _old_mode: u32,
-    _new_mode: u32,
+    _old_mode: FileMode,
+    _new_mode: FileMode,
 ) -> Result<()> {
     Ok(())
 }
@@ -5972,8 +5980,8 @@ fn grant_execute_from_read_bits(bits: u32) -> u32 {
 
 /// Mode passed to `open(2)` when creating a fresh worktree file (before the process umask).
 #[cfg(unix)]
-fn git_create_mode_for_index_mode(mode: u32) -> u32 {
-    if mode == MODE_EXECUTABLE {
+fn git_create_mode_for_index_mode(mode: FileMode) -> u32 {
+    if mode == FileMode::EXECUTABLE {
         0o777
     } else {
         0o666
@@ -5985,7 +5993,7 @@ fn write_fresh_worktree_blob(
     abs_path: &Path,
     rel_path: &str,
     data: &[u8],
-    mode: u32,
+    mode: FileMode,
 ) -> Result<fs::Metadata> {
     let mut options = OpenOptions::new();
     options.write(true).create(true).truncate(true);
@@ -6012,11 +6020,11 @@ fn write_fresh_worktree_blob(
 /// Fresh files are created with mode `0777` so umask can mask
 /// execute independently of read; this helper propagates execute from read when the prior mode
 /// is already fixed on disk.
-pub fn apply_index_file_mode(abs_path: &Path, mode: u32) -> Result<()> {
+pub fn apply_index_file_mode(abs_path: &Path, mode: FileMode) -> Result<()> {
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if mode != MODE_EXECUTABLE {
+        if mode != FileMode::EXECUTABLE {
             return Ok(());
         }
         let mut perms = fs::metadata(abs_path)?.permissions();
@@ -6036,7 +6044,7 @@ pub(crate) fn write_to_worktree_cached(
     work_tree: &Path,
     rel_path: &str,
     data: &[u8],
-    mode: u32,
+    mode: FileMode,
     dir_cache: &mut LeadingDirCache,
     has_symlinks: bool,
 ) -> Result<fs::Metadata> {
@@ -6055,7 +6063,7 @@ fn write_worktree_content(
     work_tree: &Path,
     rel_path: &str,
     content: WorktreeFileContent<'_>,
-    mode: u32,
+    mode: FileMode,
     dir_cache: &mut LeadingDirCache,
     has_symlinks: bool,
 ) -> Result<fs::Metadata> {
@@ -6081,7 +6089,7 @@ fn write_worktree_content(
     }
     let ready = match content {
         WorktreeFileContent::Bytes(data) => Ready::Bytes(data),
-        WorktreeFileContent::Stream { .. } if mode == MODE_SYMLINK => {
+        WorktreeFileContent::Stream { .. } if mode == FileMode::SYMLINK => {
             return Err(Error::Worktree(WorktreeError::Path {
                 detail: format!("symlink target for '{rel_path}' must be in memory"),
             }));
@@ -6133,7 +6141,7 @@ fn write_worktree_content(
         }
         Ready::Bytes(data) => data,
     };
-    if mode == MODE_SYMLINK {
+    if mode == FileMode::SYMLINK {
         let target = std::str::from_utf8(data).map_err(|_| {
             Error::Worktree(WorktreeError::Path {
                 detail: format!("symlink target for '{rel_path}' is not UTF-8"),
@@ -6259,7 +6267,7 @@ mod tests {
         fs::write(&file, b"data").expect("write");
         let oid = ObjectId::zero();
         let meta = fs::symlink_metadata(&file).expect("stat");
-        let mut entry = checked_out_entry(&meta, b"f", oid, MODE_REGULAR, None);
+        let mut entry = checked_out_entry(&meta, b"f", oid, FileMode::REGULAR, None);
         assert_eq!(entry.size, 4);
         assert!(entry.take_content_verified());
 
@@ -6268,7 +6276,7 @@ mod tests {
             let link = tmp.path().join("l");
             std::os::unix::fs::symlink("f", &link).expect("symlink");
             let meta = fs::symlink_metadata(&link).expect("lstat");
-            let mut entry = checked_out_entry(&meta, b"l", oid, MODE_SYMLINK, None);
+            let mut entry = checked_out_entry(&meta, b"l", oid, FileMode::SYMLINK, None);
             assert!(!entry.take_content_verified());
         }
     }
@@ -6280,7 +6288,7 @@ mod tests {
         fs::write(&file, b"four").expect("write");
         let meta = fs::symlink_metadata(&file).expect("stat");
         let stat = crate::worktree_scan::BlobDiskStat::from_metadata(&meta);
-        let recorded = entry_from_metadata(&meta, b"f", ObjectId::zero(), MODE_REGULAR);
+        let recorded = entry_from_metadata(&meta, b"f", ObjectId::zero(), FileMode::REGULAR);
         assert!(!hard_reset_entry_size_changed(&recorded, &stat));
 
         let mut resized = recorded.clone();
@@ -6295,7 +6303,7 @@ mod tests {
         assert!(!hard_reset_entry_size_changed(&unset, &stat));
 
         let mut link = resized;
-        link.mode = MODE_SYMLINK;
+        link.mode = FileMode::SYMLINK;
         assert!(!hard_reset_entry_size_changed(&link, &stat));
     }
 
@@ -6332,7 +6340,7 @@ mod tests {
             let rel = path.strip_prefix(work_tree).expect("rel").to_string_lossy();
             let data = fs::read(&path).expect("read");
             let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
-            let e = entry_from_stat(&path, rel.as_bytes(), oid, MODE_REGULAR).expect("entry");
+            let e = entry_from_stat(&path, rel.as_bytes(), oid, FileMode::REGULAR).expect("entry");
             index.add_or_replace(e);
         }
         index.sort();
@@ -6382,7 +6390,7 @@ mod tests {
             index.push_entry_unsorted(prospective_index_entry(
                 &format!("f{i:03}"),
                 oid,
-                MODE_REGULAR,
+                FileMode::REGULAR,
             ));
         }
         index.sort();
@@ -6399,7 +6407,7 @@ mod tests {
             &mut index,
             &BTreeSet::new(),
             Vec::new(),
-            vec![prospective_index_entry("f000", changed, MODE_REGULAR)],
+            vec![prospective_index_entry("f000", changed, FileMode::REGULAR)],
             true,
             &CheckoutApplyOptions::default(),
             CheckoutIndexWrite::Defer(&lock),
@@ -6438,7 +6446,7 @@ mod tests {
             let data = fs::read(&abs).expect("read");
             let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
             index.add_or_replace(
-                entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+                entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).expect("entry"),
             );
             delete_paths.push(rel);
         }
@@ -6446,8 +6454,13 @@ mod tests {
         std::fs::create_dir_all(wt.join(sub_rel)).expect("gitlink dir");
         let sub_oid = repo.odb().write(ObjectKind::Blob, b"sub\n").expect("blob");
         index.add_or_replace(
-            entry_from_stat(&wt.join(sub_rel), sub_rel.as_bytes(), sub_oid, MODE_GITLINK)
-                .expect("gitlink entry"),
+            entry_from_stat(
+                &wt.join(sub_rel),
+                sub_rel.as_bytes(),
+                sub_oid,
+                FileMode::GITLINK,
+            )
+            .expect("gitlink entry"),
         );
         index.sort();
         repo.write_index(&mut index).expect("write index");
@@ -6637,7 +6650,7 @@ mod tests {
             let data = fs::read(&abs).expect("read");
             let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
             index.add_or_replace(
-                entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+                entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).expect("entry"),
             );
             delete_paths.push(rel);
         }
@@ -6670,7 +6683,7 @@ mod tests {
             let data = fs::read(&abs).expect("read");
             let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
             index.add_or_replace(
-                entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+                entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).expect("entry"),
             );
             delete_paths.push(rel);
         }
@@ -6804,8 +6817,10 @@ mod tests {
         fs::write(wt.join("a"), b"a\n").expect("a");
         let a_oid = repo.odb().write(ObjectKind::Blob, b"a\n").expect("blob");
         let mut index = repo.load_index().expect("index");
-        index.add_or_replace(entry_from_stat(&wt.join("a"), b"a", a_oid, MODE_REGULAR).expect("e"));
-        index.add_or_replace(prospective_index_entry("sub", gitlink, MODE_GITLINK));
+        index.add_or_replace(
+            entry_from_stat(&wt.join("a"), b"a", a_oid, FileMode::REGULAR).expect("e"),
+        );
+        index.add_or_replace(prospective_index_entry("sub", gitlink, FileMode::GITLINK));
         index.sort();
         let with_sub =
             write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
@@ -6813,7 +6828,9 @@ mod tests {
         fs::write(wt.join("b"), b"b\n").expect("b");
         let b_oid = repo.odb().write(ObjectKind::Blob, b"b\n").expect("blob");
         index.remove(b"sub");
-        index.add_or_replace(entry_from_stat(&wt.join("b"), b"b", b_oid, MODE_REGULAR).expect("e"));
+        index.add_or_replace(
+            entry_from_stat(&wt.join("b"), b"b", b_oid, FileMode::REGULAR).expect("e"),
+        );
         index.sort();
         let no_sub = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())
             .expect("tree no sub");
@@ -6941,7 +6958,7 @@ mod tests {
             let abs = wt.join(rel);
             let data = fs::read(&abs).expect("read");
             let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
-            let e = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("entry");
+            let e = entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).expect("entry");
             index.add_or_replace(e);
         }
         index.sort();
@@ -7008,7 +7025,8 @@ mod tests {
                 let abs = wt.join(&rel);
                 let data = fs::read(&abs).expect("read");
                 let oid = repo.odb().write(ObjectKind::Blob, &data).expect("blob");
-                let entry = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).expect("e");
+                let entry =
+                    entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).expect("e");
                 index.add_or_replace(entry);
             }
         }
@@ -7050,7 +7068,8 @@ mod tests {
         let oid = repo.odb().write(ObjectKind::Blob, &blob).expect("blob");
         let mut index = repo.load_index().expect("index");
         index.add_or_replace(
-            entry_from_stat(&wt.join("Foo/a.txt"), b"Foo/a.txt", oid, MODE_REGULAR).expect("entry"),
+            entry_from_stat(&wt.join("Foo/a.txt"), b"Foo/a.txt", oid, FileMode::REGULAR)
+                .expect("entry"),
         );
         index.sort();
         repo.write_index(&mut index).expect("write index");
@@ -7124,7 +7143,7 @@ mod tests {
             let old_data = fs::read(&old_abs).expect("read old");
             let old_oid = repo.odb().write(ObjectKind::Blob, &old_data).expect("blob");
             index.add_or_replace(
-                entry_from_stat(&old_abs, old_rel.as_bytes(), old_oid, MODE_REGULAR)
+                entry_from_stat(&old_abs, old_rel.as_bytes(), old_oid, FileMode::REGULAR)
                     .expect("old entry"),
             );
             std::fs::write(&new_abs, format!("new {i}\n")).expect("write new");
@@ -7201,7 +7220,7 @@ mod tests {
             let old_data = fs::read(&old_abs).expect("read old");
             let old_oid = repo.odb().write(ObjectKind::Blob, &old_data).expect("blob");
             index.add_or_replace(
-                entry_from_stat(&old_abs, old_rel.as_bytes(), old_oid, MODE_REGULAR)
+                entry_from_stat(&old_abs, old_rel.as_bytes(), old_oid, FileMode::REGULAR)
                     .expect("old entry"),
             );
             std::fs::write(&new_abs, format!("new {i}\n")).expect("write new");
@@ -7390,7 +7409,7 @@ mod tests {
                     idx.remove(old.as_bytes());
                 }
             }
-            let mode = change.new_mode.bits();
+            let mode = change.new_mode;
             idx.add_or_replace(prospective_index_entry(path, change.new_oid, mode));
         }
         idx.sort();
@@ -7430,7 +7449,7 @@ mod tests {
                 .write(ObjectKind::Blob, format!("content-{path}\n").as_bytes())
                 .expect("blob");
             index.add_or_replace(
-                entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry"),
+                entry_from_stat(&abs, path.as_bytes(), oid, FileMode::REGULAR).expect("entry"),
             );
         }
         index.sort();
@@ -7667,7 +7686,7 @@ mod checkout_rollback_delay_filter_tests {
             old_path: None,
             new_path: Some("a.txt".into()),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(entry.mode),
+            new_mode: entry.mode,
             old_oid: zero_oid(),
             new_oid: entry.oid,
             score: None,

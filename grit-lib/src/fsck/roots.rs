@@ -1,7 +1,8 @@
 //! Reachability root collection for fsck and garbage collection.
 
 use crate::error::Result;
-use crate::index::{CacheTreeNode, Index, MODE_GITLINK};
+use crate::index::{CacheTreeNode, Index};
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::reflog::{all_reflog_oids, reflog_oids_on_store};
 use crate::refs;
@@ -129,7 +130,7 @@ fn load_linked_worktree_index(repo: &Repository, admin_dir: &Path) -> Result<Ind
 
 fn collect_index_object_roots(index: &Index, out: &mut HashSet<ObjectId>) {
     for entry in index.entries() {
-        if entry.mode == MODE_GITLINK || entry.oid.is_zero() {
+        if entry.mode == FileMode::GITLINK || entry.oid.is_zero() {
             continue;
         }
         out.insert(entry.oid);
@@ -146,8 +147,8 @@ fn collect_index_object_roots(index: &Index, out: &mut HashSet<ObjectId>) {
 }
 
 /// Whether a resolve-undo stage mode names a blob in this object database (Git `S_ISREG`).
-fn is_reg_resolve_undo_mode(mode: u32) -> bool {
-    mode != 0 && (mode & 0o170000) == 0o100000
+fn is_reg_resolve_undo_mode(mode: crate::objects::FileMode) -> bool {
+    mode.is_regular()
 }
 
 fn collect_resolve_undo_oids(

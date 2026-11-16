@@ -5,10 +5,7 @@ use crate::objects::FileMode;
 use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
-use crate::index::{
-    CacheTreeNode, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
-    MODE_TREE,
-};
+use crate::index::{CacheTreeNode, Index, IndexEntry};
 use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{
     oid_hash_set_with_capacity, parse_tree, serialize_tree, tree_name_cmp, ObjectId, ObjectKind,
@@ -278,7 +275,9 @@ fn cache_tree_index_rows(index: &Index) -> Vec<&IndexEntry> {
     index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && (e.mode != MODE_TREE || e.is_sparse_directory_placeholder()))
+        .filter(|e| {
+            e.stage() == 0 && (e.mode != FileMode::TREE || e.is_sparse_directory_placeholder())
+        })
         .collect()
 }
 
@@ -443,7 +442,7 @@ fn rebuild_directory_node(
 
     let mut members: Vec<TreeEntry> = Vec::new();
     // Members whose existence is still unconfirmed, probed as one batch below.
-    let mut unconfirmed: Vec<(ObjectId, u32, &[u8])> = Vec::new();
+    let mut unconfirmed: Vec<(ObjectId, FileMode, &[u8])> = Vec::new();
     let mut stale = false;
     pos = 0;
     while pos < rows.len() {
@@ -481,7 +480,7 @@ fn rebuild_directory_node(
                 pos += covered as usize;
                 continue;
             }
-            (oid, MODE_TREE, off, covered as usize, known_present)
+            (oid, FileMode::TREE, off, covered as usize, known_present)
         } else {
             if row.intent_to_add() {
                 stale = true;
@@ -496,7 +495,7 @@ fn rebuild_directory_node(
                     child.oid = Some(row.oid);
                     child.children.clear();
                 }
-                MODE_TREE
+                FileMode::TREE
             } else {
                 canonicalize_blob_mode(row.mode)
             };
@@ -506,14 +505,14 @@ fn rebuild_directory_node(
         if oid.is_zero() {
             return Err(missing_member_error(mode, &oid, path));
         }
-        let gitlink = mode == MODE_GITLINK;
+        let gitlink = mode == FileMode::GITLINK;
         let allow_missing = gitlink || flags.missing_ok || (slash.is_none() && row.intent_to_add());
         if !allow_missing && !known_present {
             unconfirmed.push((oid, mode, path));
         }
 
         members.push(TreeEntry {
-            mode: FileMode::new(mode),
+            mode,
             name: tail[..name_len].to_vec(),
             oid,
         });
@@ -549,10 +548,10 @@ fn rebuild_directory_node(
     Ok((pos as i32, known_present))
 }
 
-fn missing_member_error(mode: u32, oid: &ObjectId, path: &[u8]) -> Error {
+fn missing_member_error(mode: FileMode, oid: &ObjectId, path: &[u8]) -> Error {
     Error::Object(ObjectError::MissingTreeMember {
         path: String::from_utf8_lossy(path).into_owned(),
-        mode: FileMode::new(mode),
+        mode,
         oid: *oid,
     })
 }
@@ -636,7 +635,7 @@ fn ensure_empty_blob_for_partial_index_write(
     let needs_empty = index.entries.iter().any(|e| {
         e.stage() == 0
             && !e.intent_to_add()
-            && e.mode != MODE_TREE
+            && e.mode != FileMode::TREE
             && paths_from_index.contains(&e.path)
             && e.oid.is_empty_blob()
             && !odb.exists(&e.oid)
@@ -728,7 +727,7 @@ fn index_has_entry_under(index: &Index, dir: &[u8]) -> bool {
                 break;
             }
         }
-        if entry.stage() == 0 && !entry.intent_to_add() && entry.mode != MODE_TREE {
+        if entry.stage() == 0 && !entry.intent_to_add() && entry.mode != FileMode::TREE {
             return true;
         }
     }
@@ -754,7 +753,7 @@ pub(crate) fn write_tree_from_index_subset(
         .filter(|entry| {
             entry.stage() == 0
                 && !entry.intent_to_add()
-                && entry.mode != MODE_TREE
+                && entry.mode != FileMode::TREE
                 && paths.contains(&entry.path)
         })
         .collect();
@@ -792,7 +791,7 @@ pub fn write_tree_from_index(
         .filter(|entry| {
             entry.stage() == 0
                 && !entry.intent_to_add()
-                && entry.mode != MODE_TREE
+                && entry.mode != FileMode::TREE
                 && index_path_in_dir(&entry.path, prefix)
         })
         .collect();
@@ -811,7 +810,9 @@ pub(crate) fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<Ca
     let mut entries: Vec<&IndexEntry> = index
         .entries
         .iter()
-        .filter(|entry| entry.stage() == 0 && !entry.intent_to_add() && entry.mode != MODE_TREE)
+        .filter(|entry| {
+            entry.stage() == 0 && !entry.intent_to_add() && entry.mode != FileMode::TREE
+        })
         .collect();
     entries.sort_by(|a, b| a.path.cmp(&b.path).then_with(|| a.stage().cmp(&b.stage())));
     build_cache_tree_node(odb, b"", Vec::new(), &entries)
@@ -937,11 +938,7 @@ fn build_tree(odb: &Odb, entries: &[&IndexEntry], dir_prefix: &[u8]) -> Result<O
     let mut tree_entries = Vec::with_capacity(children.len());
     for (name, child) in children {
         match child {
-            ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry {
-                mode: FileMode::new(mode),
-                name,
-                oid,
-            }),
+            ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry { mode, name, oid }),
             ChildKind::Tree(sub_prefix, sub_entries) => {
                 let sub_oid = build_tree(odb, &sub_entries, &sub_prefix)?;
                 tree_entries.push(TreeEntry {
@@ -1005,7 +1002,7 @@ fn build_cache_tree_node(
     for (child_name, child) in children {
         match child {
             ChildKind::Blob { mode, oid } => tree_entries.push(TreeEntry {
-                mode: FileMode::new(mode),
+                mode: mode,
                 name: child_name,
                 oid,
             }),
@@ -1102,12 +1099,12 @@ pub(crate) fn write_tree_partial_from_index(
                 );
             } else if path_index.contains(&fp) {
                 if let Some(ie) = index.entries.iter().find(|e| {
-                    e.stage() == 0 && !e.intent_to_add() && e.mode != MODE_TREE && e.path == fp
+                    e.stage() == 0 && !e.intent_to_add() && e.mode != FileMode::TREE && e.path == fp
                 }) {
                     by_name.insert(
                         te.name.clone(),
                         TreeEntry {
-                            mode: FileMode::new(canonicalize_blob_mode(ie.mode)),
+                            mode: canonicalize_blob_mode(ie.mode),
                             name: te.name,
                             oid: ie.oid,
                         },
@@ -1120,7 +1117,7 @@ pub(crate) fn write_tree_partial_from_index(
         }
 
         for ie in &index.entries {
-            if ie.stage() != 0 || ie.intent_to_add() || ie.mode == MODE_TREE {
+            if ie.stage() != 0 || ie.intent_to_add() || ie.mode == FileMode::TREE {
                 continue;
             }
             if !path_index.contains(&ie.path) {
@@ -1158,7 +1155,7 @@ pub(crate) fn write_tree_partial_from_index(
                     by_name.insert(
                         name.clone(),
                         TreeEntry {
-                            mode: FileMode::new(canonicalize_blob_mode(ie.mode)),
+                            mode: canonicalize_blob_mode(ie.mode),
                             name,
                             oid: ie.oid,
                         },
@@ -1181,23 +1178,20 @@ pub(crate) fn write_tree_partial_from_index(
     merge_level(odb, index, base_tree_oid, b"", &path_index)
 }
 
-fn canonicalize_blob_mode(mode: u32) -> u32 {
-    match mode & 0o170000 {
-        0o120000 => MODE_SYMLINK,
-        0o160000 => MODE_GITLINK,
-        0o100000 => {
-            if mode & 0o111 != 0 {
-                MODE_EXECUTABLE
-            } else {
-                MODE_REGULAR
-            }
-        }
-        _ => MODE_REGULAR,
+fn canonicalize_blob_mode(mode: FileMode) -> FileMode {
+    if mode.is_symlink() {
+        FileMode::SYMLINK
+    } else if mode.is_gitlink() {
+        FileMode::GITLINK
+    } else if mode.is_executable() {
+        FileMode::EXECUTABLE
+    } else {
+        FileMode::REGULAR
     }
 }
 
 enum ChildKind<'a> {
-    Blob { mode: u32, oid: ObjectId },
+    Blob { mode: FileMode, oid: ObjectId },
     Tree(Vec<u8>, Vec<&'a IndexEntry>),
 }
 
@@ -1214,11 +1208,12 @@ mod tests {
     #![allow(clippy::expect_used, clippy::unwrap_used)]
 
     use super::*;
-    use crate::index::{IndexEntry, MODE_REGULAR, MODE_TREE};
+    use crate::index::IndexEntry;
     use crate::objects::parse_tree;
+    use crate::objects::FileMode;
     use tempfile::TempDir;
 
-    fn entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
+    fn entry(path: &str, mode: FileMode, oid: ObjectId) -> IndexEntry {
         IndexEntry {
             ctime_sec: 0,
             ctime_nsec: 0,
@@ -1239,7 +1234,7 @@ mod tests {
     }
 
     fn sparse_dir_placeholder(path: &str, tree_oid: ObjectId) -> IndexEntry {
-        let mut e = entry(path, MODE_TREE, tree_oid);
+        let mut e = entry(path, FileMode::TREE, tree_oid);
         e.set_skip_worktree(true);
         e
     }
@@ -1252,7 +1247,7 @@ mod tests {
         let tree_oid = write_tree_from_index(
             &odb,
             &Index {
-                entries: vec![entry("x", MODE_REGULAR, blob)],
+                entries: vec![entry("x", FileMode::REGULAR, blob)],
                 ..Index::new()
             },
             "",
@@ -1273,7 +1268,7 @@ mod tests {
         let tree_oid = write_tree_from_index(
             &odb,
             &Index {
-                entries: vec![entry("x", MODE_REGULAR, blob)],
+                entries: vec![entry("x", FileMode::REGULAR, blob)],
                 ..Index::new()
             },
             "",
@@ -1295,7 +1290,7 @@ mod tests {
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"same").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("same", MODE_REGULAR, blob));
+        index.add_or_replace(entry("same", FileMode::REGULAR, blob));
         let first =
             write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
         let objects_before = std::fs::read_dir(dir.path()).unwrap().count();
@@ -1315,7 +1310,7 @@ mod tests {
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"d").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("d", MODE_REGULAR, blob));
+        index.add_or_replace(entry("d", FileMode::REGULAR, blob));
         let flags = WriteTreeFlags {
             persistence: WriteTreePersistence::DryRun,
             ..WriteTreeFlags::default()
@@ -1332,7 +1327,7 @@ mod tests {
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"r").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("r", MODE_REGULAR, blob));
+        index.add_or_replace(entry("r", FileMode::REGULAR, blob));
         let expected = write_tree_from_index(&odb, &index, "").unwrap();
         index.clear_cache_tree();
         let flags = WriteTreeFlags {
@@ -1348,7 +1343,7 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"u").unwrap();
-        let mut conflict = entry("conflict", MODE_REGULAR, blob);
+        let mut conflict = entry("conflict", FileMode::REGULAR, blob);
         conflict.set_stage(1);
         let mut index = Index::new();
         index.add_or_replace(conflict);
@@ -1363,8 +1358,8 @@ mod tests {
         let a = odb.write(ObjectKind::Blob, b"a").unwrap();
         let b = odb.write(ObjectKind::Blob, b"b").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("dir", MODE_REGULAR, a));
-        index.add_or_replace(entry("dir/file", MODE_REGULAR, b));
+        index.add_or_replace(entry("dir", FileMode::REGULAR, a));
+        index.add_or_replace(entry("dir/file", FileMode::REGULAR, b));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(matches!(
             err,
@@ -1378,7 +1373,7 @@ mod tests {
         let odb = Odb::new(dir.path());
         let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("gone", MODE_REGULAR, missing));
+        index.add_or_replace(entry("gone", FileMode::REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(
             matches!(&err, Error::Object(ObjectError::MissingTreeMember { path, oid, .. }) if path == "gone" && *oid == missing),
@@ -1397,8 +1392,8 @@ mod tests {
         let blob = odb.write(ObjectKind::Blob, b"ok").unwrap();
         let zero = ObjectId::zero();
         let mut index = Index::new();
-        index.add_or_replace(entry("sub", MODE_GITLINK, zero));
-        index.add_or_replace(entry("ok", MODE_REGULAR, blob));
+        index.add_or_replace(entry("sub", FileMode::GITLINK, zero));
+        index.add_or_replace(entry("ok", FileMode::REGULAR, blob));
         let err = cache_tree_update(
             &odb,
             &mut index,
@@ -1421,8 +1416,8 @@ mod tests {
         let blob = odb.write(ObjectKind::Blob, b"ok").unwrap();
         let missing = ObjectId::from_hex("00000000000000000000000000000000000000ab").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("sub", MODE_GITLINK, missing));
-        index.add_or_replace(entry("ok", MODE_REGULAR, blob));
+        index.add_or_replace(entry("sub", FileMode::GITLINK, missing));
+        index.add_or_replace(entry("ok", FileMode::REGULAR, blob));
         cache_tree_update(
             &odb,
             &mut index,
@@ -1441,7 +1436,7 @@ mod tests {
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"i").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("i", MODE_REGULAR, blob));
+        index.add_or_replace(entry("i", FileMode::REGULAR, blob));
         index.set_cache_tree(build_cache_tree_from_index(&odb, &index).unwrap());
         index.cache_tree.as_mut().unwrap().entry_count = -1;
         cache_tree_update(
@@ -1462,11 +1457,11 @@ mod tests {
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"old").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("old", MODE_REGULAR, blob));
+        index.add_or_replace(entry("old", FileMode::REGULAR, blob));
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
         assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
 
-        let mut ita = entry("new", MODE_REGULAR, ObjectId::zero());
+        let mut ita = entry("new", FileMode::REGULAR, ObjectId::zero());
         ita.set_intent_to_add(true);
         index.add_or_replace(ita);
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
@@ -1480,12 +1475,12 @@ mod tests {
 
         let inner_blob = odb.write(ObjectKind::Blob, b"inner").unwrap();
         let mut inner_index = Index::new();
-        inner_index.add_or_replace(entry("leaf", MODE_REGULAR, inner_blob));
+        inner_index.add_or_replace(entry("leaf", FileMode::REGULAR, inner_blob));
         let inner_tree = write_tree_from_index(&odb, &inner_index, "").unwrap();
 
         let top_blob = odb.write(ObjectKind::Blob, b"top").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("top", MODE_REGULAR, top_blob));
+        index.add_or_replace(entry("top", FileMode::REGULAR, top_blob));
         index.add_or_replace(sparse_dir_placeholder("wide/sub", inner_tree));
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
         assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
@@ -1521,13 +1516,17 @@ mod tests {
         let oid_deep = odb.write(ObjectKind::Blob, b"deep").unwrap();
 
         let mut index = Index::new();
-        index.add_or_replace(entry("f", MODE_REGULAR, oid_f));
+        index.add_or_replace(entry("f", FileMode::REGULAR, oid_f));
         let root_tree = write_tree_from_index(&odb, &index, "").unwrap();
         index.set_cache_tree(build_cache_tree_from_index(&odb, &index).unwrap());
         assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
 
         index.invalidate_cache_tree_for_path(b"deep");
-        index.add_or_replace(entry("deep/very-long-subdir/file", MODE_REGULAR, oid_deep));
+        index.add_or_replace(entry(
+            "deep/very-long-subdir/file",
+            FileMode::REGULAR,
+            oid_deep,
+        ));
 
         let oid = write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
         assert_ne!(oid, root_tree);
@@ -1544,9 +1543,9 @@ mod tests {
         let oid_link = odb.write(ObjectKind::Blob, b"target").unwrap();
 
         let mut index = Index::new();
-        index.add_or_replace(entry("bin/run.sh", 0o100777, oid_exec));
-        index.add_or_replace(entry("link", 0o120777, oid_link));
-        index.add_or_replace(entry("a.txt", 0o100664, oid_a));
+        index.add_or_replace(entry("bin/run.sh", FileMode::new(0o100777), oid_exec));
+        index.add_or_replace(entry("link", FileMode::new(0o120777), oid_link));
+        index.add_or_replace(entry("a.txt", FileMode::new(0o100664), oid_a));
 
         let root_oid = write_tree_from_index(&odb, &index, "").unwrap();
         let root_tree_obj = odb.read(&root_oid).unwrap();
@@ -1589,8 +1588,8 @@ mod tests {
         filetime::set_file_mtime(&path_b, stamp_b).unwrap();
 
         let mut index = Index::new();
-        index.add_or_replace(entry("a.txt", 0o100644, oid_a));
-        index.add_or_replace(entry("b.txt", 0o100644, oid_b));
+        index.add_or_replace(entry("a.txt", FileMode::REGULAR, oid_a));
+        index.add_or_replace(entry("b.txt", FileMode::REGULAR, oid_b));
 
         write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
 
@@ -1613,8 +1612,8 @@ mod tests {
         let oid_a = odb.write(ObjectKind::Blob, b"a").unwrap();
         let oid_b = odb.write(ObjectKind::Blob, b"b").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("a.txt", 0o100644, oid_a));
-        index.add_or_replace(entry("b.txt", 0o100644, oid_b));
+        index.add_or_replace(entry("a.txt", FileMode::REGULAR, oid_a));
+        index.add_or_replace(entry("b.txt", FileMode::REGULAR, oid_b));
 
         let root_oid =
             write_tree_update_index(&odb, &mut index, "", WriteTreeFlags::default()).unwrap();
@@ -1684,12 +1683,12 @@ mod tests {
             })
             .collect();
         let mut index = Index::new();
-        index.add_or_replace(entry("alpha/one", MODE_REGULAR, blobs[0]));
-        index.add_or_replace(entry("alpha/two", MODE_REGULAR, blobs[1]));
-        index.add_or_replace(entry("beta/three", MODE_REGULAR, blobs[2]));
-        index.add_or_replace(entry("beta/four/deep", MODE_REGULAR, blobs[3]));
-        index.add_or_replace(entry("gamma", MODE_REGULAR, blobs[4]));
-        index.add_or_replace(entry("wide/sub/leaf", MODE_REGULAR, blobs[5]));
+        index.add_or_replace(entry("alpha/one", FileMode::REGULAR, blobs[0]));
+        index.add_or_replace(entry("alpha/two", FileMode::REGULAR, blobs[1]));
+        index.add_or_replace(entry("beta/three", FileMode::REGULAR, blobs[2]));
+        index.add_or_replace(entry("beta/four/deep", FileMode::REGULAR, blobs[3]));
+        index.add_or_replace(entry("gamma", FileMode::REGULAR, blobs[4]));
+        index.add_or_replace(entry("wide/sub/leaf", FileMode::REGULAR, blobs[5]));
         index
     }
 
@@ -1717,7 +1716,7 @@ mod tests {
                     .write(ObjectKind::Blob, format!("mut{step}").as_bytes())
                     .unwrap();
                 let extra_path = format!("alpha/extra{step}");
-                index.add_or_replace(entry(&extra_path, MODE_REGULAR, blob));
+                index.add_or_replace(entry(&extra_path, FileMode::REGULAR, blob));
             }
             cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
             let full = build_cache_tree_from_index(&odb, &index).unwrap();
@@ -1750,7 +1749,7 @@ mod tests {
 
         index.invalidate_cache_tree_for_path(b"beta/four");
         let blob = odb.write(ObjectKind::Blob, b"updated").unwrap();
-        index.add_or_replace(entry("beta/four/deep", MODE_REGULAR, blob));
+        index.add_or_replace(entry("beta/four/deep", FileMode::REGULAR, blob));
 
         odb.hot_path_metrics().reset_tree_writes();
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
@@ -1784,13 +1783,13 @@ mod tests {
             let blob = odb
                 .write(ObjectKind::Blob, format!("{d}\n").as_bytes())
                 .unwrap();
-            index.add_or_replace(entry(&format!("d{d}/f"), MODE_REGULAR, blob));
+            index.add_or_replace(entry(&format!("d{d}/f"), FileMode::REGULAR, blob));
         }
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
 
         let changed = odb.write(ObjectKind::Blob, b"changed\n").unwrap();
         index.invalidate_cache_tree_for_path(b"d0/f");
-        index.add_or_replace(entry("d0/f", MODE_REGULAR, changed));
+        index.add_or_replace(entry("d0/f", FileMode::REGULAR, changed));
         odb.reset_exists_probe();
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
         // One batched reuse check of the other `dirs - 1` cached directories, then the
@@ -1813,7 +1812,7 @@ mod tests {
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
         let missing = ObjectId::from_hex("00000000000000000000000000000000000000cd").unwrap();
         index.invalidate_cache_tree_for_path(b"beta/three");
-        index.add_or_replace(entry("beta/three", MODE_REGULAR, missing));
+        index.add_or_replace(entry("beta/three", FileMode::REGULAR, missing));
         let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
         assert!(
             matches!(&err, Error::Object(ObjectError::MissingTreeMember { oid, path, .. }) if *oid == missing && path == "beta/three"),
@@ -1847,7 +1846,7 @@ mod tests {
         let odb = Odb::new(dir.path());
         let mut index = Index::new();
         let blob = odb.write(ObjectKind::Blob, b"x").unwrap();
-        index.add_or_replace(entry("dir/x", MODE_REGULAR, blob));
+        index.add_or_replace(entry("dir/x", FileMode::REGULAR, blob));
         cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
         let dir_oid = cache_tree_child_oid(&index, b"dir");
         odb.test_remove_loose_object(&dir_oid);
@@ -1875,8 +1874,8 @@ mod tests {
 
         let keep = odb.write(ObjectKind::Blob, b"keep").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("keep", MODE_REGULAR, keep));
-        let mut ita = entry("ita/new", MODE_REGULAR, ObjectId::zero());
+        index.add_or_replace(entry("keep", FileMode::REGULAR, keep));
+        let mut ita = entry("ita/new", FileMode::REGULAR, ObjectId::zero());
         ita.set_intent_to_add(true);
         index.add_or_replace(ita);
 
@@ -1896,7 +1895,7 @@ mod tests {
         assert!(index_cache_tree_inputs_match(&left, &right));
         right.add_or_replace(entry(
             "alpha/one",
-            MODE_REGULAR,
+            FileMode::REGULAR,
             odb.write(ObjectKind::Blob, b"changed").unwrap(),
         ));
         assert!(!index_cache_tree_inputs_match(&left, &right));
@@ -1910,8 +1909,8 @@ mod tests {
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"only").unwrap();
         let mut base_index = Index::new();
-        base_index.add_or_replace(entry("upstream.txt", MODE_REGULAR, blob));
-        base_index.add_or_replace(entry("dir/only.txt", MODE_REGULAR, blob));
+        base_index.add_or_replace(entry("upstream.txt", FileMode::REGULAR, blob));
+        base_index.add_or_replace(entry("dir/only.txt", FileMode::REGULAR, blob));
         let base_tree = write_tree_from_index(&odb, &base_index, "").unwrap();
 
         let mut paths = HashSet::new();
@@ -1939,13 +1938,13 @@ mod tests {
         let oid_new = odb.write(ObjectKind::Blob, b"new").unwrap();
 
         let mut base_index = Index::new();
-        base_index.add_or_replace(entry("keep.txt", MODE_REGULAR, oid_keep));
-        base_index.add_or_replace(entry("dir/old.txt", MODE_REGULAR, oid_old));
+        base_index.add_or_replace(entry("keep.txt", FileMode::REGULAR, oid_keep));
+        base_index.add_or_replace(entry("dir/old.txt", FileMode::REGULAR, oid_old));
         let base_tree = write_tree_from_index(&odb, &base_index, "").unwrap();
 
         let mut index = base_index.clone();
-        index.add_or_replace(entry("dir/new.txt", MODE_REGULAR, oid_new));
-        index.add_or_replace(entry("added/sub/file.txt", MODE_REGULAR, oid_new));
+        index.add_or_replace(entry("dir/new.txt", FileMode::REGULAR, oid_new));
+        index.add_or_replace(entry("added/sub/file.txt", FileMode::REGULAR, oid_new));
 
         let mut paths = HashSet::new();
         paths.insert(b"dir/new.txt".to_vec());
@@ -1982,8 +1981,8 @@ mod tests {
         let blob_a = odb.write(ObjectKind::Blob, b"a").unwrap();
         let blob_a0 = odb.write(ObjectKind::Blob, b"a0").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("a/f", MODE_REGULAR, blob_a));
-        index.add_or_replace(entry("a0/f", MODE_REGULAR, blob_a0));
+        index.add_or_replace(entry("a/f", FileMode::REGULAR, blob_a));
+        index.add_or_replace(entry("a0/f", FileMode::REGULAR, blob_a0));
 
         let tree_oid = write_tree_from_index(&odb, &index, "a").unwrap();
         let top = parse_tree(&odb.read(&tree_oid).unwrap().data).unwrap();
@@ -2000,7 +1999,7 @@ mod tests {
         let odb = Odb::new(dir.path());
         let blob = odb.write(ObjectKind::Blob, b"content").unwrap();
         let mut index = Index::new();
-        index.add_or_replace(entry("only.txt", MODE_REGULAR, blob));
+        index.add_or_replace(entry("only.txt", FileMode::REGULAR, blob));
         let base_tree = odb.empty_tree_oid().unwrap();
         let mut paths = HashSet::new();
         paths.insert(b"only.txt".to_vec());
@@ -2024,8 +2023,8 @@ mod tests {
         let base_tree = odb.empty_tree_oid().unwrap();
 
         let mut index = Index::new();
-        index.add_or_replace(entry("a/f", MODE_REGULAR, blob_a));
-        index.add_or_replace(entry("a0/f", MODE_REGULAR, blob_a0));
+        index.add_or_replace(entry("a/f", FileMode::REGULAR, blob_a));
+        index.add_or_replace(entry("a0/f", FileMode::REGULAR, blob_a0));
 
         let mut paths = HashSet::new();
         paths.insert(b"a/f".to_vec());

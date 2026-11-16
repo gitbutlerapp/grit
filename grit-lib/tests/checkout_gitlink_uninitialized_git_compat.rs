@@ -8,7 +8,6 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{DiffStatus, TreeDiffOptions};
 use grit_lib::error::Error;
-use grit_lib::index::MODE_GITLINK;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::commit::CommitRequest;
@@ -93,7 +92,7 @@ fn checkout_uninitialized_gitlink_matches_git_clone() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     let entry = index.get(b"sub", 0).expect("sub in index");
-    assert_eq!(entry.mode, MODE_GITLINK);
+    assert_eq!(entry.mode, FileMode::GITLINK);
     assert_eq!(entry.oid.to_string(), GITLINK_OID);
 
     let porcelain = git_porcelain_worktree(&root.join("gl.git"), &grit_dest);

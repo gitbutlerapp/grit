@@ -593,7 +593,8 @@ fn rebase_onto_defaults_upstream_from_tracking_config() {
 #[test]
 fn rebase_onto_bare_repository() {
     use grit_lib::index::write_tree::write_tree_from_index;
-    use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+    use grit_lib::index::{Index, IndexEntry};
+    use grit_lib::objects::FileMode;
     use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 
     let dir = tempfile::tempdir().expect("tempdir");

@@ -16,7 +16,6 @@ use std::process::{Command, Stdio};
 use std::sync::OnceLock;
 
 use flate2::write::ZlibEncoder;
-use grit_lib::index::MODE_REGULAR;
 use grit_lib::objects::hash::Parallelism;
 use grit_lib::objects::index_pack::{ingest_received_pack, install_pack_bytes, IngestPackOptions};
 use grit_lib::objects::odb::Odb;

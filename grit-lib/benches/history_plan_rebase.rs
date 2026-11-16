@@ -8,7 +8,7 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, Criterion, Throughput};
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::history::{RebaseOntoOptions, RebaseRequest, RefScope, RewriteOptions};

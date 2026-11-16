@@ -275,7 +275,8 @@ fn align_lookup_needs_path_probe(
 
 use std::collections::BTreeSet;
 
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::Index;
+use crate::objects::FileMode;
 
 /// Directory-grouped blob scan plan: index entry indices grouped by parent directory.
 ///
@@ -341,7 +342,7 @@ pub(crate) fn index_blob_scan_eligible(
     if ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
         return false;
     }
-    if ie.mode == MODE_GITLINK {
+    if ie.mode == FileMode::GITLINK {
         return false;
     }
     if honor_fsmonitor_valid && index.fsmonitor_last_update.is_some() && ie.fsmonitor_valid() {
@@ -484,7 +485,7 @@ pub(crate) fn group_blob_entries_by_dir_for_paths(
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct BlobDiskStat {
     pub(crate) fields: crate::index::IndexStatFields,
-    pub(crate) git_mode: u32,
+    pub(crate) git_mode: FileMode,
     pub(crate) is_dir: bool,
     /// Worktree byte length before index munging (`st_size` / `metadata.len()`).
     pub(crate) raw_size: u64,
@@ -500,11 +501,11 @@ impl BlobDiskStat {
         Self {
             fields: crate::index::IndexStatFields::from_linux_stat(stat),
             git_mode: if kind == libc::S_IFLNK {
-                crate::index::MODE_SYMLINK
+                crate::objects::FileMode::SYMLINK
             } else if stat.st_mode & 0o111 != 0 {
-                crate::index::MODE_EXECUTABLE
+                crate::objects::FileMode::EXECUTABLE
             } else {
-                crate::index::MODE_REGULAR
+                crate::objects::FileMode::REGULAR
             },
             is_dir: kind == libc::S_IFDIR,
             raw_size: stat.st_size as u64,
@@ -672,7 +673,7 @@ fn retain_stage_tracked_lookup(
         BlobDiskLookup::Missing | BlobDiskLookup::Io(_) => true,
         BlobDiskLookup::Present(stat) => {
             let ie = &index.entries[entry_index];
-            if ie.mode == crate::index::MODE_GITLINK {
+            if ie.mode == crate::objects::FileMode::GITLINK {
                 return true;
             }
             let stat_same = stat
@@ -707,13 +708,13 @@ fn retain_worktree_guard_lookup(
         BlobDiskLookup::Missing => true,
         BlobDiskLookup::Io(_) => true,
         BlobDiskLookup::Present(stat) => {
-            if ie.mode == crate::index::MODE_GITLINK {
+            if ie.mode == crate::objects::FileMode::GITLINK {
                 return !stat.is_dir;
             }
             if stat.is_dir
-                || stat.git_mode != crate::index::MODE_SYMLINK
-                    && stat.git_mode != crate::index::MODE_REGULAR
-                    && stat.git_mode != crate::index::MODE_EXECUTABLE
+                || stat.git_mode != crate::objects::FileMode::SYMLINK
+                    && stat.git_mode != crate::objects::FileMode::REGULAR
+                    && stat.git_mode != crate::objects::FileMode::EXECUTABLE
             {
                 return true;
             }
@@ -1962,7 +1963,7 @@ mod tests {
         let oid = write_blob_file(wt, "d0/f0.txt", b"hello\n");
         let mut index = Index::new();
         index.add_or_replace(
-            entry_from_stat(&wt.join("d0/f0.txt"), b"d0/f0.txt", oid, 0o100644).unwrap(),
+            entry_from_stat(&wt.join("d0/f0.txt"), b"d0/f0.txt", oid, FileMode::REGULAR).unwrap(),
         );
         let plan = group_blob_entries_by_dir(&index, false);
         assert_eq!(plan.dirs.len(), 1);
@@ -2004,7 +2005,8 @@ mod tests {
         let oid = ObjectId::zero();
         let mut index = Index::new();
         fs::write(wt.join("gone.txt"), b"x").unwrap();
-        let entry = entry_from_stat(&wt.join("gone.txt"), b"gone.txt", oid, 0o100644).unwrap();
+        let entry =
+            entry_from_stat(&wt.join("gone.txt"), b"gone.txt", oid, FileMode::REGULAR).unwrap();
         index.add_or_replace(entry);
         fs::remove_file(wt.join("gone.txt")).unwrap();
 
@@ -2049,7 +2051,7 @@ mod tests {
             rel.push_str("/leaf.txt");
             let oid = write_blob_file(wt, &rel, b"payload\n");
             index.add_or_replace(
-                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, FileMode::REGULAR).unwrap(),
             );
         }
         let plan = group_blob_entries_by_dir(&index, false);
@@ -2119,7 +2121,8 @@ mod tests {
                 let rel = format!("{dir}/part{f}.txt");
                 let oid = write_blob_file(&wt, &rel, format!("{d}-{f}\n").as_bytes());
                 index.add_or_replace(
-                    entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                    entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, FileMode::REGULAR)
+                        .unwrap(),
                 );
             }
         }
@@ -2208,7 +2211,7 @@ mod tests {
             let rel = format!("flat/f{f}.txt");
             let oid = write_blob_file(&wt, &rel, format!("{f}\n").as_bytes());
             index.add_or_replace(
-                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, FileMode::REGULAR).unwrap(),
             );
         }
         let plan = group_blob_entries_by_dir(&index, false);
@@ -2261,7 +2264,8 @@ mod tests {
                 let rel = format!("{dir}/f{f}-file.txt");
                 let oid = write_blob_file(&wt, &rel, format!("{d}-{f}\n").as_bytes());
                 index.add_or_replace(
-                    entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                    entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, FileMode::REGULAR)
+                        .unwrap(),
                 );
             }
         }
@@ -2326,7 +2330,7 @@ mod tests {
             let rel = format!("data/file_{i:07}.txt");
             let oid = write_blob_file(&wt, &rel, format!("content {i}\n").as_bytes());
             index.add_or_replace(
-                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, FileMode::REGULAR).unwrap(),
             );
         }
         let plan = group_blob_entries_by_dir(&index, false);
@@ -2465,7 +2469,7 @@ mod tests {
             let rel = format!("dir/f{i:04}.txt");
             let oid = write_blob_file(wt, &rel, b"x\n");
             index.add_or_replace(
-                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, FileMode::REGULAR).unwrap(),
             );
         }
         fs::remove_dir_all(wt.join("dir")).unwrap();
@@ -2505,14 +2509,20 @@ mod tests {
         let mut index = Index::new();
         let tracked_oid = write_blob_file(wt, "d/file.txt", b"same\n");
         index.add_or_replace(
-            entry_from_stat(&wt.join("d/file.txt"), b"d/file.txt", tracked_oid, 0o100644).unwrap(),
+            entry_from_stat(
+                &wt.join("d/file.txt"),
+                b"d/file.txt",
+                tracked_oid,
+                FileMode::REGULAR,
+            )
+            .unwrap(),
         );
         const PADDING: usize = 1000;
         for i in 0..PADDING {
             let rel = format!("bulk/f{i:04}.txt");
             let oid = write_blob_file(wt, &rel, b"z\n");
             index.add_or_replace(
-                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, FileMode::REGULAR).unwrap(),
             );
         }
         fs::remove_dir_all(wt.join("d")).unwrap();
@@ -2555,7 +2565,13 @@ mod tests {
         let oid = write_blob_file(wt, "dir/file.txt", b"tracked\n");
         let mut index = Index::new();
         index.add_or_replace(
-            entry_from_stat(&wt.join("dir/file.txt"), b"dir/file.txt", oid, 0o100644).unwrap(),
+            entry_from_stat(
+                &wt.join("dir/file.txt"),
+                b"dir/file.txt",
+                oid,
+                FileMode::REGULAR,
+            )
+            .unwrap(),
         );
 
         fs::remove_dir_all(wt.join("dir")).unwrap();

@@ -691,8 +691,13 @@ fn commit_on_main(repo: &Repository, contents: &str, parent: Option<ObjectId>) -
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("index");
     index.add_or_replace(
-        grit_lib::index::entry_from_stat(&wt.join("f"), b"f", blob, grit_lib::index::MODE_REGULAR)
-            .expect("entry"),
+        grit_lib::index::entry_from_stat(
+            &wt.join("f"),
+            b"f",
+            blob,
+            grit_lib::objects::FileMode::REGULAR,
+        )
+        .expect("entry"),
     );
     index.sort();
     let tree = write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())

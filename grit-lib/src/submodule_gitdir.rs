@@ -13,7 +13,7 @@ use crate::config::{ConfigFile, ConfigScope};
 use crate::error::{Error, Result, SubmoduleError};
 use crate::hash;
 use crate::index::Index;
-use crate::objects::{ObjectId, ObjectKind};
+use crate::objects::{FileMode, ObjectId, ObjectKind};
 use crate::odb::Odb;
 
 /// Filesystem path to the separate git directory for a submodule under `super_git_dir`.
@@ -547,7 +547,7 @@ pub fn migrate_gitdir_configs(work_tree: &Path, git_dir: &Path) -> Result<()> {
 pub fn path_inside_indexed_submodule(index: &Index, new_path: &str) -> bool {
     let new_norm = new_path.replace('\\', "/");
     for e in &index.entries {
-        if e.mode != 0o160000 || e.stage() != 0 {
+        if e.mode != FileMode::GITLINK || e.stage() != 0 {
             continue;
         }
         let ce = String::from_utf8_lossy(&e.path).replace('\\', "/");

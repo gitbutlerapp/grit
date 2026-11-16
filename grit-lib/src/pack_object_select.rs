@@ -12,8 +12,8 @@ use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::objects::{
     oid_hash_map, oid_hash_set, oid_hash_set_with_capacity, parse_tag, tag_object_line_oid,
-    tree_entry_span, CommitRef, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntryRef,
-    TreeRefIter,
+    tree_entry_span, CommitRef, FileMode, Object, ObjectId, ObjectKind, OidHashMap, OidHashSet,
+    TreeEntryRef, TreeRefIter,
 };
 use crate::odb::store::{CompositeStore, ObjectStore};
 use crate::odb::Odb;
@@ -978,10 +978,10 @@ fn objects_in_commit_snapshot(odb: &Odb, commit_oid: ObjectId) -> Result<HashSet
         };
         for entry in TreeRefIter::with_oid_len(&tree_obj.data, oid_len) {
             let entry = entry?;
-            if entry.mode == 0o160000 {
+            if entry.mode == FileMode::GITLINK {
                 continue;
             }
-            if entry.mode & 0o170000 == 0o040000 {
+            if entry.mode.is_tree() {
                 queue.push_back(entry.oid);
             } else {
                 out.insert(entry.oid);
@@ -1691,7 +1691,7 @@ impl<'a> EnumerationWalk<'a> {
                         }
                     }
                     TreeEntryRef {
-                        mode: span.mode,
+                        mode: FileMode::new(span.mode),
                         name: &data[span.name],
                         oid: ObjectId::from_bytes(&data[pos - oid_len..pos])?,
                     }
@@ -1720,7 +1720,7 @@ impl<'a> EnumerationWalk<'a> {
         path_hash: Option<u32>,
         depth: u64,
     ) -> Result<()> {
-        if entry.mode == 0o160000 {
+        if entry.mode == FileMode::GITLINK {
             return Ok(());
         }
         // Only a filter leaves objects unlisted, so without one an object already
@@ -1733,7 +1733,7 @@ impl<'a> EnumerationWalk<'a> {
         // and fails there if it is missing. Any other mode, including directories
         // written with non-canonical permission bits, is read so the object's own
         // kind decides whether it is walked.
-        match entry.mode & 0o170000 {
+        match entry.mode.bits() & 0o170000 {
             0o120000 => self.push_blob(entry.oid, None, tree, depth)?,
             0o100000 => {
                 let name = pack_name_hash_child(path_hash, entry.name);
@@ -2705,9 +2705,9 @@ mod tests {
                     format!("{path}/{}", String::from_utf8_lossy(entry.name))
                 };
                 match entry.mode {
-                    0o160000 => {}
-                    0o040000 => trees.push((entry.oid, child)),
-                    0o120000 => {
+                    FileMode::GITLINK => {}
+                    FileMode::TREE => trees.push((entry.oid, child)),
+                    FileMode::SYMLINK => {
                         objects.insert(entry.oid);
                     }
                     _ => {

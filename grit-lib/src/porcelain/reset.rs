@@ -550,7 +550,7 @@ mod tests {
                 &wt.join(path),
                 path.as_bytes(),
                 oid,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry");
             index.add_or_replace(entry);
@@ -739,9 +739,13 @@ mod tests {
             .odb()
             .write(ObjectKind::Blob, b"staged\n")
             .expect("blob");
-        let entry =
-            crate::index::entry_from_stat(&wt.join("f"), b"f", oid, crate::index::MODE_REGULAR)
-                .expect("entry");
+        let entry = crate::index::entry_from_stat(
+            &wt.join("f"),
+            b"f",
+            oid,
+            crate::objects::FileMode::REGULAR,
+        )
+        .expect("entry");
         index.add_or_replace(entry);
         repo.write_index(&mut index).expect("write index");
 
@@ -905,7 +909,7 @@ mod tests {
             &wt.join("same.txt"),
             b"same.txt",
             oid,
-            crate::index::MODE_REGULAR,
+            crate::objects::FileMode::REGULAR,
         )
         .expect("entry");
         index.add_or_replace(entry);
@@ -956,7 +960,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size,
@@ -1039,7 +1043,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size,
@@ -1060,7 +1064,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: crate::objects::FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,
@@ -1137,7 +1141,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size,
@@ -1192,8 +1196,12 @@ mod tests {
         let c1 = {
             let mut index = repo.load_index().expect("index");
             for (path, contents, mode) in [
-                ("plain.txt", "hi\n", crate::index::MODE_REGULAR),
-                ("run.sh", "#!/bin/sh\n", crate::index::MODE_EXECUTABLE),
+                ("plain.txt", "hi\n", crate::objects::FileMode::REGULAR),
+                (
+                    "run.sh",
+                    "#!/bin/sh\n",
+                    crate::objects::FileMode::EXECUTABLE,
+                ),
             ] {
                 let oid = repo
                     .odb()
@@ -1363,7 +1371,7 @@ mod tests {
                 &wt.join("f"),
                 b"f",
                 oid_f,
-                crate::index::MODE_REGULAR,
+                crate::objects::FileMode::REGULAR,
             )
             .expect("entry f");
             index.add_or_replace(entry_f);
@@ -1529,7 +1537,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size,

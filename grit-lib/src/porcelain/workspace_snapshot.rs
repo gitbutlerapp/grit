@@ -6,8 +6,9 @@
 
 use crate::error::RefError;
 use crate::error::{Error, Result};
-use crate::index::{entry_from_stat, Index, MODE_GITLINK, MODE_TREE};
+use crate::index::{entry_from_stat, Index};
 use crate::lockfile::LockWait;
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::path_validate::ProtectOptions;
 use crate::porcelain::checkout::checkout_between_trees_with_progress;
@@ -330,7 +331,7 @@ fn build_worktree_tree(repo: &Repository, include_untracked: bool) -> Result<Obj
     );
     for path_bytes in paths {
         if let Some(entry) = source.get(&path_bytes, 0) {
-            if entry.mode == MODE_GITLINK {
+            if entry.mode == FileMode::GITLINK {
                 out.add_or_replace(entry.clone());
                 continue;
             }
@@ -389,7 +390,7 @@ fn stage_worktree_path_for_tree(
     let recorded_mode = index.get(index_relpath, 0).map(|e| e.mode);
     let mode = crate::index::WorktreeModePolicy::from_config(rules.config())
         .index_mode_for_worktree(mode_from_metadata(&meta), recorded_mode);
-    if mode == MODE_TREE {
+    if mode == FileMode::TREE {
         return Ok(());
     }
     let file_attrs = rules.file_attrs(&attrs_path, false);
@@ -501,7 +502,7 @@ fn build_pre_restore_disk_tree(
     );
     for path_bytes in paths {
         if let Some(entry) = source.get(&path_bytes, 0) {
-            if entry.mode == MODE_GITLINK {
+            if entry.mode == FileMode::GITLINK {
                 out.add_or_replace(entry.clone());
                 continue;
             }

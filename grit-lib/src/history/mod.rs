@@ -17,7 +17,7 @@
 //!
 //! ```rust
 //! use grit_lib::revwalk::history::{
-//!     CommitEdit, HistoryEdits, RefScope, RewriteOptions, EmptyPolicy,
+//!     CommitEdit, CommitRewrite, HistoryEdits, RefScope, RewriteOptions, EmptyPolicy,
 //! };
 //! use grit_lib::objects::ObjectId;
 //! use grit_lib::repo::Repository;
@@ -26,7 +26,7 @@
 //! let mut edits = HistoryEdits::new();
 //! edits.insert(
 //!     oldest,
-//!     CommitEdit::rewrite(None, Some("Reworded subject\n".into()), None, None),
+//!     CommitEdit::rewrite(CommitRewrite::default().with_message("Reworded subject\n")),
 //! );
 //! let opts = RewriteOptions::new("Rewriter <r@example.com> 1 +0000".parse()?)
 //!     .with_scope(RefScope::Branches)
@@ -87,8 +87,8 @@ pub use rebase_session::{
 pub use reword::{normalize_rewrite_message, RewordOptions};
 pub use squash::{SquashMessage, SquashOptions};
 pub use types::{
-    AppliedRewrite, ApplyOptions, CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, NewCommit,
-    Pathspec, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,
+    AppliedRewrite, ApplyOptions, CommitEdit, CommitRewrite, EmptyPolicy, HeadEffect, HistoryEdits,
+    NewCommit, Pathspec, PlannedRefUpdate, RefScope, RewriteOptions, RewritePlan, RewrittenCommit,
     SplitOptions, UndoMode, UndoOutcome,
 };
 

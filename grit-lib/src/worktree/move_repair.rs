@@ -6,8 +6,9 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::git_path::{absolute_path_for_gitfile_stored_path, path_for_disk_compare};
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::Index;
 use crate::lockfile::{LockError, LockFile, LockWait};
+use crate::objects::FileMode;
 use crate::repo::Repository;
 
 use super::core::{common_git_dir, find_linked_worktree, list_worktrees, WorktreeEntry};
@@ -335,7 +336,7 @@ fn worktree_has_blocking_submodules(entry: &WorktreeEntry) -> Result<bool> {
     }
     let index = Index::load(&index_path)?;
     for idx_entry in index.entries() {
-        if idx_entry.mode != MODE_GITLINK {
+        if idx_entry.mode != FileMode::GITLINK {
             continue;
         }
         let name = std::str::from_utf8(&idx_entry.path).map_err(|_| {

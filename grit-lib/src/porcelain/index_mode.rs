@@ -5,10 +5,8 @@
 //! the caller sets an [`StageExecutableHint`], matching Git's `update-index --chmod` behavior.
 
 use crate::error::Result;
-use crate::index::{
-    Index, IndexChmodReason, IndexError, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
-    MODE_TREE,
-};
+use crate::index::{Index, IndexChmodReason, IndexError};
+use crate::objects::FileMode;
 
 fn chmod_error(path: &[u8], reason: IndexChmodReason) -> IndexError {
     IndexError::Chmod {
@@ -23,25 +21,25 @@ pub enum StageExecutableHint {
     /// Use worktree metadata (and preserve an existing index mode when `core.filemode` is false).
     #[default]
     None,
-    /// Store [`MODE_EXECUTABLE`] for eligible regular files.
+    /// Store [`FileMode::EXECUTABLE`] for eligible regular files.
     SetExecutable,
-    /// Store [`MODE_REGULAR`] for eligible regular files.
+    /// Store [`FileMode::REGULAR`] for eligible regular files.
     SetNonExecutable,
 }
 
 /// Returns whether `mode` is a regular file mode that may be toggled executable/non-executable.
 #[must_use]
-pub(crate) fn is_chmod_eligible_mode(mode: u32) -> bool {
-    mode == MODE_REGULAR || mode == MODE_EXECUTABLE
+pub(crate) fn is_chmod_eligible_mode(mode: FileMode) -> bool {
+    mode == FileMode::REGULAR || mode == FileMode::EXECUTABLE
 }
 
 /// Apply an explicit staging hint to a base mode derived from the worktree or index.
 #[must_use]
-pub(crate) fn staged_mode_with_hint(base: u32, hint: StageExecutableHint) -> u32 {
+pub(crate) fn staged_mode_with_hint(base: FileMode, hint: StageExecutableHint) -> FileMode {
     match hint {
         StageExecutableHint::None => base,
-        StageExecutableHint::SetExecutable if is_chmod_eligible_mode(base) => MODE_EXECUTABLE,
-        StageExecutableHint::SetNonExecutable if is_chmod_eligible_mode(base) => MODE_REGULAR,
+        StageExecutableHint::SetExecutable if is_chmod_eligible_mode(base) => FileMode::EXECUTABLE,
+        StageExecutableHint::SetNonExecutable if is_chmod_eligible_mode(base) => FileMode::REGULAR,
         _ => base,
     }
 }
@@ -63,7 +61,7 @@ pub(crate) fn staged_mode_with_hint(base: u32, hint: StageExecutableHint) -> u32
 pub(crate) fn set_stage0_file_mode(
     index: &mut Index,
     path: &[u8],
-    mode: u32,
+    mode: FileMode,
 ) -> crate::error::Result<bool> {
     if index
         .entries
@@ -110,7 +108,7 @@ pub(crate) fn apply_executable_hint_to_index(
     if hint == StageExecutableHint::None {
         return Ok(Vec::new());
     }
-    let target = staged_mode_with_hint(MODE_REGULAR, hint);
+    let target = staged_mode_with_hint(FileMode::REGULAR, hint);
     let mut updated = Vec::new();
     let paths: Vec<Vec<u8>> = index
         .entries
@@ -131,7 +129,10 @@ pub(crate) fn apply_executable_hint_to_index(
         let Some(entry) = index.get(&path, 0) else {
             continue;
         };
-        if entry.mode == MODE_SYMLINK || entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
+        if entry.mode == FileMode::SYMLINK
+            || entry.mode == FileMode::GITLINK
+            || entry.mode == FileMode::TREE
+        {
             return Err(chmod_error(&path, IndexChmodReason::NotChmodEligible).into());
         }
         if !is_chmod_eligible_mode(entry.mode) {
@@ -159,7 +160,7 @@ mod tests {
     use crate::index::IndexEntry;
     use crate::objects::ObjectId;
 
-    fn regular_entry(path: &str, mode: u32) -> IndexEntry {
+    fn regular_entry(path: &str, mode: FileMode) -> IndexEntry {
         IndexEntry {
             ctime_sec: 0,
             ctime_nsec: 0,
@@ -182,24 +183,24 @@ mod tests {
     #[test]
     fn hint_maps_regular_modes() {
         assert_eq!(
-            staged_mode_with_hint(MODE_REGULAR, StageExecutableHint::SetExecutable),
-            MODE_EXECUTABLE
+            staged_mode_with_hint(FileMode::REGULAR, StageExecutableHint::SetExecutable),
+            FileMode::EXECUTABLE
         );
         assert_eq!(
-            staged_mode_with_hint(MODE_EXECUTABLE, StageExecutableHint::SetNonExecutable),
-            MODE_REGULAR
+            staged_mode_with_hint(FileMode::EXECUTABLE, StageExecutableHint::SetNonExecutable),
+            FileMode::REGULAR
         );
         assert_eq!(
-            staged_mode_with_hint(MODE_SYMLINK, StageExecutableHint::SetExecutable),
-            MODE_SYMLINK
+            staged_mode_with_hint(FileMode::SYMLINK, StageExecutableHint::SetExecutable),
+            FileMode::SYMLINK
         );
     }
 
     #[test]
     fn set_stage0_file_mode_rejects_symlink() {
         let mut index = Index::new();
-        index.add_or_replace(regular_entry("link", MODE_SYMLINK));
-        let err = set_stage0_file_mode(&mut index, b"link", MODE_EXECUTABLE).unwrap_err();
+        index.add_or_replace(regular_entry("link", FileMode::SYMLINK));
+        let err = set_stage0_file_mode(&mut index, b"link", FileMode::EXECUTABLE).unwrap_err();
         assert!(matches!(
             err,
             crate::error::Error::Index(IndexError::Chmod { .. })
@@ -209,19 +210,19 @@ mod tests {
     #[test]
     fn set_stage0_file_mode_updates_regular_file() {
         let mut index = Index::new();
-        index.add_or_replace(regular_entry("run.sh", MODE_REGULAR));
-        assert!(set_stage0_file_mode(&mut index, b"run.sh", MODE_EXECUTABLE).expect("chmod"));
+        index.add_or_replace(regular_entry("run.sh", FileMode::REGULAR));
+        assert!(set_stage0_file_mode(&mut index, b"run.sh", FileMode::EXECUTABLE).expect("chmod"));
         assert_eq!(
             index.get(b"run.sh", 0).expect("entry").mode,
-            MODE_EXECUTABLE
+            FileMode::EXECUTABLE
         );
     }
 
     #[test]
     fn set_stage0_file_mode_rejects_unknown_entry_mode() {
         let mut index = Index::new();
-        index.add_or_replace(regular_entry("x", 0o100664));
-        let err = set_stage0_file_mode(&mut index, b"x", MODE_EXECUTABLE).unwrap_err();
+        index.add_or_replace(regular_entry("x", FileMode::new(0o100664)));
+        let err = set_stage0_file_mode(&mut index, b"x", FileMode::EXECUTABLE).unwrap_err();
         assert!(matches!(
             err,
             crate::error::Error::Index(IndexError::Chmod { .. })
@@ -231,8 +232,8 @@ mod tests {
     #[test]
     fn set_stage0_file_mode_rejects_invalid_target_mode() {
         let mut index = Index::new();
-        index.add_or_replace(regular_entry("run.sh", MODE_REGULAR));
-        let err = set_stage0_file_mode(&mut index, b"run.sh", MODE_SYMLINK).unwrap_err();
+        index.add_or_replace(regular_entry("run.sh", FileMode::REGULAR));
+        let err = set_stage0_file_mode(&mut index, b"run.sh", FileMode::SYMLINK).unwrap_err();
         assert!(matches!(
             err,
             crate::error::Error::Index(IndexError::Chmod { .. })

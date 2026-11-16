@@ -456,7 +456,7 @@ pub(crate) fn mark_fsmonitor_valid_proven_clean(index: &mut Index, entry_index: 
     let Some(entry) = index.entries.get_mut(entry_index) else {
         return false;
     };
-    if entry.stage() != 0 || entry.mode == crate::index::MODE_GITLINK {
+    if entry.stage() != 0 || entry.mode == crate::objects::FileMode::GITLINK {
         return false;
     }
     if entry.fsmonitor_valid() {
@@ -474,7 +474,7 @@ pub(crate) fn mark_fsmonitor_valid_proven_clean_path(index: &mut Index, path: &[
     let Some(entry) = index.get_mut(path, 0) else {
         return false;
     };
-    if entry.mode == crate::index::MODE_GITLINK {
+    if entry.mode == crate::objects::FileMode::GITLINK {
         return false;
     }
     if entry.fsmonitor_valid() {

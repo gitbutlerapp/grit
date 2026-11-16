@@ -25,19 +25,16 @@ use crate::diff::{
     DiffStat, DiffStatus, FileStat,
 };
 use crate::error::{ApplyError, Error, Result};
-use crate::index::{
-    index_file_mtime, Index, IndexEntry, IndexLock, MODE_GITLINK, MODE_SYMLINK, MODE_TREE,
-};
+use crate::index::{index_file_mtime, Index, IndexEntry, IndexLock};
 use crate::objects::FileMode;
 use crate::porcelain::stash_error::{CorruptStashReason, StashError, StashPushValidationError};
 use crate::worktree::{map_worktree_io, WorktreePathOperation};
-// `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
+// `FileMode::EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, IndexApplyOptions};
 use crate::check_ref_format::{RefName, RefNameRef};
 use crate::diff::HunkId;
 use crate::ident::Signature;
 #[cfg(unix)]
-use crate::index::MODE_EXECUTABLE;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
@@ -68,7 +65,7 @@ use crate::porcelain::index_from_tree::{
 use crate::porcelain::pathspec_match::{
     diff_entry_path_mode, index_stage0_mode_or_regular, pathspec_entries_from_paths,
     positive_pathspec_matches_any_path, positive_spec_matches_any_entries, PathspecMatchEntry,
-    RepositoryPathspecFilter, REGULAR_FILE_MODE,
+    RepositoryPathspecFilter,
 };
 use crate::porcelain::restore::{restore_paths_with_lock, RestoreOptions, RestoreSource};
 use crate::porcelain::status::{
@@ -112,7 +109,7 @@ pub struct FlatTreeEntry {
     /// `grit+pathhex:` names use the same reversible encoding as the index).
     pub path: String,
     /// Git tree entry mode (file, symlink, gitlink, …).
-    pub mode: u32,
+    pub mode: FileMode,
     /// Blob or subtree object id for this path.
     pub oid: ObjectId,
 }
@@ -132,7 +129,7 @@ pub fn flatten_tree_full(
         crate::path_population::validate_tree_walk_entry(
             prefix.as_bytes(),
             &entry.name,
-            entry.mode.bits(),
+            entry.mode,
             protect,
         )?;
         if entry.mode == FileMode::TREE {
@@ -141,7 +138,7 @@ pub fn flatten_tree_full(
         } else {
             result.push(FlatTreeEntry {
                 path: full_path,
-                mode: entry.mode.bits(),
+                mode: entry.mode,
                 oid: entry.oid,
             });
         }
@@ -169,7 +166,7 @@ pub fn flat_tree_lookup<'a>(entries: &'a [FlatTreeEntry], path: &str) -> Option<
 /// Blob entry from a recursively flattened tree, with raw Git path bytes.
 struct RawFlatTreeEntry {
     path: Vec<u8>,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
 }
 
@@ -188,19 +185,14 @@ fn flatten_tree_full_raw(
         } else {
             crate::repo_relpath::join_rel(prefix, &entry.name)
         };
-        crate::path_population::validate_tree_walk_entry(
-            prefix,
-            &entry.name,
-            entry.mode.bits(),
-            protect,
-        )?;
+        crate::path_population::validate_tree_walk_entry(prefix, &entry.name, entry.mode, protect)?;
         if entry.mode == FileMode::TREE {
             let sub = flatten_tree_full_raw(odb, &entry.oid, &full_path, protect)?;
             result.extend(sub);
         } else {
             result.push(RawFlatTreeEntry {
                 path: full_path,
-                mode: entry.mode.bits(),
+                mode: entry.mode,
                 oid: entry.oid,
             });
         }
@@ -230,7 +222,7 @@ fn raw_flat_tree_lookup<'a>(
 #[derive(Clone)]
 struct StashTreeEntry {
     path: Vec<u8>,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
 }
 
@@ -258,7 +250,6 @@ impl StashTreeDelta {
         for change in diff_trees(repo.odb(), Some(base), Some(other), "")? {
             let entry = |path: String, mode: FileMode, oid| -> Result<StashTreeEntry> {
                 let path = crate::repo_relpath::storage_bytes(&path).into_owned();
-                let mode = mode.bits();
                 crate::path_population::validate_worktree_path(&path, mode, protect)?;
                 Ok(StashTreeEntry { path, mode, oid })
             };
@@ -298,7 +289,7 @@ fn stash_tree_entry_at_path(
         .filter(|entry| entry.mode != FileMode::TREE)
         .map(|entry| StashTreeEntry {
             path: path.to_owned(),
-            mode: entry.mode.bits(),
+            mode: entry.mode,
             oid: entry.oid,
         }))
 }
@@ -317,7 +308,7 @@ fn load_stash_index(repo: &Repository) -> Result<Index> {
 }
 
 /// Push a conflict (non-zero) stage entry for `path` into `index`.
-pub fn add_stage_entry(index: &mut Index, path: &[u8], oid: &ObjectId, mode: u32, stage: u16) {
+pub fn add_stage_entry(index: &mut Index, path: &[u8], oid: &ObjectId, mode: FileMode, stage: u16) {
     let name_len = path.len().min(0xFFF) as u16;
     let flags = (stage << 12) | name_len;
     index.push_entry_unsorted(IndexEntry {
@@ -341,7 +332,7 @@ pub fn add_stage_entry(index: &mut Index, path: &[u8], oid: &ObjectId, mode: u32
 
 /// Read the worktree bytes for `path`, honoring a symlink index mode (returns
 /// the link target rather than following it).
-pub fn worktree_bytes_for_index_mode(path: &Path, mode: u32) -> io::Result<Vec<u8>> {
+pub fn worktree_bytes_for_index_mode(path: &Path, mode: FileMode) -> io::Result<Vec<u8>> {
     crate::diff::read_worktree_bytes_for_mode(path, mode)
 }
 
@@ -815,7 +806,7 @@ fn filter_paths_by_pathspecs(
             let mode = index
                 .as_ref()
                 .map(|idx| index_stage0_mode_or_regular(idx, path))
-                .unwrap_or(REGULAR_FILE_MODE);
+                .unwrap_or(FileMode::REGULAR);
             filter.matches_entry(path, mode)
         })
         .collect())
@@ -847,7 +838,7 @@ enum StashableChanges {
 fn index_is_plain_for_stash(index: &Index) -> bool {
     index.entries.iter().all(|e| {
         e.stage() == 0
-            && e.mode != MODE_TREE
+            && e.mode != FileMode::TREE
             && !e.skip_worktree()
             && !e.assume_unchanged()
             && !e.intent_to_add()
@@ -1099,7 +1090,7 @@ fn stage_untracked_path_for_stash(
     let recorded_mode = index.get(&index_path_bytes, 0).map(|e| e.mode);
     let mode = crate::index::WorktreeModePolicy::from_config(rules.config())
         .index_mode_for_worktree(mode_from_metadata(&meta), recorded_mode);
-    if mode == MODE_TREE {
+    if mode == FileMode::TREE {
         return Ok(());
     }
 
@@ -1232,7 +1223,7 @@ fn refresh_index_stat_from_worktree(
     work_tree: &Path,
     path: &str,
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
 ) -> Result<()> {
     let path_bytes = crate::repo_relpath::storage_bytes(path);
     let abs = crate::repo_relpath::worktree_abs(work_tree, path);
@@ -2190,7 +2181,7 @@ fn append_stash_untracked_show_entries(
                 let (old_oid, old_mode, status) = if let Some(h) = head_entry {
                     (
                         h.oid,
-                        FileMode::new(h.mode),
+                        h.mode,
                         DiffStatus::for_content_change(h.mode, entry.mode),
                     )
                 } else {
@@ -2201,7 +2192,7 @@ fn append_stash_untracked_show_entries(
                     old_path: Some(entry.path.clone()),
                     new_path: Some(entry.path.clone()),
                     old_mode,
-                    new_mode: FileMode::new(entry.mode),
+                    new_mode: entry.mode,
                     old_oid,
                     new_oid: entry.oid,
                     score: None,
@@ -2214,7 +2205,7 @@ fn append_stash_untracked_show_entries(
             old_path: None,
             new_path: Some(entry.path.clone()),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(entry.mode),
+            new_mode: entry.mode,
             old_oid: zero_oid(),
             new_oid: entry.oid,
             score: None,
@@ -2433,7 +2424,7 @@ pub(crate) fn clear_stashes(repo: &Repository) -> crate::error::Result<usize> {
 /// One filter-free regular file applied from a stash tree blob via bulk checkout.
 struct StashCheckoutJob<'a> {
     rel_path: &'a str,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
 }
 
@@ -2443,7 +2434,7 @@ fn write_smudged_regular_file_replacing_symlink(
     rules: &WorktreeRules,
     rel_path: &str,
     file_path: &Path,
-    mode: u32,
+    mode: FileMode,
     blob: &[u8],
     oid: &ObjectId,
 ) -> Result<()> {
@@ -2452,7 +2443,7 @@ fn write_smudged_regular_file_replacing_symlink(
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
-        if mode == MODE_EXECUTABLE {
+        if mode == FileMode::EXECUTABLE {
             let perms = fs::Permissions::from_mode(0o755);
             fs::set_permissions(file_path, perms)?;
         }
@@ -2483,13 +2474,13 @@ fn materialize_raw_flat_entry_in_worktree(
         fs::create_dir_all(parent)
             .map_err(|source| map_worktree_io(&stored, WorktreePathOperation::Create, source))?;
     }
-    if entry.mode == MODE_GITLINK {
+    if entry.mode == FileMode::GITLINK {
         fs::create_dir_all(&file_path)
             .map_err(|source| map_worktree_io(&stored, WorktreePathOperation::Create, source))?;
         return Ok(());
     }
     let blob = repo.odb().read(&entry.oid)?;
-    if entry.mode == MODE_SYMLINK {
+    if entry.mode == FileMode::SYMLINK {
         let target = String::from_utf8(blob.data).map_err(|_| StashError::SymlinkNotUtf8)?;
         if file_path.exists() || file_path.symlink_metadata().is_ok() {
             let _ = fs::remove_file(&file_path);
@@ -2517,7 +2508,7 @@ fn index_entry_stat_clean(
     stat_policy: crate::index::StatMatchPolicy,
     trust_filemode: bool,
 ) -> bool {
-    if ie.stat_cache_unset() || ie.mode == MODE_GITLINK {
+    if ie.stat_cache_unset() || ie.mode == FileMode::GITLINK {
         return false;
     }
     let Ok(rel) = std::str::from_utf8(&ie.path) else {
@@ -2526,7 +2517,7 @@ fn index_entry_stat_clean(
     let Ok(meta) = fs::symlink_metadata(work_tree.join(rel)) else {
         return false;
     };
-    if meta.is_dir() || meta.file_type().is_symlink() != (ie.mode == MODE_SYMLINK) {
+    if meta.is_dir() || meta.file_type().is_symlink() != (ie.mode == FileMode::SYMLINK) {
         return false;
     }
     if trust_filemode && crate::diff::mode_from_metadata(&meta) != ie.mode {
@@ -2574,7 +2565,7 @@ fn check_stash_local_changes<'a>(
         let Some(idx_entry) = current_index.get(path, 0) else {
             continue;
         };
-        if idx_entry.mode == MODE_GITLINK {
+        if idx_entry.mode == FileMode::GITLINK {
             continue;
         }
         if index_entry_stat_clean(
@@ -2663,7 +2654,7 @@ fn untracked_stash_restore_collisions(
 ) -> Vec<Vec<u8>> {
     let mut collisions = Vec::new();
     for entry in ut_entries {
-        if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
+        if entry.mode == FileMode::GITLINK || entry.mode == FileMode::TREE {
             continue;
         }
         let added = entry.path.as_slice();
@@ -2705,7 +2696,7 @@ fn check_stash_untracked_restore(
     }
     let ut_file_paths: HashSet<&[u8]> = ut_entries
         .iter()
-        .filter(|e| e.mode != MODE_GITLINK && e.mode != MODE_TREE)
+        .filter(|e| e.mode != FileMode::GITLINK && e.mode != FileMode::TREE)
         .map(|e| e.path.as_slice())
         .collect();
     let existing_paths: Vec<Vec<u8>> =
@@ -2748,7 +2739,7 @@ fn untracked_on_disk_matches_stash(
     let Some(entry) = ut_entries.iter().find(|e| storage_string(&e.path) == path) else {
         return Ok(false);
     };
-    if entry.mode == MODE_GITLINK || entry.mode == MODE_TREE {
+    if entry.mode == FileMode::GITLINK || entry.mode == FileMode::TREE {
         return Ok(false);
     }
     let abs = crate::index::worktree_path_from_index_rel(work_tree, &entry.path);
@@ -2886,7 +2877,7 @@ fn apply_stash_commit(
         .filter(|entry| entry.stage() == 0 && entry.skip_worktree())
         .map(|entry| entry.path.clone())
         .collect();
-    let assume_unchanged_before: BTreeMap<Vec<u8>, (ObjectId, u32)> = new_index
+    let assume_unchanged_before: BTreeMap<Vec<u8>, (ObjectId, FileMode)> = new_index
         .entries
         .iter()
         .filter(|entry| entry.stage() == 0 && entry.assume_unchanged())
@@ -3057,7 +3048,7 @@ fn apply_stash_commit(
                     prepared_dirs.insert(parent.to_path_buf());
                 }
             }
-            if entry.mode == MODE_GITLINK {
+            if entry.mode == FileMode::GITLINK {
                 let rel_display = storage_string(path);
                 checkout_journal.spool_remove(&rel_display)?;
                 if file_path.is_file() || file_path.is_symlink() {
@@ -3080,7 +3071,7 @@ fn apply_stash_commit(
                 continue;
             }
 
-            if !head_moved && entry.mode != MODE_SYMLINK {
+            if !head_moved && entry.mode != FileMode::SYMLINK {
                 let file_attrs = worktree_rules.file_attrs(&String::from_utf8_lossy(path), false);
                 // The bulk driver matches attributes against its stored path strings. Keep
                 // encoded names on this writer, which matches against the original name.
@@ -3103,7 +3094,7 @@ fn apply_stash_commit(
             let rel_display = storage_string(path);
             checkout_journal.preserve_before_write(&rel_display)?;
 
-            if entry.mode == MODE_SYMLINK {
+            if entry.mode == FileMode::SYMLINK {
                 let target =
                     String::from_utf8(stash_blob.data).map_err(|_| StashError::SymlinkNotUtf8)?;
                 if file_path.exists() || file_path.symlink_metadata().is_ok() {
@@ -3200,7 +3191,7 @@ fn apply_stash_commit(
                         let original_mode = new_index
                             .get(path_bytes, 0)
                             .map(|e| e.mode)
-                            .unwrap_or(crate::index::MODE_REGULAR);
+                            .unwrap_or(crate::objects::FileMode::REGULAR);
                         // Remove existing stage-0 entry
                         new_index
                             .entries
@@ -3273,10 +3264,8 @@ fn apply_stash_commit(
                         new_path: Some(crate::repo_relpath::storage_string(
                             job.rel_path.as_bytes(),
                         )),
-                        old_mode: FileMode::new(
-                            base.map(|e| e.mode).unwrap_or(crate::index::MODE_REGULAR),
-                        ),
-                        new_mode: FileMode::new(job.mode),
+                        old_mode: base.map(|e| e.mode).unwrap_or(FileMode::REGULAR),
+                        new_mode: job.mode,
                         old_oid: base.map(|e| e.oid).unwrap_or_else(zero_oid),
                         new_oid: job.oid,
                         score: None,
@@ -3380,7 +3369,7 @@ fn apply_stash_commit(
             for path in &touched {
                 if let Some(te) = StashTreeEntry::lookup(current_head_entries, path) {
                     let path_bytes = path.as_slice();
-                    let size = if te.mode == MODE_SYMLINK || te.mode == MODE_GITLINK {
+                    let size = if te.mode == FileMode::SYMLINK || te.mode == FileMode::GITLINK {
                         0u32
                     } else {
                         repo.odb().read_info(&te.oid)?.size as u32
@@ -3418,11 +3407,12 @@ fn apply_stash_commit(
                             None => true,
                         };
                         if had_staged {
-                            let size = if ie.mode == MODE_SYMLINK || ie.mode == MODE_GITLINK {
-                                0u32
-                            } else {
-                                repo.odb().read_info(&ie.oid)?.size as u32
-                            };
+                            let size =
+                                if ie.mode == FileMode::SYMLINK || ie.mode == FileMode::GITLINK {
+                                    0u32
+                                } else {
+                                    repo.odb().read_info(&ie.oid)?.size as u32
+                                };
                             new_index.stage_file(IndexEntry {
                                 ctime_sec: 0,
                                 ctime_nsec: 0,
@@ -3791,7 +3781,8 @@ mod coverage_tests {
 
     use super::*;
     use crate::environment::RepositoryOptions;
-    use crate::index::{entry_from_stat, MODE_REGULAR};
+    use crate::index::entry_from_stat;
+    use crate::objects::FileMode;
     use crate::refs;
     use std::fs;
     use std::path::Path;
@@ -3813,7 +3804,7 @@ mod coverage_tests {
         fs::write(&wt, b"base\n").unwrap();
         let mut index = repo.load_index().unwrap();
         let oid = repo.odb().write(ObjectKind::Blob, b"base\n").unwrap();
-        index.add_or_replace(entry_from_stat(&wt, b"f", oid, MODE_REGULAR).unwrap());
+        index.add_or_replace(entry_from_stat(&wt, b"f", oid, FileMode::REGULAR).unwrap());
         index.sort();
         repo.write_index(&mut index).unwrap();
         let tree = write_stash_tree_from_index(&repo, &mut index).unwrap();
@@ -3876,8 +3867,13 @@ mod coverage_tests {
         for (path, bytes) in [("f", b"base\n" as &[u8]), ("g", b"also\n")] {
             let oid = repo.odb().write(ObjectKind::Blob, bytes).unwrap();
             index.add_or_replace(
-                entry_from_stat(&tmp.path().join(path), path.as_bytes(), oid, MODE_REGULAR)
-                    .unwrap(),
+                entry_from_stat(
+                    &tmp.path().join(path),
+                    path.as_bytes(),
+                    oid,
+                    FileMode::REGULAR,
+                )
+                .unwrap(),
             );
         }
         index.sort();
@@ -4061,7 +4057,10 @@ mod coverage_tests {
                 .collect::<Vec<_>>(),
             [b"added".as_slice(), b"edited", b"removed"]
         );
-        assert_eq!(delta.changes[1].1.as_ref().unwrap().mode, 0o100755);
+        assert_eq!(
+            delta.changes[1].1.as_ref().unwrap().mode,
+            FileMode::EXECUTABLE
+        );
         assert!(delta.changes[2].1.is_none());
         assert!(stash_tree_entry_at_path(&repo, base, b"removed/child")
             .unwrap()

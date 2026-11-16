@@ -58,24 +58,74 @@ impl NewCommit {
     }
 }
 
+/// Replacement fields for [`CommitEdit::Rewrite`]; an unset field keeps the commit's own value.
+///
+/// ```
+/// use grit_lib::revwalk::history::{CommitEdit, CommitRewrite};
+///
+/// let edit: CommitEdit = CommitRewrite::default()
+///     .with_message("Reworded subject\n")
+///     .into();
+/// assert!(matches!(edit, CommitEdit::Rewrite(r) if r.message.as_deref() == Some("Reworded subject\n")));
+/// ```
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[non_exhaustive]
+pub struct CommitRewrite {
+    /// Replacement root tree.
+    pub tree: Option<ObjectId>,
+    /// Replacement commit message.
+    pub message: Option<String>,
+    /// Replacement author header line (`Name <email> <seconds> <±HHMM>`), kept as raw text
+    /// so an existing commit's author survives byte for byte.
+    pub author: Option<String>,
+    /// Replacement parent list (callers chaining edits should pass mapped OIDs).
+    pub parents: Option<Vec<ObjectId>>,
+}
+
+impl CommitRewrite {
+    /// Sets [`tree`](Self::tree).
+    #[must_use]
+    pub const fn with_tree(mut self, tree: ObjectId) -> Self {
+        self.tree = Some(tree);
+        self
+    }
+
+    /// Sets [`message`](Self::message).
+    #[must_use]
+    pub fn with_message(mut self, message: impl Into<String>) -> Self {
+        self.message = Some(message.into());
+        self
+    }
+
+    /// Sets [`author`](Self::author).
+    #[must_use]
+    pub fn with_author(mut self, author: impl Into<String>) -> Self {
+        self.author = Some(author.into());
+        self
+    }
+
+    /// Sets [`parents`](Self::parents).
+    #[must_use]
+    pub fn with_parents(mut self, parents: Vec<ObjectId>) -> Self {
+        self.parents = Some(parents);
+        self
+    }
+}
+
+impl From<CommitRewrite> for CommitEdit {
+    fn from(rewrite: CommitRewrite) -> Self {
+        Self::Rewrite(rewrite)
+    }
+}
+
 /// Per-commit edit applied during planning.
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum CommitEdit {
     /// Replace fields on the commit, then replay descendants.
     ///
-    /// Build it with [`CommitEdit::rewrite`].
-    #[non_exhaustive]
-    Rewrite {
-        /// Optional replacement tree OID.
-        tree: Option<ObjectId>,
-        /// Optional replacement message.
-        message: Option<String>,
-        /// Optional replacement author ident line.
-        author: Option<String>,
-        /// Optional replacement parent list (mapped OIDs should be used by callers when chaining).
-        parents: Option<Vec<ObjectId>>,
-    },
+    /// Build it with [`CommitEdit::rewrite`] or `CommitRewrite::default().with_…().into()`.
+    Rewrite(CommitRewrite),
     /// Omit the commit; descendants replay onto its mapped first parent.
     Drop,
     /// Insert `commit` before the mapped original, which becomes the insert's child.
@@ -118,28 +168,14 @@ pub enum CommitEdit {
 }
 
 impl CommitEdit {
-    /// Creates a [`CommitEdit::Rewrite`] that replaces the given fields; `None` keeps the
-    /// commit's own value.
+    /// Creates a [`CommitEdit::Rewrite`] that replaces the fields set on `rewrite`.
     ///
     /// # Parameters
     ///
-    /// - `tree`: replacement root tree.
-    /// - `message`: replacement message.
-    /// - `author`: replacement author ident line.
-    /// - `parents`: replacement parent list.
+    /// - `rewrite`: the replacement fields; unset fields keep the commit's own value.
     #[must_use]
-    pub fn rewrite(
-        tree: Option<ObjectId>,
-        message: Option<String>,
-        author: Option<String>,
-        parents: Option<Vec<ObjectId>>,
-    ) -> Self {
-        Self::Rewrite {
-            tree,
-            message,
-            author,
-            parents,
-        }
+    pub const fn rewrite(rewrite: CommitRewrite) -> Self {
+        Self::Rewrite(rewrite)
     }
 
     /// Creates a [`CommitEdit::SplitBefore`] that inserts `insert` before the commit.

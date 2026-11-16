@@ -75,7 +75,7 @@ fn commit_file(
         &wt.join(path),
         path.as_bytes(),
         oid,
-        grit_lib::index::MODE_REGULAR,
+        grit_lib::objects::FileMode::REGULAR,
     )
     .expect("entry");
     index.add_or_replace(entry);
@@ -311,7 +311,7 @@ fn commit_tree(repo: &Repository, updates: &[(&str, &str)], parent: Option<Objec
             &abs,
             path.as_bytes(),
             oid,
-            grit_lib::index::MODE_REGULAR,
+            grit_lib::objects::FileMode::REGULAR,
         )
         .expect("entry");
         index.add_or_replace(entry);

@@ -1040,7 +1040,8 @@ mod tests {
     use super::*;
     use crate::config::ConfigSet;
     use crate::environment::Environment;
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::{HashAlgo, ObjectKind};
     use std::fs;
 
@@ -1052,7 +1053,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 1,
             ino,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 1,
             gid: 1,
             size: 3,

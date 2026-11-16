@@ -20,7 +20,6 @@ use crate::diff::{
 };
 use crate::error::{DiffError, Error, PathspecResolveError, Result};
 use crate::index::Index;
-use crate::index::MODE_TREE;
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::parallel::{par_map, ParallelOp, ThreadPolicy};
@@ -993,7 +992,7 @@ pub(super) fn diff_index_to_tree_for_paths(
         };
         let (idx_oid, idx_mode) = index_entry
             .map(|e| (e.oid, e.mode))
-            .unwrap_or((ObjectId::zero(), 0));
+            .unwrap_or((ObjectId::zero(), FileMode::ABSENT));
         let (tree_oid, tree_mode) = tree_side.unwrap_or((ObjectId::zero(), FileMode::new(0)));
         if index_entry.is_none() && tree_side.is_none() {
             continue;
@@ -1004,7 +1003,7 @@ pub(super) fn diff_index_to_tree_for_paths(
                 old_path: None,
                 new_path: Some(path.clone()),
                 old_mode: FileMode::ABSENT,
-                new_mode: FileMode::new(idx_mode),
+                new_mode: idx_mode,
                 old_oid: ObjectId::zero(),
                 new_oid: idx_oid,
                 score: None,
@@ -1024,13 +1023,13 @@ pub(super) fn diff_index_to_tree_for_paths(
             });
             continue;
         }
-        if idx_oid != tree_oid || idx_mode != tree_mode.bits() {
+        if idx_oid != tree_oid || idx_mode != tree_mode {
             result.push(DiffEntry {
-                status: DiffStatus::for_content_change(tree_mode.bits(), idx_mode),
+                status: DiffStatus::for_content_change(tree_mode, idx_mode),
                 old_path: Some(path.clone()),
                 new_path: Some(path.clone()),
                 old_mode: tree_mode,
-                new_mode: FileMode::new(idx_mode),
+                new_mode: idx_mode,
                 old_oid: tree_oid,
                 new_oid: idx_oid,
                 score: None,
@@ -1397,7 +1396,7 @@ fn path_is_exact_tracked_file(
 ) -> Result<bool> {
     let path_bytes = path.as_bytes();
     if let Some(entry) = index.get(path_bytes, 0) {
-        return Ok(entry.mode != MODE_TREE);
+        return Ok(entry.mode != FileMode::TREE);
     }
     match head_tree {
         Some(tree) => Ok(repo.odb().tree_entry_at_path(&tree, path_bytes)?.is_some()),

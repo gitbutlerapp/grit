@@ -176,7 +176,7 @@ pub fn enrich_combined_path_renames(
         };
         side.status = CombinedParentStatus::Renamed;
         side.oid = entry.oid;
-        side.mode = entry.mode.bits();
+        side.mode = entry.mode;
         side.rename_from = Some(src.clone());
     }
 }
@@ -1214,18 +1214,18 @@ mod line_coverage_tests {
         let merge_oid = blob_oid_at_path(&odb, &merge_tree, "f.txt").expect("merge blob");
         let mut path = CombinedDiffPath {
             path: "f.txt".into(),
-            merge_mode: 0o100644,
+            merge_mode: FileMode::REGULAR,
             merge_oid,
             parents: vec![
                 CombinedParentSide {
                     status: CombinedParentStatus::Modified,
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     oid: p1_oid,
                     rename_from: None,
                 },
                 CombinedParentSide {
                     status: CombinedParentStatus::Modified,
-                    mode: 0o100644,
+                    mode: FileMode::REGULAR,
                     oid: blob_oid_at_path(&odb, &merge_tree, "f.txt").expect("oid"),
                     rename_from: Some("old-f.txt".into()),
                 },

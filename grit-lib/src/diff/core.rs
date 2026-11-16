@@ -38,7 +38,7 @@ use crate::diff_rename_parallel::{
     parallel_map_indices, parse_rename_limit,
 };
 use crate::error::{Error, Result, SubmoduleError};
-use crate::index::{CacheTreeNode, Index, IndexEntry, MODE_SYMLINK, MODE_TREE};
+use crate::index::{CacheTreeNode, Index, IndexEntry};
 use crate::index::{IndexCorrupt, IndexCorruptReason, IndexError};
 use crate::objects::{
     parse_commit, CommitData, FileMode, ObjectId, ObjectKind, TreeEntry, TreeEntryRef, TreeRefIter,
@@ -2464,8 +2464,8 @@ impl DiffStatus {
     /// otherwise, so a permission-only change stays `Modified`. Every diff mode
     /// (tree, index, work tree) shares this rule.
     #[must_use]
-    pub(crate) fn for_content_change(old_mode: u32, new_mode: u32) -> Self {
-        if old_mode & 0o170000 != new_mode & 0o170000 {
+    pub(crate) fn for_content_change(old_mode: FileMode, new_mode: FileMode) -> Self {
+        if old_mode.bits() & 0o170000 != new_mode.bits() & 0o170000 {
             Self::TypeChanged
         } else {
             Self::Modified
@@ -2717,7 +2717,7 @@ fn tree_walk_directory_relevant(
         return true;
     }
     if let Some(matcher) = pathspec_matcher {
-        return matcher.matches_entry(dir, 0o040000)
+        return matcher.matches_entry(dir, FileMode::TREE)
             || crate::pathspec::pathspec_wants_descent_for_rev_tree(dir, pathspecs);
     }
     crate::pathspec::pathspec_entry_is_relevant(dir, true, pathspecs)
@@ -3210,7 +3210,7 @@ impl<'a> WalkEntries<'a> {
     fn next_entry(&mut self) -> Result<Option<TreeEntryRef<'a>>> {
         match self {
             Self::Parsed(entries) => Ok(entries.next().map(|entry| TreeEntryRef {
-                mode: entry.mode.bits(),
+                mode: entry.mode,
                 name: &entry.name,
                 oid: entry.oid,
             })),
@@ -3288,9 +3288,9 @@ fn diff_tree_entries_count(
             (Some(o), Some(n)) => {
                 let cmp = crate::objects::tree_name_cmp(
                     &o.name,
-                    is_tree_mode(o.mode.bits()),
+                    is_tree_mode(o.mode),
                     &n.name,
-                    is_tree_mode(n.mode.bits()),
+                    is_tree_mode(n.mode),
                 );
                 match cmp {
                     std::cmp::Ordering::Less => {
@@ -3303,11 +3303,10 @@ fn diff_tree_entries_count(
                     }
                     std::cmp::Ordering::Equal => {
                         if o.oid != n.oid
-                            || crate::index::canon_mode(o.mode.bits())
-                                != crate::index::canon_mode(n.mode.bits())
+                            || crate::index::canon_mode(o.mode) != crate::index::canon_mode(n.mode)
                         {
                             let path = crate::repo_relpath::format_path_stored(prefix, &o.name);
-                            if is_tree_mode(o.mode.bits()) && is_tree_mode(n.mode.bits()) {
+                            if is_tree_mode(o.mode) && is_tree_mode(n.mode) {
                                 if show_trees {
                                     *count += 1;
                                 }
@@ -3317,7 +3316,7 @@ fn diff_tree_entries_count(
                                     Some(&n.oid),
                                     &path,
                                 )?;
-                            } else if is_tree_mode(o.mode.bits()) != is_tree_mode(n.mode.bits()) {
+                            } else if is_tree_mode(o.mode) != is_tree_mode(n.mode) {
                                 emit_deleted_count(odb, o, prefix, show_trees, count)?;
                                 emit_added_count(odb, n, prefix, show_trees, count)?;
                             } else {
@@ -3352,7 +3351,7 @@ fn emit_deleted_count(
     count: &mut usize,
 ) -> Result<()> {
     let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
-    if is_tree_mode(entry.mode.bits()) {
+    if is_tree_mode(entry.mode) {
         if show_trees {
             *count += 1;
         }
@@ -3371,7 +3370,7 @@ fn emit_added_count(
     count: &mut usize,
 ) -> Result<()> {
     let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
-    if is_tree_mode(entry.mode.bits()) {
+    if is_tree_mode(entry.mode) {
         if show_trees {
             *count += 1;
         }
@@ -3444,8 +3443,8 @@ fn diff_tree_entries_opts(
                                         status: DiffStatus::Modified,
                                         old_path: Some(path.clone()),
                                         new_path: Some(path.clone()),
-                                        old_mode: FileMode::new(crate::index::canon_mode(o.mode)),
-                                        new_mode: FileMode::new(crate::index::canon_mode(n.mode)),
+                                        old_mode: crate::index::canon_mode(o.mode),
+                                        new_mode: crate::index::canon_mode(n.mode),
                                         old_oid: o.oid,
                                         new_oid: n.oid,
                                         score: None,
@@ -3473,8 +3472,8 @@ fn diff_tree_entries_opts(
                                     status: DiffStatus::for_content_change(o.mode, n.mode),
                                     old_path: Some(path.clone()),
                                     new_path: Some(path),
-                                    old_mode: FileMode::new(crate::index::canon_mode(o.mode)),
-                                    new_mode: FileMode::new(crate::index::canon_mode(n.mode)),
+                                    old_mode: crate::index::canon_mode(o.mode),
+                                    new_mode: crate::index::canon_mode(n.mode),
                                     old_oid: o.oid,
                                     new_oid: n.oid,
                                     score: None,
@@ -3537,7 +3536,7 @@ fn emit_deleted_tree_from_index(
                 status: DiffStatus::Deleted,
                 old_path: Some(path),
                 new_path: None,
-                old_mode: FileMode::new(ie.mode),
+                old_mode: ie.mode,
                 new_mode: FileMode::ABSENT,
                 old_oid: ie.oid,
                 new_oid: zero_oid(),
@@ -3569,7 +3568,7 @@ fn emit_deleted_tree_from_index(
             status: DiffStatus::Deleted,
             old_path: Some(path.to_owned()),
             new_path: None,
-            old_mode: FileMode::new(ie.mode),
+            old_mode: ie.mode,
             new_mode: FileMode::ABSENT,
             old_oid: ie.oid,
             new_oid: zero_oid(),
@@ -3597,7 +3596,7 @@ fn emit_deleted_opts(
                 status: DiffStatus::Deleted,
                 old_path: Some(path.clone()),
                 new_path: None,
-                old_mode: FileMode::new(entry.mode),
+                old_mode: entry.mode,
                 new_mode: FileMode::ABSENT,
                 old_oid: entry.oid,
                 new_oid: zero_oid(),
@@ -3629,7 +3628,7 @@ fn emit_deleted_opts(
             status: DiffStatus::Deleted,
             old_path: Some(path.clone()),
             new_path: None,
-            old_mode: FileMode::new(crate::index::canon_mode(entry.mode)),
+            old_mode: crate::index::canon_mode(entry.mode),
             new_mode: FileMode::ABSENT,
             old_oid: entry.oid,
             new_oid: zero_oid(),
@@ -3655,7 +3654,7 @@ fn emit_added_opts(
                 old_path: None,
                 new_path: Some(crate::repo_relpath::sparse_directory_stored_path(&path)),
                 old_mode: FileMode::ABSENT,
-                new_mode: FileMode::new(MODE_TREE),
+                new_mode: FileMode::TREE,
                 old_oid: zero_oid(),
                 new_oid: entry.oid,
                 score: None,
@@ -3668,7 +3667,7 @@ fn emit_added_opts(
                 old_path: None,
                 new_path: Some(path.clone()),
                 old_mode: FileMode::ABSENT,
-                new_mode: FileMode::new(entry.mode),
+                new_mode: entry.mode,
                 old_oid: zero_oid(),
                 new_oid: entry.oid,
                 score: None,
@@ -3692,7 +3691,7 @@ fn emit_added_opts(
             old_path: None,
             new_path: Some(path),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(crate::index::canon_mode(entry.mode)),
+            new_mode: crate::index::canon_mode(entry.mode),
             old_oid: zero_oid(),
             new_oid: entry.oid,
             score: None,
@@ -3901,7 +3900,7 @@ fn diff_index_to_tree_flatten(
 
     let mut result = Vec::new();
     let mut stage0_paths = std::collections::BTreeSet::new();
-    let mut unmerged_modes: std::collections::BTreeMap<String, (u8, u32)> =
+    let mut unmerged_modes: std::collections::BTreeMap<String, (u8, FileMode)> =
         std::collections::BTreeMap::new();
 
     // Check index entries against tree
@@ -3950,7 +3949,7 @@ fn diff_index_to_tree_flatten(
             }
             continue;
         }
-        if ignore_submodules && ie.mode == 0o160000 {
+        if ignore_submodules && ie.mode == FileMode::GITLINK {
             let _ = tree_map.remove(path.as_str());
             stage0_paths.insert(path.clone());
             continue;
@@ -3968,8 +3967,8 @@ fn diff_index_to_tree_flatten(
                         status: DiffStatus::for_content_change(tree_mode, index_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path),
-                        old_mode: FileMode::new(tree_mode),
-                        new_mode: FileMode::new(index_mode),
+                        old_mode: tree_mode,
+                        new_mode: index_mode,
                         old_oid: te.oid,
                         new_oid: ie.oid,
                         score: None,
@@ -3983,7 +3982,7 @@ fn diff_index_to_tree_flatten(
                     old_path: None,
                     new_path: Some(path),
                     old_mode: FileMode::ABSENT,
-                    new_mode: FileMode::new(ie.mode),
+                    new_mode: ie.mode,
                     old_oid: zero_oid(),
                     new_oid: ie.oid,
                     score: None,
@@ -4007,7 +4006,7 @@ fn diff_index_to_tree_flatten(
 fn diff_index_to_tree_finish_unmerged_and_deleted(
     ignore_submodules: bool,
     tree_map: &mut std::collections::BTreeMap<&str, &FlatEntry>,
-    unmerged_modes: &std::collections::BTreeMap<String, (u8, u32)>,
+    unmerged_modes: &std::collections::BTreeMap<String, (u8, FileMode)>,
     stage0_paths: &std::collections::BTreeSet<String>,
     result: &mut Vec<DiffEntry>,
 ) {
@@ -4021,7 +4020,7 @@ fn diff_index_to_tree_finish_unmerged_and_deleted(
             old_path: Some(path.clone()),
             new_path: Some(path.clone()),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(*mode),
+            new_mode: *mode,
             old_oid: zero_oid(),
             new_oid: zero_oid(),
             score: None,
@@ -4030,14 +4029,14 @@ fn diff_index_to_tree_finish_unmerged_and_deleted(
 
     // Remaining tree entries not in index → deleted
     for (path, te) in std::mem::take(tree_map) {
-        if ignore_submodules && te.mode == 0o160000 {
+        if ignore_submodules && te.mode == FileMode::GITLINK {
             continue;
         }
         result.push(DiffEntry {
             status: DiffStatus::Deleted,
             old_path: Some(path.to_owned()),
             new_path: None,
-            old_mode: FileMode::new(te.mode),
+            old_mode: te.mode,
             new_mode: FileMode::ABSENT,
             old_oid: te.oid,
             new_oid: zero_oid(),
@@ -4082,7 +4081,7 @@ fn diff_index_to_tree_with_cache_tree(
         if ie.stage() != 0 {
             continue;
         }
-        if ignore_submodules && ie.mode == 0o160000 {
+        if ignore_submodules && ie.mode == FileMode::GITLINK {
             continue;
         }
         result.push(DiffEntry {
@@ -4090,7 +4089,7 @@ fn diff_index_to_tree_with_cache_tree(
             old_path: None,
             new_path: Some(path),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(ie.mode),
+            new_mode: ie.mode,
             old_oid: zero_oid(),
             new_oid: ie.oid,
             score: None,
@@ -4153,7 +4152,7 @@ fn peek_index_level_entry<'a>(
                 name: &rel[..slash],
             });
         }
-        if ignore_submodules && ie.mode == 0o160000 {
+        if ignore_submodules && ie.mode == FileMode::GITLINK {
             *cursor += 1;
             continue;
         }
@@ -4291,7 +4290,7 @@ fn diff_index_tree_at(
                     IndexLevelKind::Blob { name, .. } => (*name, false),
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
-                let t_is_tree = is_tree_mode(t_entry.mode.bits());
+                let t_is_tree = is_tree_mode(t_entry.mode);
                 let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 match cmp {
                     std::cmp::Ordering::Less => {
@@ -4339,18 +4338,18 @@ fn diff_index_tree_at(
                             };
                             *walk.idx_cursor += 1;
                             if t_entry.oid != ie.oid
-                                || crate::index::canon_mode(t_entry.mode.bits())
+                                || crate::index::canon_mode(t_entry.mode)
                                     != crate::index::canon_mode(ie.mode)
                             {
                                 let path = String::from_utf8_lossy(&ie.path).into_owned();
-                                let tree_mode = crate::index::canon_mode(t_entry.mode.bits());
+                                let tree_mode = crate::index::canon_mode(t_entry.mode);
                                 let index_mode = crate::index::canon_mode(ie.mode);
                                 walk.result.push(DiffEntry {
                                     status: DiffStatus::for_content_change(tree_mode, index_mode),
                                     old_path: Some(path.clone()),
                                     new_path: Some(path),
-                                    old_mode: FileMode::new(tree_mode),
-                                    new_mode: FileMode::new(index_mode),
+                                    old_mode: tree_mode,
+                                    new_mode: index_mode,
                                     old_oid: t_entry.oid,
                                     new_oid: ie.oid,
                                     score: None,
@@ -4414,16 +4413,16 @@ fn emit_index_tree_deleted(
         return Ok(());
     }
     let path = String::from_utf8_lossy(&join_index_path(dir_prefix, &entry.name)).into_owned();
-    if is_tree_mode(entry.mode.bits()) {
+    if is_tree_mode(entry.mode) {
         for fe in flatten_tree(odb, &entry.oid, &path)? {
-            if ignore_submodules && fe.mode == 0o160000 {
+            if ignore_submodules && fe.mode == FileMode::GITLINK {
                 continue;
             }
             result.push(DiffEntry {
                 status: DiffStatus::Deleted,
                 old_path: Some(fe.path.clone()),
                 new_path: None,
-                old_mode: FileMode::new(fe.mode),
+                old_mode: fe.mode,
                 new_mode: FileMode::ABSENT,
                 old_oid: fe.oid,
                 new_oid: zero_oid(),
@@ -4466,7 +4465,7 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &[u8]
                 old_path: None,
                 new_path: Some(path),
                 old_mode: FileMode::ABSENT,
-                new_mode: FileMode::new(ie.mode),
+                new_mode: ie.mode,
                 old_oid: zero_oid(),
                 new_oid: ie.oid,
                 score: None,
@@ -4502,7 +4501,7 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &[u8]
                 if ie.stage() != 0 || ie.intent_to_add() {
                     continue;
                 }
-                if walk.ignore_submodules && ie.mode == 0o160000 {
+                if walk.ignore_submodules && ie.mode == FileMode::GITLINK {
                     continue;
                 }
                 let path = String::from_utf8_lossy(&ie.path).into_owned();
@@ -4511,7 +4510,7 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &[u8]
                     old_path: None,
                     new_path: Some(path),
                     old_mode: FileMode::ABSENT,
-                    new_mode: FileMode::new(ie.mode),
+                    new_mode: ie.mode,
                     old_oid: zero_oid(),
                     new_oid: ie.oid,
                     score: None,
@@ -4526,7 +4525,7 @@ fn emit_index_tree_added(walk: &mut DiffIndexTreeWalk<'_, '_>, dir_prefix: &[u8]
 #[derive(Default)]
 pub(crate) struct HardResetIndexPlan {
     pub remove_paths: Vec<Vec<u8>>,
-    pub updates: Vec<(Vec<u8>, u32, ObjectId)>,
+    pub updates: Vec<(Vec<u8>, FileMode, ObjectId)>,
     pub insert_entries: Vec<IndexEntry>,
 }
 
@@ -4701,7 +4700,7 @@ fn rebuild_hard_reset_cache_tree_at(
                     IndexLevelKind::Blob { name, .. } => (*name, false),
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
-                let t_is_tree = is_tree_mode(t_entry.mode.bits());
+                let t_is_tree = is_tree_mode(t_entry.mode);
                 let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 if cmp != std::cmp::Ordering::Equal {
                     return Err(IndexError::corrupt(IndexCorrupt::new(
@@ -4826,7 +4825,7 @@ fn hard_reset_align_index_tree_at(
                     IndexLevelKind::Blob { name, .. } => (*name, false),
                     IndexLevelKind::Tree { name } => (*name, true),
                 };
-                let t_is_tree = is_tree_mode(t_entry.mode.bits());
+                let t_is_tree = is_tree_mode(t_entry.mode);
                 let cmp = crate::objects::tree_name_cmp(t_name, t_is_tree, i_name, i_is_tree);
                 match cmp {
                     std::cmp::Ordering::Less => {
@@ -4867,12 +4866,12 @@ fn hard_reset_align_index_tree_at(
                             };
                             *walk.idx_cursor += 1;
                             if t_entry.oid != ie.oid
-                                || crate::index::canon_mode(t_entry.mode.bits())
+                                || crate::index::canon_mode(t_entry.mode)
                                     != crate::index::canon_mode(ie.mode)
                             {
                                 walk.plan.updates.push((
                                     ie.path.clone(),
-                                    crate::index::canon_mode(t_entry.mode.bits()),
+                                    crate::index::canon_mode(t_entry.mode),
                                     t_entry.oid,
                                 ));
                             }
@@ -4960,7 +4959,7 @@ fn hard_reset_plan_tree_only(
         return Ok(());
     }
     let path = join_index_path(dir_prefix, &entry.name);
-    if is_tree_mode(entry.mode.bits()) {
+    if is_tree_mode(entry.mode) {
         if hard_reset_sparse_excludes_tree(walk, &path) {
             walk.plan
                 .insert_entries
@@ -4974,11 +4973,9 @@ fn hard_reset_plan_tree_only(
             )?;
         }
     } else {
-        walk.plan.insert_entries.push(hard_reset_index_tree_row(
-            path,
-            entry.mode.bits(),
-            entry.oid,
-        ));
+        walk.plan
+            .insert_entries
+            .push(hard_reset_index_tree_row(path, entry.mode, entry.oid));
     }
     Ok(())
 }
@@ -5001,12 +4998,12 @@ fn hard_reset_sparse_directory_row(mut path: Vec<u8>, oid: ObjectId) -> IndexEnt
     if !path.ends_with(b"/") {
         path.push(b'/');
     }
-    let mut row = hard_reset_index_tree_row(path, MODE_TREE, oid);
+    let mut row = hard_reset_index_tree_row(path, FileMode::TREE, oid);
     row.set_skip_worktree(true);
     row
 }
 
-fn hard_reset_index_tree_row(path: Vec<u8>, mode: u32, oid: ObjectId) -> IndexEntry {
+fn hard_reset_index_tree_row(path: Vec<u8>, mode: FileMode, oid: ObjectId) -> IndexEntry {
     IndexEntry {
         ctime_sec: 0,
         ctime_nsec: 0,
@@ -5038,10 +5035,10 @@ fn hard_reset_append_entries_from_tree(
             path.push(b'/');
         }
         path.extend_from_slice(&te.name);
-        if is_tree_mode(te.mode.bits()) {
+        if is_tree_mode(te.mode) {
             hard_reset_append_entries_from_tree(odb, &te.oid, &path, out)?;
         } else {
-            out.push(hard_reset_index_tree_row(path, te.mode.bits(), te.oid));
+            out.push(hard_reset_index_tree_row(path, te.mode, te.oid));
         }
     }
     Ok(())
@@ -5254,13 +5251,17 @@ fn poll_diff_cancel(
 struct StagingHashJob {
     entry_index: usize,
     /// Worktree mode after [`crate::index::WorktreeModePolicy`] against the entry's mode.
-    worktree_mode: u32,
+    worktree_mode: FileMode,
     /// `None` when the path has default attributes, which is the common case.
     file_attrs: Option<Box<crate::crlf::FileAttrs>>,
 }
 
 impl StagingHashJob {
-    fn new(entry_index: usize, worktree_mode: u32, file_attrs: crate::crlf::FileAttrs) -> Self {
+    fn new(
+        entry_index: usize,
+        worktree_mode: FileMode,
+        file_attrs: crate::crlf::FileAttrs,
+    ) -> Self {
         let file_attrs =
             (file_attrs != crate::crlf::FileAttrs::default()).then(|| Box::new(file_attrs));
         Self {
@@ -5374,7 +5375,7 @@ fn parallel_process_blob_worktree_jobs(
         ParallelHashError::Task(err) => err,
     })?;
 
-    let mut changed: Vec<(usize, u32, ObjectId)> = jobs
+    let mut changed: Vec<(usize, FileMode, ObjectId)> = jobs
         .iter()
         .zip(new_oids)
         .filter_map(|(job, new_oid)| new_oid.map(|oid| (job.entry_index, job.worktree_mode, oid)))
@@ -5396,15 +5397,15 @@ fn parallel_process_blob_worktree_jobs(
 fn worktree_content_change_entry(
     ie: &IndexEntry,
     path: &str,
-    worktree_mode: u32,
+    worktree_mode: FileMode,
     new_oid: ObjectId,
 ) -> DiffEntry {
     DiffEntry {
         status: DiffStatus::for_content_change(ie.mode, worktree_mode),
         old_path: Some(path.to_owned()),
         new_path: Some(path.to_owned()),
-        old_mode: FileMode::new(ie.mode),
-        new_mode: FileMode::new(worktree_mode),
+        old_mode: ie.mode,
+        new_mode: worktree_mode,
         old_oid: ie.oid,
         new_oid,
         score: None,
@@ -5622,7 +5623,7 @@ fn try_push_status_modified_on_size_mismatch(
     ie: &IndexEntry,
     path_str_ref: &str,
     worktree_size: u32,
-    worktree_mode: u32,
+    worktree_mode: FileMode,
     raw_worktree_len: u64,
     for_status: bool,
     size_change_proves_modified: bool,
@@ -5697,7 +5698,7 @@ fn push_index_blob_worktree_diff(
                 status: DiffStatus::TypeChanged,
                 old_path: Some(path_owned.clone()),
                 new_path: Some(path_owned),
-                old_mode: FileMode::new(ie.mode),
+                old_mode: ie.mode,
                 new_mode: FileMode::new(0o160000),
                 old_oid: ie.oid,
                 new_oid: head,
@@ -5709,7 +5710,7 @@ fn push_index_blob_worktree_diff(
             status: DiffStatus::Deleted,
             old_path: Some(path_str_ref.to_owned()),
             new_path: None,
-            old_mode: FileMode::new(ie.mode),
+            old_mode: ie.mode,
             new_mode: FileMode::ABSENT,
             old_oid: ie.oid,
             new_oid: zero_oid(),
@@ -5909,7 +5910,7 @@ fn worktree_diff_pass1_index_entry(
     }
     let is_intent_to_add = ie.intent_to_add();
 
-    if ie.mode == 0o160000 {
+    if ie.mode == FileMode::GITLINK {
         let sub_dir =
             index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
         match fs::symlink_metadata(&sub_dir) {
@@ -5923,7 +5924,7 @@ fn worktree_diff_pass1_index_entry(
                         status: DiffStatus::Deleted,
                         old_path: Some(path_owned.clone()),
                         new_path: Some(path_owned),
-                        old_mode: FileMode::new(ie.mode),
+                        old_mode: ie.mode,
                         new_mode: FileMode::ABSENT,
                         old_oid: ie.oid,
                         new_oid: zero_oid(),
@@ -5952,8 +5953,8 @@ fn worktree_diff_pass1_index_entry(
                     status: DiffStatus::TypeChanged,
                     old_path: Some(path_owned.clone()),
                     new_path: Some(path_owned),
-                    old_mode: FileMode::new(ie.mode),
-                    new_mode: FileMode::new(worktree_mode),
+                    old_mode: ie.mode,
+                    new_mode: worktree_mode,
                     old_oid: ie.oid,
                     new_oid: worktree_oid,
                     score: None,
@@ -5983,8 +5984,8 @@ fn worktree_diff_pass1_index_entry(
                     status: DiffStatus::Modified,
                     old_path: Some(path_owned.clone()),
                     new_path: Some(path_owned),
-                    old_mode: FileMode::new(ie.mode),
-                    new_mode: FileMode::new(ie.mode),
+                    old_mode: ie.mode,
+                    new_mode: ie.mode,
                     old_oid: ie.oid,
                     new_oid,
                     score: None,
@@ -6020,8 +6021,8 @@ fn worktree_diff_pass1_index_entry(
                 status: DiffStatus::Modified,
                 old_path: Some(path_owned.clone()),
                 new_path: Some(path_owned),
-                old_mode: FileMode::new(ie.mode),
-                new_mode: FileMode::new(ie.mode),
+                old_mode: ie.mode,
+                new_mode: ie.mode,
                 old_oid: ie.oid,
                 new_oid,
                 score: None,
@@ -6055,7 +6056,7 @@ fn worktree_diff_pass1_index_entry(
                     old_path: None,
                     new_path: Some(path_str_ref.to_owned()),
                     old_mode: FileMode::ABSENT,
-                    new_mode: FileMode::new(worktree_mode),
+                    new_mode: worktree_mode,
                     old_oid: zero_oid(),
                     new_oid: worktree_oid,
                     score: None,
@@ -6069,7 +6070,7 @@ fn worktree_diff_pass1_index_entry(
                     status: DiffStatus::Deleted,
                     old_path: Some(path_str_ref.to_owned()),
                     new_path: None,
-                    old_mode: FileMode::new(ie.mode),
+                    old_mode: ie.mode,
                     new_mode: FileMode::ABSENT,
                     old_oid: ie.oid,
                     new_oid: zero_oid(),
@@ -6084,7 +6085,7 @@ fn worktree_diff_pass1_index_entry(
 
 #[inline]
 fn index_entry_needs_worktree_diff_pass1(ie: &IndexEntry) -> bool {
-    ie.mode == crate::index::MODE_GITLINK || ie.intent_to_add()
+    ie.mode == crate::objects::FileMode::GITLINK || ie.intent_to_add()
 }
 
 fn diff_index_to_worktree_inner(
@@ -6503,7 +6504,7 @@ fn diff_index_to_worktree_inner(
                     status: DiffStatus::Deleted,
                     old_path: Some(path_str_ref.to_owned()),
                     new_path: None,
-                    old_mode: FileMode::new(ie.mode),
+                    old_mode: ie.mode,
                     new_mode: FileMode::ABSENT,
                     old_oid: ie.oid,
                     new_oid: zero_oid(),
@@ -6562,7 +6563,7 @@ fn diff_index_to_worktree_inner(
                 // read it again. Staging hashes again because it needs the blob stored.
                 if !materialize_dirty_blobs
                     && !stat.is_dir
-                    && stat.git_mode != crate::index::MODE_SYMLINK
+                    && stat.git_mode != crate::objects::FileMode::SYMLINK
                     && RefreshContent::differs(refresh_checks.get(entry_index), &ie.oid)
                 {
                     result.push(worktree_content_change_entry(
@@ -6576,7 +6577,9 @@ fn diff_index_to_worktree_inner(
                 // Streaming jobs read regular files. Links and directories need the shared
                 // classifier; use the physical type so core.symlinks=false placeholders
                 // keep the regular-file fast path even with an effective symlink mode.
-                if parallel_blob_work && !stat.is_dir && stat.git_mode != crate::index::MODE_SYMLINK
+                if parallel_blob_work
+                    && !stat.is_dir
+                    && stat.git_mode != crate::objects::FileMode::SYMLINK
                 {
                     let stat_same = stat_matches_blob_stat(ie, &stat, stat_policy);
                     if stat_same
@@ -6644,8 +6647,8 @@ fn diff_index_to_worktree_inner(
                     // The scan's lstat already proves an unchanged, non-racy entry clean, and the
                     // stat refresh above may have just verified a racy entry by content; only
                     // re-stat paths that `push_index_blob_worktree_diff` has to inspect.
-                    let same_file_type = (worktree_mode == crate::index::MODE_SYMLINK)
-                        == (ie.mode == crate::index::MODE_SYMLINK);
+                    let same_file_type = (worktree_mode == crate::objects::FileMode::SYMLINK)
+                        == (ie.mode == crate::objects::FileMode::SYMLINK);
                     if !stat.is_dir
                         && worktree_mode == ie.mode
                         && ((refresh_content_verified[entry_index] && same_file_type)
@@ -6739,10 +6742,9 @@ fn diff_index_to_worktree_inner(
             materialize_dirty_blobs,
         )?;
 
-        let new_mode = wt_meta.as_ref().map_or_else(
-            || FileMode::ABSENT,
-            |meta| FileMode::new(mode_from_metadata(meta)),
-        );
+        let new_mode = wt_meta
+            .as_ref()
+            .map_or(FileMode::ABSENT, mode_from_metadata);
         result.push(DiffEntry {
             status: DiffStatus::Unmerged,
             old_path: Some(path.clone()),
@@ -6774,8 +6776,8 @@ fn diff_index_to_worktree_inner(
                         status: DiffStatus::for_content_change(base_entry.mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path),
-                        old_mode: FileMode::new(base_entry.mode),
-                        new_mode: FileMode::new(wt_mode),
+                        old_mode: base_entry.mode,
+                        new_mode: wt_mode,
                         old_oid: base_entry.oid,
                         new_oid: wt_oid,
                         score: None,
@@ -7083,7 +7085,7 @@ pub(crate) fn smudge_racily_clean_entries(
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> bool {
     use crate::crlf;
-    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    use crate::objects::FileMode;
 
     let Some(index_mtime) = index_mtime else {
         return false;
@@ -7110,7 +7112,10 @@ pub(crate) fn smudge_racily_clean_entries(
         if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
             continue;
         }
-        if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
+        if ie.mode != FileMode::REGULAR
+            && ie.mode != FileMode::EXECUTABLE
+            && ie.mode != FileMode::SYMLINK
+        {
             continue;
         }
         if ie.size == 0 {
@@ -7237,7 +7242,7 @@ impl<'a> WorktreeEntryComparer<'a> {
             self.ignorecase,
         );
 
-        if ie.mode == 0o160000 {
+        if ie.mode == FileMode::GITLINK {
             let sub_head_oid = read_submodule_head(&file_path);
             let ref_matches = match sub_head_oid {
                 Some(oid) => oid == ie.oid,
@@ -7324,7 +7329,7 @@ pub struct WorktreeAddRefreshParams<'a> {
     pub index_mtime: Option<(u32, u32)>,
     /// Mode that would be written, after [`crate::index::WorktreeModePolicy`] against `ie.mode`
     /// and any `--chmod` hint.
-    pub staged_mode: u32,
+    pub staged_mode: FileMode,
     /// Repository-scoped filter-process registry (when staging through a [`crate::repo::Repository`]).
     pub filter_process: Option<&'a crate::filter_process::FilterProcessState>,
 }
@@ -7337,7 +7342,7 @@ pub enum WorktreeAddRefresh {
     /// Executable bit differs while blob content is unchanged.
     ModeOnly {
         /// Mode to store in the index.
-        mode: u32,
+        mode: FileMode,
     },
     /// Blob OID and mode are unchanged; only cached stat fields should be refreshed.
     StatOnly,
@@ -7394,7 +7399,7 @@ pub(crate) fn index_entry_skips_worktree_content_hash_after_stat_match(
 pub(crate) fn classify_worktree_entry_for_add(
     params: &WorktreeAddRefreshParams<'_>,
 ) -> Result<WorktreeAddRefresh> {
-    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    use crate::objects::FileMode;
 
     let ie = params.ie;
     let meta = params.meta;
@@ -7408,10 +7413,10 @@ pub(crate) fn classify_worktree_entry_for_add(
     let stat_same = stat_matches(ie, meta);
     let trust_stat = index_stat_cache_trustworthy(params.index_mtime);
 
-    if ie.mode == MODE_SYMLINK {
+    if ie.mode == FileMode::SYMLINK {
         // With `core.symlinks=false` the policy keeps a plain file holding the link target as
         // a symlink entry, so it is compared by content like a real link.
-        if !meta.file_type().is_symlink() && staged_mode != MODE_SYMLINK {
+        if !meta.file_type().is_symlink() && staged_mode != FileMode::SYMLINK {
             return Ok(WorktreeAddRefresh::NeedsRestage);
         }
         if stat_same && !racy && trust_stat && staged_mode == ie.mode {
@@ -7423,7 +7428,7 @@ pub(crate) fn classify_worktree_entry_for_add(
         return worktree_effective_oid_matches_index(params);
     }
 
-    if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE {
+    if ie.mode != FileMode::REGULAR && ie.mode != FileMode::EXECUTABLE {
         return Ok(WorktreeAddRefresh::NeedsRestage);
     }
 
@@ -7772,12 +7777,15 @@ struct BlobStatRefreshOutcome {
 
 /// Whether the stat refresh may adopt worktree stat data for `ie` at all.
 fn refresh_index_entry_eligible(ie: &IndexEntry) -> bool {
-    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    use crate::objects::FileMode;
     ie.stage() == 0
         && !ie.skip_worktree()
         && !ie.assume_unchanged()
         && !ie.intent_to_add()
-        && matches!(ie.mode, MODE_REGULAR | MODE_EXECUTABLE | MODE_SYMLINK)
+        && matches!(
+            ie.mode,
+            FileMode::REGULAR | FileMode::EXECUTABLE | FileMode::SYMLINK
+        )
 }
 
 /// Whether refreshing `ie` from the scanned `stat` must first prove by content that the
@@ -7886,7 +7894,7 @@ fn refresh_content_checks(
     /// Attributes are resolved on the calling thread: the shared rules are not `Sync`.
     struct ContentCheck {
         entry_index: usize,
-        worktree_mode: u32,
+        worktree_mode: FileMode,
         /// Position of the entry's attributes in `attrs`.
         attrs_index: usize,
     }
@@ -8115,19 +8123,19 @@ pub(crate) fn path_checkout_skip_blob_write_when_up_to_date_with_config(
     index: &Index,
     entry: &IndexEntry,
     expected_oid: &ObjectId,
-    expected_mode: u32,
+    expected_mode: FileMode,
     rel_path: &str,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     preloaded_config: Option<&crate::config::ConfigSet>,
 ) -> Result<bool> {
     use crate::config::ConfigSet;
     use crate::crlf;
-    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR};
+    use crate::objects::FileMode;
 
     if entry.oid != *expected_oid || entry.mode != expected_mode {
         return Ok(false);
     }
-    if expected_mode != MODE_REGULAR && expected_mode != MODE_EXECUTABLE {
+    if expected_mode != FileMode::REGULAR && expected_mode != FileMode::EXECUTABLE {
         return Ok(false);
     }
     let abs_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
@@ -8192,7 +8200,7 @@ fn invalidate_index_stat_cache(ie: &mut IndexEntry) {
 
 /// Read worktree content for diffing, honoring Git tree modes.
 ///
-/// For [`MODE_SYMLINK`] entries backed by a symlink on disk this returns the link target path
+/// For [`FileMode::SYMLINK`] entries backed by a symlink on disk this returns the link target path
 /// bytes (via [`read_link`](std::fs::read_link)), not the contents of the followed file. A
 /// symlink entry checked out as a plain file (`core.symlinks=false`) already holds the target,
 /// so it is read like other modes, with a plain [`read`](std::fs::read) of the path.
@@ -8200,8 +8208,11 @@ fn invalidate_index_stat_cache(ie: &mut IndexEntry) {
 /// # Errors
 ///
 /// Returns [`std::io::Error`] when the path cannot be read.
-pub(crate) fn read_worktree_bytes_for_mode(path: &Path, mode: u32) -> std::io::Result<Vec<u8>> {
-    if mode == MODE_SYMLINK && fs::symlink_metadata(path)?.file_type().is_symlink() {
+pub(crate) fn read_worktree_bytes_for_mode(
+    path: &Path,
+    mode: FileMode,
+) -> std::io::Result<Vec<u8>> {
+    if mode == FileMode::SYMLINK && fs::symlink_metadata(path)?.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         return Ok(symlink_target_bytes(&target));
     }
@@ -8221,7 +8232,7 @@ pub fn read_worktree_side_bytes_for_diff(
     odb: &Odb,
     work_tree: &Path,
     rel_path: &str,
-    mode: u32,
+    mode: FileMode,
     config: &crate::config::ConfigSet,
     index_entry: Option<&IndexEntry>,
     worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
@@ -8254,7 +8265,7 @@ pub(crate) fn load_worktree_side_for_diff(
     odb: &Odb,
     work_tree: &Path,
     rel_path: &str,
-    mode: u32,
+    mode: FileMode,
     config: &crate::config::ConfigSet,
     index_entry: Option<&IndexEntry>,
     worktree_rules: Option<&crate::worktree_rules::WorktreeRules>,
@@ -8270,7 +8281,7 @@ pub(crate) fn load_worktree_side_for_diff(
             source,
         )
     })?;
-    if mode == MODE_SYMLINK && meta.file_type().is_symlink() {
+    if mode == FileMode::SYMLINK && meta.file_type().is_symlink() {
         let target = fs::read_link(&file_path).map_err(|source| {
             crate::worktree::map_worktree_io(
                 rel_match.as_ref(),
@@ -8665,14 +8676,14 @@ fn hash_stream_threshold(odb: &Odb) -> Result<u64> {
 pub(crate) fn hash_worktree_file_with_mode(
     odb: &Odb,
     path: &Path,
-    worktree_mode: u32,
+    worktree_mode: FileMode,
     conv: &crate::crlf::ConversionConfig,
     file_attrs: &crate::crlf::FileAttrs,
     rel_path: &str,
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    if worktree_mode == MODE_SYMLINK {
+    if worktree_mode == FileMode::SYMLINK {
         let data = read_worktree_bytes_for_mode(path, worktree_mode)?;
         return odb.hash(ObjectKind::Blob, &data);
     }
@@ -8721,17 +8732,17 @@ pub(crate) fn materialize_worktree_blob(
 }
 
 /// Derive a Git file mode from filesystem metadata.
-pub fn mode_from_metadata(meta: &fs::Metadata) -> u32 {
+pub fn mode_from_metadata(meta: &fs::Metadata) -> FileMode {
     if meta.file_type().is_symlink() {
-        0o120000
+        FileMode::SYMLINK
     } else {
         #[cfg(unix)]
         {
             if meta.mode() & 0o111 != 0 {
-                return 0o100755;
+                return FileMode::EXECUTABLE;
             }
         }
-        0o100644
+        FileMode::REGULAR
     }
 }
 
@@ -8972,15 +8983,15 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
         let tree_entry = tree_map.get(path.as_str());
 
         // Gitlink entries (submodules) — compare HEAD commit, not file content.
-        let is_gitlink = tree_entry.is_some_and(|te| te.mode == 0o160000)
+        let is_gitlink = tree_entry.is_some_and(|te| te.mode == FileMode::GITLINK)
             || index_entries
                 .get(path.as_bytes())
-                .is_some_and(|ie| ie.mode == 0o160000);
+                .is_some_and(|ie| ie.mode == FileMode::GITLINK);
         if is_gitlink {
             let sub_dir = work_tree.join(path);
             let index_gitlink_oid = index_entries
                 .get(path.as_bytes())
-                .filter(|ie| ie.mode == 0o160000)
+                .filter(|ie| ie.mode == FileMode::GITLINK)
                 .map(|ie| ie.oid);
             match (tree_entry, index_gitlink_oid) {
                 (Some(te), _) => {
@@ -8993,7 +9004,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                             status: DiffStatus::Deleted,
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
-                            old_mode: FileMode::new(te.mode),
+                            old_mode: te.mode,
                             new_mode: FileMode::ABSENT,
                             old_oid: te.oid,
                             new_oid: zero_oid(),
@@ -9037,8 +9048,8 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                             status: DiffStatus::Modified,
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
-                            old_mode: FileMode::new(te.mode),
-                            new_mode: FileMode::new(te.mode),
+                            old_mode: te.mode,
+                            new_mode: te.mode,
                             old_oid: te.oid,
                             new_oid,
                             score: None,
@@ -9103,8 +9114,8 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                         status: DiffStatus::for_content_change(tree_mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
-                        old_mode: FileMode::new(tree_mode),
-                        new_mode: FileMode::new(wt_mode),
+                        old_mode: tree_mode,
+                        new_mode: wt_mode,
                         old_oid: te.oid,
                         new_oid: wt_oid,
                         score: None,
@@ -9144,8 +9155,8 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                         status: DiffStatus::for_content_change(tree_mode, ie.mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
-                        old_mode: FileMode::new(tree_mode),
-                        new_mode: FileMode::new(ie.mode),
+                        old_mode: tree_mode,
+                        new_mode: ie.mode,
                         old_oid: te.oid,
                         new_oid: te.oid,
                         score: None,
@@ -9171,8 +9182,8 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                             status: DiffStatus::for_content_change(tree_mode, wt_mode),
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
-                            old_mode: FileMode::new(tree_mode),
-                            new_mode: FileMode::new(wt_mode),
+                            old_mode: tree_mode,
+                            new_mode: wt_mode,
                             old_oid: te.oid,
                             // Raw `git diff <tree>` uses a null OID on the worktree side (patch
                             // output resolves content from the working tree).
@@ -9184,8 +9195,8 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                             status: DiffStatus::for_content_change(tree_mode, wt_mode),
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
-                            old_mode: FileMode::new(tree_mode),
-                            new_mode: FileMode::new(wt_mode),
+                            old_mode: tree_mode,
+                            new_mode: wt_mode,
                             old_oid: te.oid,
                             new_oid: te.oid,
                             score: None,
@@ -9211,8 +9222,8 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                         status: DiffStatus::for_content_change(tree_mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
-                        old_mode: FileMode::new(tree_mode),
-                        new_mode: FileMode::new(wt_mode),
+                        old_mode: tree_mode,
+                        new_mode: wt_mode,
                         old_oid: te.oid,
                         new_oid,
                         score: None,
@@ -9226,7 +9237,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                     status: DiffStatus::Deleted,
                     old_path: Some(path.clone()),
                     new_path: None,
-                    old_mode: FileMode::new(tree_mode),
+                    old_mode: tree_mode,
                     new_mode: FileMode::ABSENT,
                     old_oid: te.oid,
                     new_oid: zero_oid(),
@@ -9253,7 +9264,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
                     old_path: None,
                     new_path: Some(path.clone()),
                     old_mode: FileMode::ABSENT,
-                    new_mode: FileMode::new(wt_mode),
+                    new_mode: wt_mode,
                     old_oid: zero_oid(),
                     new_oid: wt_oid,
                     score: None,
@@ -10290,7 +10301,7 @@ fn read_new_side_bytes(
         crate::error::RepositoryError::RequiresWorkTree,
     ))?;
     if let Some(wctx) = worktree {
-        let mode = entry.new_mode.bits();
+        let mode = entry.new_mode;
         let index_entry = wctx.index.get(path.as_bytes(), 0);
         return read_worktree_side_bytes_for_diff(odb, root, path, mode, config, index_entry, None);
     }
@@ -10609,10 +10620,10 @@ pub(crate) fn flatten_tree_entries(
             } else {
                 format!("{prefix}/{name}")
             };
-            if e.mode == 0o040000 {
+            if e.mode == FileMode::TREE {
                 walk(odb, &e.oid, &path, out)?;
             } else {
-                out.push((path, FileMode::new(e.mode), e.oid));
+                out.push((path, e.mode, e.oid));
             }
         }
         Ok(())
@@ -10658,7 +10669,7 @@ pub(crate) fn status_apply_rename_copy_detection(
     let source_tree_entries: Vec<(String, FileMode, ObjectId)> = match head_tree {
         Some(oid) => flatten_tree(odb, oid, "")?
             .into_iter()
-            .map(|e| (e.path, FileMode::new(e.mode), e.oid))
+            .map(|e| (e.path, e.mode, e.oid))
             .collect(),
         None => Vec::new(),
     };
@@ -11333,7 +11344,7 @@ fn should_break_rewrite_inner(src: &[u8], dst: &[u8], break_score: u64) -> bool 
 /// Flatten a tree object recursively into a sorted list of (path, mode, oid).
 struct FlatEntry {
     path: String,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
 }
 
@@ -11363,7 +11374,7 @@ fn subtree_oid_at_path(odb: &Odb, root: &ObjectId, path: &str) -> Result<Option<
         else {
             return Ok(None);
         };
-        if !is_tree_mode(entry.mode.bits()) {
+        if !is_tree_mode(entry.mode) {
             return Ok(None);
         }
         oid = entry.oid;
@@ -11380,7 +11391,7 @@ fn emit_flattened_subtree_as_added(
     result: &mut Vec<DiffEntry>,
 ) -> Result<()> {
     for entry in flatten_tree(odb, subtree, prefix)? {
-        if ignore_submodules && entry.mode == 0o160000 {
+        if ignore_submodules && entry.mode == FileMode::GITLINK {
             continue;
         }
         result.push(DiffEntry {
@@ -11388,7 +11399,7 @@ fn emit_flattened_subtree_as_added(
             old_path: None,
             new_path: Some(entry.path),
             old_mode: FileMode::ABSENT,
-            new_mode: FileMode::new(entry.mode),
+            new_mode: entry.mode,
             old_oid: zero_oid(),
             new_oid: entry.oid,
             score: None,
@@ -11420,8 +11431,8 @@ fn diff_flattened_subtrees(
                         status: DiffStatus::for_content_change(te.mode, entry.mode),
                         old_path: Some(entry.path.clone()),
                         new_path: Some(entry.path.clone()),
-                        old_mode: FileMode::new(te.mode),
-                        new_mode: FileMode::new(entry.mode),
+                        old_mode: te.mode,
+                        new_mode: entry.mode,
                         old_oid: te.oid,
                         new_oid: entry.oid,
                         score: None,
@@ -11434,7 +11445,7 @@ fn diff_flattened_subtrees(
                     old_path: None,
                     new_path: Some(entry.path.clone()),
                     old_mode: FileMode::ABSENT,
-                    new_mode: FileMode::new(entry.mode),
+                    new_mode: entry.mode,
                     old_oid: zero_oid(),
                     new_oid: entry.oid,
                     score: None,
@@ -11443,7 +11454,7 @@ fn diff_flattened_subtrees(
         }
     }
     for (path, te) in head_map {
-        if ignore_submodules && te.mode == 0o160000 {
+        if ignore_submodules && te.mode == FileMode::GITLINK {
             continue;
         }
         tree_map.remove(path);
@@ -11451,7 +11462,7 @@ fn diff_flattened_subtrees(
             status: DiffStatus::Deleted,
             old_path: Some(path.to_owned()),
             new_path: None,
-            old_mode: FileMode::new(te.mode),
+            old_mode: te.mode,
             new_mode: FileMode::ABSENT,
             old_oid: te.oid,
             new_oid: zero_oid(),
@@ -11471,7 +11482,7 @@ fn flatten_tree_with_index(
 
     for entry in entries {
         let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
-        if is_tree_mode(entry.mode.bits()) {
+        if is_tree_mode(entry.mode) {
             if index.is_some_and(|idx| sparse_index_skips_tree_descent(idx, &path, &entry.oid)) {
                 continue;
             }
@@ -11480,7 +11491,7 @@ fn flatten_tree_with_index(
         } else {
             result.push(FlatEntry {
                 path,
-                mode: entry.mode.bits(),
+                mode: entry.mode,
                 oid: entry.oid,
             });
         }
@@ -11493,7 +11504,7 @@ fn flatten_tree_with_index(
 pub(crate) fn head_path_states(
     odb: &Odb,
     head_tree: Option<&ObjectId>,
-) -> Result<std::collections::BTreeMap<String, (u32, ObjectId)>> {
+) -> Result<std::collections::BTreeMap<String, (FileMode, ObjectId)>> {
     let mut m = std::collections::BTreeMap::new();
     let Some(t) = head_tree else {
         return Ok(m);
@@ -11505,7 +11516,7 @@ pub(crate) fn head_path_states(
 }
 
 /// Whether a mode represents a tree (directory).
-fn is_tree_mode(mode: u32) -> bool {
+fn is_tree_mode(mode: FileMode) -> bool {
     crate::index::is_tree_mode(mode)
 }
 
@@ -11542,7 +11553,7 @@ pub fn sort_entries_by_path(entries: &mut [DiffEntry]) {
 }
 
 /// Format a numeric mode as a zero-padded octal string.
-pub(crate) fn format_mode(mode: u32) -> String {
+pub(crate) fn format_mode(mode: FileMode) -> String {
     format!("{mode:06o}")
 }
 
@@ -11880,7 +11891,7 @@ pub fn submodule_porcelain_flags(
     // modified in the superproject (t7506). Do **not** OR `untracked` — untracked-only inside a
     // nested submodule must stay `S..U` on the parent, not `S.U` / `S.M.`.
     for e in &sub_index.entries {
-        if e.stage() != 0 || e.mode != 0o160000 {
+        if e.stage() != 0 || e.mode != FileMode::GITLINK {
             continue;
         }
         let child = String::from_utf8_lossy(&e.path).into_owned();
@@ -11928,7 +11939,7 @@ fn submodule_dir_has_untracked_inner(
         if is_dir {
             let is_gitlink = owning_index
                 .get(rel.as_bytes(), 0)
-                .is_some_and(|e| e.mode == 0o160000);
+                .is_some_and(|e| e.mode == FileMode::GITLINK);
             if is_gitlink {
                 let Some(nested_git) = submodule_embedded_git_dir(&path) else {
                     continue;
@@ -12130,7 +12141,8 @@ mod diff_index_to_tree_cache_tree_tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use super::*;
-    use crate::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::ObjectKind;
     use crate::write_tree::{build_cache_tree_from_index, write_tree_from_index};
     use tempfile::TempDir;
@@ -12168,7 +12180,7 @@ mod diff_index_to_tree_cache_tree_tests {
         diff_index_to_tree(odb, &flat_index, Some(head_tree), ignore_submodules)
     }
 
-    fn index_entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
+    fn index_entry(path: &str, mode: FileMode, oid: ObjectId) -> IndexEntry {
         IndexEntry {
             ctime_sec: 0,
             ctime_nsec: 0,
@@ -12198,7 +12210,7 @@ mod diff_index_to_tree_cache_tree_tests {
                 let oid = odb
                     .write(ObjectKind::Blob, format!("body-{d}-{w}").as_bytes())
                     .expect("blob");
-                index.add_or_replace(index_entry(&path, MODE_REGULAR, oid));
+                index.add_or_replace(index_entry(&path, FileMode::REGULAR, oid));
             }
         }
         let head_tree = write_tree_from_index(&odb, &index, "").expect("write tree");
@@ -12358,7 +12370,7 @@ mod diff_index_to_tree_cache_tree_tests {
             for f in 0..2 {
                 let path = format!("dir{d:03}/sub/f{f}.txt");
                 let oid = odb.write(ObjectKind::Blob, path.as_bytes()).expect("blob");
-                index.add_or_replace(index_entry(&path, MODE_REGULAR, oid));
+                index.add_or_replace(index_entry(&path, FileMode::REGULAR, oid));
             }
         }
         let head_tree = write_tree_from_index(&odb, &index, "").expect("write tree");
@@ -12380,7 +12392,7 @@ mod diff_index_to_tree_cache_tree_tests {
         for path in ["dir010/sub/new.txt", "dir999/new.txt", "top.txt"] {
             index.invalidate_cache_tree_for_path(path.as_bytes());
             let oid = odb.write(ObjectKind::Blob, path.as_bytes()).expect("blob");
-            index.add_or_replace(index_entry(path, MODE_REGULAR, oid));
+            index.add_or_replace(index_entry(path, FileMode::REGULAR, oid));
         }
         for path in [
             "dir020/sub/f0.txt",
@@ -12414,7 +12426,7 @@ mod diff_index_to_tree_cache_tree_tests {
             for f in [&b"a.txt"[..], b"b.txt"] {
                 let path = [dir, b"/", f].concat();
                 let oid = odb.write(ObjectKind::Blob, &path).expect("blob");
-                let mut entry = index_entry("x", MODE_REGULAR, oid);
+                let mut entry = index_entry("x", FileMode::REGULAR, oid);
                 entry.flags = path.len().min(0xfff) as u16;
                 entry.path = path;
                 index.add_or_replace(entry);
@@ -12448,23 +12460,23 @@ mod diff_index_to_tree_cache_tree_tests {
         let odb = Odb::new(temp.path());
         let blob = odb.write(ObjectKind::Blob, b"x").expect("blob");
         let mut index = Index::new();
-        index.add_or_replace(index_entry("tracked.txt", MODE_REGULAR, blob));
+        index.add_or_replace(index_entry("tracked.txt", FileMode::REGULAR, blob));
         let head_tree = write_tree_from_index(&odb, &index, "").expect("tree");
         let cache = build_cache_tree_from_index(&odb, &index).expect("cache");
         index.set_cache_tree(cache);
 
-        let mode_entry = index_entry("tracked.txt", MODE_EXECUTABLE, blob);
+        let mode_entry = index_entry("tracked.txt", FileMode::EXECUTABLE, blob);
         index.add_or_replace(mode_entry);
         index.invalidate_cache_tree_for_path(b"tracked.txt");
 
         let diffs = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("diff");
         assert_eq!(diffs.len(), 1);
         assert_eq!(diffs[0].status, DiffStatus::Modified);
-        assert_eq!(diffs[0].old_mode, FileMode::new(MODE_REGULAR));
-        assert_eq!(diffs[0].new_mode, FileMode::new(MODE_EXECUTABLE));
+        assert_eq!(diffs[0].old_mode, FileMode::REGULAR);
+        assert_eq!(diffs[0].new_mode, FileMode::EXECUTABLE);
 
         // Intent-to-add is omitted from staged diff.
-        let mut ita = index_entry("new.txt", MODE_REGULAR, blob);
+        let mut ita = index_entry("new.txt", FileMode::REGULAR, blob);
         ita.set_intent_to_add(true);
         index.add_or_replace(ita);
         let diffs = diff_index_to_tree(&odb, &index, Some(&head_tree), false).expect("diff");
@@ -12478,7 +12490,7 @@ mod diff_index_to_tree_cache_tree_tests {
             .parse()
             .expect("oid");
         let mut sub_index = Index::new();
-        sub_index.add_or_replace(index_entry("sub", MODE_GITLINK, gitlink));
+        sub_index.add_or_replace(index_entry("sub", FileMode::GITLINK, gitlink));
         let sub_tree = write_tree_from_index(&odb, &sub_index, "").expect("tree");
         let sub_cache = build_cache_tree_from_index(&odb, &sub_index).expect("cache");
         sub_index.set_cache_tree(sub_cache);
@@ -12499,7 +12511,7 @@ mod diff_index_to_tree_cache_tree_tests {
             .expect("oid");
         let head_tree = write_tree_from_index(&odb, &Index::new(), "").expect("empty tree");
         let mut index = Index::new();
-        index.add_or_replace(index_entry("newdir/sub", MODE_GITLINK, gitlink));
+        index.add_or_replace(index_entry("newdir/sub", FileMode::GITLINK, gitlink));
         let cache = build_cache_tree_from_index(&odb, &index).expect("cache");
         index.set_cache_tree(cache);
         index.invalidate_cache_tree_for_path(b"newdir/sub");
@@ -12523,8 +12535,8 @@ mod diff_index_to_tree_cache_tree_tests {
             .parse()
             .expect("oid");
         let mut index = Index::new();
-        index.add_or_replace(index_entry("keep.txt", MODE_REGULAR, blob));
-        index.add_or_replace(index_entry("olddir/sub", MODE_GITLINK, gitlink));
+        index.add_or_replace(index_entry("keep.txt", FileMode::REGULAR, blob));
+        index.add_or_replace(index_entry("olddir/sub", FileMode::GITLINK, gitlink));
         let head_tree = write_tree_from_index(&odb, &index, "").expect("head");
         let cache = build_cache_tree_from_index(&odb, &index).expect("cache");
         index.set_cache_tree(cache);
@@ -12550,7 +12562,11 @@ mod diff_index_to_tree_cache_tree_tests {
         let leaf = odb.write(ObjectKind::Blob, b"leaf").expect("blob");
         let mut deep = Index::new();
         for i in 0..20 {
-            deep.add_or_replace(index_entry(&format!("deep/n{i}.txt"), MODE_REGULAR, leaf));
+            deep.add_or_replace(index_entry(
+                &format!("deep/n{i}.txt"),
+                FileMode::REGULAR,
+                leaf,
+            ));
         }
         let tree = write_tree_from_index(&odb, &deep, "").expect("tree");
         let reads = TreeReadCounter::start();
@@ -12570,10 +12586,10 @@ mod diff_index_to_tree_cache_tree_tests {
         let a = odb.write(ObjectKind::Blob, b"a").expect("blob");
         let b = odb.write(ObjectKind::Blob, b"b").expect("blob");
         let mut left = Index::new();
-        left.add_or_replace(index_entry("f.txt", MODE_REGULAR, a));
+        left.add_or_replace(index_entry("f.txt", FileMode::REGULAR, a));
         let mut right = Index::new();
-        right.add_or_replace(index_entry("f.txt", MODE_REGULAR, b));
-        right.add_or_replace(index_entry("g.txt", MODE_REGULAR, a));
+        right.add_or_replace(index_entry("f.txt", FileMode::REGULAR, b));
+        right.add_or_replace(index_entry("g.txt", FileMode::REGULAR, a));
         let old_tree = write_tree_from_index(&odb, &left, "").expect("old");
         let new_tree = write_tree_from_index(&odb, &right, "").expect("new");
         let entries = diff_trees(&odb, Some(&old_tree), Some(&new_tree), "").expect("diff");
@@ -12595,19 +12611,27 @@ mod diff_index_to_tree_cache_tree_tests {
         let mut left = Index::new();
         let mut right = Index::new();
         for i in 0..50 {
-            left.add_or_replace(index_entry(&format!("same{i:02}.txt"), MODE_REGULAR, a));
-            right.add_or_replace(index_entry(&format!("same{i:02}.txt"), MODE_REGULAR, a));
+            left.add_or_replace(index_entry(
+                &format!("same{i:02}.txt"),
+                FileMode::REGULAR,
+                a,
+            ));
+            right.add_or_replace(index_entry(
+                &format!("same{i:02}.txt"),
+                FileMode::REGULAR,
+                a,
+            ));
         }
-        left.add_or_replace(index_entry("dir/changed.txt", MODE_REGULAR, a));
-        left.add_or_replace(index_entry("dir/kept.txt", MODE_REGULAR, a));
-        left.add_or_replace(index_entry("gone/x.txt", MODE_REGULAR, a));
-        left.add_or_replace(index_entry("mode.sh", MODE_REGULAR, a));
-        left.add_or_replace(index_entry("swap", MODE_REGULAR, a));
-        right.add_or_replace(index_entry("dir/changed.txt", MODE_REGULAR, b));
-        right.add_or_replace(index_entry("dir/kept.txt", MODE_REGULAR, a));
-        right.add_or_replace(index_entry("mode.sh", MODE_EXECUTABLE, a));
-        right.add_or_replace(index_entry("new/y.txt", MODE_REGULAR, b));
-        right.add_or_replace(index_entry("swap/inner.txt", MODE_REGULAR, b));
+        left.add_or_replace(index_entry("dir/changed.txt", FileMode::REGULAR, a));
+        left.add_or_replace(index_entry("dir/kept.txt", FileMode::REGULAR, a));
+        left.add_or_replace(index_entry("gone/x.txt", FileMode::REGULAR, a));
+        left.add_or_replace(index_entry("mode.sh", FileMode::REGULAR, a));
+        left.add_or_replace(index_entry("swap", FileMode::REGULAR, a));
+        right.add_or_replace(index_entry("dir/changed.txt", FileMode::REGULAR, b));
+        right.add_or_replace(index_entry("dir/kept.txt", FileMode::REGULAR, a));
+        right.add_or_replace(index_entry("mode.sh", FileMode::EXECUTABLE, a));
+        right.add_or_replace(index_entry("new/y.txt", FileMode::REGULAR, b));
+        right.add_or_replace(index_entry("swap/inner.txt", FileMode::REGULAR, b));
         let setup = Odb::new(temp.path());
         let old_tree = write_tree_from_index(&setup, &left, "").expect("old");
         let new_tree = write_tree_from_index(&setup, &right, "").expect("new");
@@ -12747,7 +12771,8 @@ mod changed_flags_shared_tests {
 mod gitlink_tree_worktree_tests {
     use std::fs;
 
-    use crate::index::{Index, IndexEntry, MODE_GITLINK};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::{ObjectId, ObjectKind};
     use crate::repo::init_repository;
 
@@ -12790,7 +12815,7 @@ mod gitlink_tree_worktree_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             uid: 0,
             gid: 0,
             size: 0,
@@ -12842,7 +12867,7 @@ mod gitlink_tree_worktree_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             uid: 0,
             gid: 0,
             size: 0,
@@ -12950,7 +12975,7 @@ mod gitlink_tree_worktree_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             uid: 0,
             gid: 0,
             size: 0,
@@ -12975,7 +13000,8 @@ mod gitlink_tree_worktree_tests {
 #[cfg(test)]
 mod racy_index_mtime_diff_tests {
     use super::*;
-    use crate::index::{entry_from_metadata, Index, MODE_REGULAR};
+    use crate::index::{entry_from_metadata, Index};
+    use crate::objects::FileMode;
     use crate::objects::{HashAlgo, ObjectKind};
     use filetime::FileTime;
     use std::fs;
@@ -13015,7 +13041,7 @@ mod racy_index_mtime_diff_tests {
         fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
         let odb = Odb::new(&git_dir.join("objects"));
         let oid_a = odb.hash(ObjectKind::Blob, content_a).expect("hash");
-        let entry = entry_from_metadata(&meta, b"f.txt", oid_a, MODE_REGULAR);
+        let entry = entry_from_metadata(&meta, b"f.txt", oid_a, FileMode::REGULAR);
 
         let mut index = Index::new();
         index.source_mtime = Some(INDEX_MTIME);
@@ -13036,7 +13062,7 @@ mod racy_index_mtime_diff_tests {
     #[test]
     #[cfg(unix)]
     fn non_utf8_symlink_clean_racy_equal_mtime_reports_no_diff() {
-        use crate::index::MODE_SYMLINK;
+        use crate::objects::FileMode;
         use std::os::unix::ffi::OsStrExt as _;
         use std::os::unix::fs::symlink;
 
@@ -13053,7 +13079,7 @@ mod racy_index_mtime_diff_tests {
         fs::create_dir_all(git_dir.join("objects")).expect("objects dir");
         let odb = Odb::new(&git_dir.join("objects"));
         let oid = odb.hash(ObjectKind::Blob, target.as_bytes()).expect("hash");
-        let entry = entry_from_metadata(&meta, b"link", oid, MODE_SYMLINK);
+        let entry = entry_from_metadata(&meta, b"link", oid, FileMode::SYMLINK);
 
         let mut index = Index::new();
         index.source_mtime = Some(INDEX_MTIME);
@@ -13078,7 +13104,7 @@ mod racy_index_mtime_diff_tests {
         pin_mtime(&wt.join("f.txt"), INDEX_MTIME.0, INDEX_MTIME.1);
         let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
         let oid = odb.hash(ObjectKind::Blob, bytes).expect("hash");
-        let entry = entry_from_metadata(&meta, b"f.txt", oid, MODE_REGULAR);
+        let entry = entry_from_metadata(&meta, b"f.txt", oid, FileMode::REGULAR);
 
         let mut index = Index::new();
         index.hash_algo = HashAlgo::Sha256;
@@ -13123,7 +13149,7 @@ mod racy_index_mtime_diff_tests {
                 &meta,
                 path.as_bytes(),
                 oid,
-                MODE_REGULAR,
+                FileMode::REGULAR,
             ));
         }
 
@@ -13159,7 +13185,8 @@ mod smudge_racily_clean_tests {
     use super::*;
     use crate::config::ConfigSet;
     use crate::crlf::{self, FileAttrs};
-    use crate::index::{entry_from_metadata, Index, MODE_REGULAR};
+    use crate::index::{entry_from_metadata, Index};
+    use crate::objects::FileMode;
     use crate::objects::{HashAlgo, ObjectKind};
     use filetime::FileTime;
     use std::fs;
@@ -13220,7 +13247,7 @@ mod smudge_racily_clean_tests {
         pin_mtime_and_sample(&path, mtime.0, mtime.1);
         let meta = fs::symlink_metadata(&path).expect("stat file");
         let oid = odb.hash(ObjectKind::Blob, bytes).expect("hash");
-        entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR)
+        entry_from_metadata(&meta, rel.as_bytes(), oid, FileMode::REGULAR)
     }
 
     fn staged_entry_with_oid(
@@ -13234,7 +13261,7 @@ mod smudge_racily_clean_tests {
         fs::write(&path, worktree_bytes).expect("write file");
         pin_mtime_and_sample(&path, mtime.0, mtime.1);
         let meta = fs::symlink_metadata(&path).expect("stat file");
-        entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR)
+        entry_from_metadata(&meta, rel.as_bytes(), oid, FileMode::REGULAR)
     }
 
     #[test]
@@ -13959,7 +13986,7 @@ mod smudge_racily_clean_tests {
         fs::write(wt.join("f.txt"), b"x\n").expect("write");
         pin_mtime_and_sample(&wt.join("f.txt"), 100, 0);
         let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
-        let mut entry = entry_from_metadata(&meta, b"f.txt", zero_oid(), MODE_REGULAR);
+        let mut entry = entry_from_metadata(&meta, b"f.txt", zero_oid(), FileMode::REGULAR);
         entry.mtime_nsec = entry.mtime_nsec.wrapping_add(1_000_000);
         assert!(stat_matches(&entry, &meta));
     }
@@ -13983,7 +14010,7 @@ mod smudge_racily_clean_tests {
             conv: &conv,
             file_attrs: &attrs,
             index_mtime: Some((200, 0)),
-            staged_mode: MODE_REGULAR,
+            staged_mode: FileMode::REGULAR,
             filter_process: None,
         };
         let refresh = classify_worktree_entry_for_add(&params).expect("classify");
@@ -14010,7 +14037,7 @@ mod smudge_racily_clean_tests {
             conv: &conv,
             file_attrs: &attrs,
             index_mtime: None,
-            staged_mode: MODE_REGULAR,
+            staged_mode: FileMode::REGULAR,
             filter_process: None,
         };
         let refresh = classify_worktree_entry_for_add(&params).expect("classify");
@@ -14037,7 +14064,7 @@ mod smudge_racily_clean_tests {
             conv: &conv,
             file_attrs: &attrs,
             index_mtime: Some((200, 0)),
-            staged_mode: MODE_REGULAR,
+            staged_mode: FileMode::REGULAR,
             filter_process: None,
         };
         let refresh = classify_worktree_entry_for_add(&params).expect("classify");
@@ -14062,7 +14089,7 @@ mod smudge_racily_clean_tests {
         pin_mtime_and_sample(&wt.join("f.txt"), index_mtime.0, index_mtime.1);
         let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
         // Stat was refreshed from the worktree but the blob OID is still stale (racy window).
-        let entry = entry_from_metadata(&meta, b"f.txt", stale_oid, MODE_REGULAR);
+        let entry = entry_from_metadata(&meta, b"f.txt", stale_oid, FileMode::REGULAR);
         index.entries.push(entry.clone());
 
         assert!(stat_matches(&entry, &meta));
@@ -14099,7 +14126,7 @@ mod smudge_racily_clean_tests {
             &meta,
             b"f.txt",
             stale_oid,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         ));
         (git_dir, odb, index, index_mtime, stale_oid)
     }
@@ -14348,7 +14375,7 @@ mod smudge_racily_clean_tests {
             None,
         )
         .expect("hash");
-        let entry = entry_from_metadata(&meta, b"big.bin", oid, MODE_REGULAR);
+        let entry = entry_from_metadata(&meta, b"big.bin", oid, FileMode::REGULAR);
         let mut conv = crlf::ConversionConfig::from_config(&ConfigSet::new());
         conv.autocrlf = crlf::AutoCrlf::True;
         let attrs = FileAttrs::default();
@@ -14467,7 +14494,7 @@ mod smudge_racily_clean_tests {
 #[cfg(all(test, unix))]
 mod read_worktree_bytes_for_mode_tests {
     use super::*;
-    use crate::index::MODE_SYMLINK;
+    use crate::objects::FileMode;
     use std::fs;
     use std::os::unix::fs::symlink;
 
@@ -14478,7 +14505,7 @@ mod read_worktree_bytes_for_mode_tests {
         fs::write(wt.join("payload.txt"), b"secret\n").expect("write");
         symlink("payload.txt", wt.join("link")).expect("symlink");
         let bytes =
-            read_worktree_bytes_for_mode(&wt.join("link"), MODE_SYMLINK).expect("read link");
+            read_worktree_bytes_for_mode(&wt.join("link"), FileMode::SYMLINK).expect("read link");
         assert_eq!(bytes, b"payload.txt");
     }
 
@@ -14487,7 +14514,8 @@ mod read_worktree_bytes_for_mode_tests {
         let td = tempfile::tempdir().expect("tempdir");
         let path = td.path().join("link");
         fs::write(&path, b"payload.txt").expect("write");
-        let bytes = read_worktree_bytes_for_mode(&path, MODE_SYMLINK).expect("read plain link");
+        let bytes =
+            read_worktree_bytes_for_mode(&path, FileMode::SYMLINK).expect("read plain link");
         assert_eq!(bytes, b"payload.txt");
     }
 
@@ -14496,7 +14524,8 @@ mod read_worktree_bytes_for_mode_tests {
         let td = tempfile::tempdir().expect("tempdir");
         let path = td.path().join("f.txt");
         fs::write(&path, b"hello\n").expect("write");
-        let bytes = read_worktree_bytes_for_mode(&path, crate::index::MODE_REGULAR).expect("read");
+        let bytes =
+            read_worktree_bytes_for_mode(&path, crate::objects::FileMode::REGULAR).expect("read");
         assert_eq!(bytes, b"hello\n");
     }
 
@@ -14717,14 +14746,15 @@ mod line_coverage_tests {
     use super::*;
     use crate::config::ConfigSet;
     use crate::index::StatMatchPolicy;
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::ObjectKind;
     use crate::parallel::ThreadPolicy;
     use crate::write_tree::write_tree_from_index;
     use similar::Algorithm;
     use tempfile::TempDir;
 
-    fn index_entry(path: &str, mode: u32, oid: ObjectId) -> IndexEntry {
+    fn index_entry(path: &str, mode: FileMode, oid: ObjectId) -> IndexEntry {
         IndexEntry {
             ctime_sec: 0,
             ctime_nsec: 0,
@@ -14962,7 +14992,7 @@ mod line_coverage_tests {
         assert!(parse_diff_rename_score_token("50%").is_some());
         let _ = rewrite_merge_score(b"a", b"b");
         let _ = rewrite_dissimilarity_index_percent(b"abc", b"abd");
-        assert_eq!(format_mode(0o100644), "100644");
+        assert_eq!(format_mode(FileMode::REGULAR), "100644");
 
         let old_lines = ["a", "b", "c"];
         let new_lines = ["a", "b", "d"];
@@ -15102,7 +15132,7 @@ mod line_coverage_tests {
         let b2 = odb.write(ObjectKind::Blob, b"v2\n").expect("b2");
         let b3 = odb.write(ObjectKind::Blob, b"v3\n").expect("b3");
         let mut index = Index::new();
-        index.add_or_replace(index_entry("file.txt", MODE_REGULAR, b2));
+        index.add_or_replace(index_entry("file.txt", FileMode::REGULAR, b2));
         let head = write_tree_from_index(&odb, &index, "").expect("tree");
         index.entries_mut()[0].oid = b1;
         let idx_diff = diff_index_to_tree(&odb, &index, Some(&head), false)?;
@@ -15114,7 +15144,7 @@ mod line_coverage_tests {
             .write(ObjectKind::Commit, commit_body.as_bytes())
             .expect("c1");
         let mut index2 = Index::new();
-        index2.add_or_replace(index_entry("file.txt", MODE_REGULAR, b3));
+        index2.add_or_replace(index_entry("file.txt", FileMode::REGULAR, b3));
         let head2 = write_tree_from_index(&odb, &index2, "").expect("head2");
         let c2_body = format!(
             "tree {head2}\nparent {c1}\nauthor T <t@e.com> 2 +0000\ncommitter T <t@e.com> 2 +0000\n\nm2\n"
@@ -15167,7 +15197,7 @@ mod line_coverage_tests {
         std::fs::write(wt.join("tracked.txt"), content).expect("write");
         let oid = odb.write(ObjectKind::Blob, content).expect("blob");
         let mut index = Index::new();
-        index.add_or_replace(index_entry("tracked.txt", MODE_REGULAR, oid));
+        index.add_or_replace(index_entry("tracked.txt", FileMode::REGULAR, oid));
         let head = write_tree_from_index(&odb, &index, "").expect("tree");
         std::fs::write(wt.join("tracked.txt"), b"hello WORLD\n").expect("mutate");
         let mut index_mut = index.clone();
@@ -15219,7 +15249,7 @@ mod line_coverage_tests {
         let abs = wt.join("tracked.txt");
         let meta = std::fs::metadata(&abs).expect("meta");
         let mut index = Index::new();
-        index.add_or_replace(index_entry("tracked.txt", MODE_REGULAR, b_old));
+        index.add_or_replace(index_entry("tracked.txt", FileMode::REGULAR, b_old));
         let _ = stat_matches_with_policy(&index.entries()[0], &meta, StatMatchPolicy::default());
         let _ = worktree_differs_from_index_entry(
             &odb,
@@ -15241,7 +15271,7 @@ mod line_coverage_tests {
             conv: &conv,
             file_attrs: &attrs,
             index_mtime: None,
-            staged_mode: MODE_REGULAR,
+            staged_mode: FileMode::REGULAR,
             filter_process: None,
         };
         let _ = classify_worktree_entry_for_add(&params)?;
@@ -15265,7 +15295,7 @@ mod line_coverage_tests {
             Some(&index.entries()[0]),
             None,
         )?;
-        let _ = read_worktree_bytes_for_mode(&abs, MODE_REGULAR);
+        let _ = read_worktree_bytes_for_mode(&abs, FileMode::REGULAR);
         let _ = mode_from_metadata(&meta);
         let _ = smudge_racily_clean_entries(&odb, &git_dir, &mut index, wt, None, Some(&cfg), None);
         let _ = refresh_index_stat_content_verified(
@@ -15294,7 +15324,7 @@ mod line_coverage_tests {
             &index,
             &index.entries()[0],
             &b_old,
-            MODE_REGULAR,
+            FileMode::REGULAR,
             "tracked.txt",
             None,
             None,
@@ -15332,7 +15362,7 @@ mod line_coverage_tests {
         std::fs::write(wt.join("conflict.txt"), b"worktree\n").expect("wt");
         let tree = write_tree(&odb, &[("conflict.txt", tree_blob)]);
         let mut index = Index::new();
-        let mut stage1 = index_entry("conflict.txt", MODE_REGULAR, tree_blob);
+        let mut stage1 = index_entry("conflict.txt", FileMode::REGULAR, tree_blob);
         stage1.flags = (stage1.flags & 0x0FFF) | (1 << 12);
         index.entries_mut().push(stage1);
         let cfg = ConfigSet::new();

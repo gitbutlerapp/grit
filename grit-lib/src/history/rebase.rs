@@ -1312,7 +1312,8 @@ mod tests {
     use super::*;
     use crate::error::Error;
     use crate::index::write_tree::write_tree_from_index;
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
 
     fn ident(n: i64) -> String {
@@ -1330,7 +1331,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: bytes.len() as u32,
@@ -1519,7 +1520,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: content.len() as u32,
@@ -1780,7 +1781,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_REGULAR,
+                mode: FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: 5,
@@ -1806,7 +1807,7 @@ mod tests {
                     mtime_nsec: 0,
                     dev: 0,
                     ino: 0,
-                    mode: MODE_REGULAR,
+                    mode: FileMode::REGULAR,
                     uid: 0,
                     gid: 0,
                     size: size as u32,
@@ -1914,7 +1915,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_REGULAR,
+                mode: FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: bytes.len() as u32,

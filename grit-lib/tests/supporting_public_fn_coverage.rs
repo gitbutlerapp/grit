@@ -91,7 +91,7 @@ fn commit_encoding_and_trailers_helpers() {
 fn credentials_parse_roundtrip() {
     let wire = "protocol=https\nhost=example.com\nusername=u\npassword=p\n";
     let cred = Credential::parse(wire);
-    assert_eq!(cred.protocol.as_deref(), Some("https"));
+    assert_eq!(cred.protocol(), Some("https"));
     let out = cred.serialize();
     assert!(out.contains("protocol=https"));
 }

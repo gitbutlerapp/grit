@@ -11,11 +11,11 @@ use std::sync::Arc;
 use crate::config::ConfigSet;
 use crate::diff::{mode_from_metadata, DiffEntry, DiffStatus};
 use crate::hooks::{run_post_checkout, run_post_rewrite, HookName, RewriteKind};
-use crate::index::MODE_REGULAR;
 use crate::lockfile::LockWait;
 use crate::notes::{
     apply_prepared_notes_rewrite, prepare_notes_for_rewrite, NotesRewriteCommand, NotesRewritePlan,
 };
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
@@ -489,9 +489,9 @@ struct StagedPathPrestate {
 fn worktree_matches_staged_index(
     worktree_path: &std::path::Path,
     index_blob: &[u8],
-    index_mode: u32,
+    index_mode: FileMode,
 ) -> crate::error::Result<bool> {
-    if index_mode != MODE_REGULAR && index_mode != crate::index::MODE_EXECUTABLE {
+    if index_mode != FileMode::REGULAR && index_mode != FileMode::EXECUTABLE {
         return Ok(false);
     }
     if !worktree_path.is_file() {
@@ -668,7 +668,7 @@ impl FixupApplyPrestate {
                                 .map_err(crate::history::error::worktree_apply_io)?,
                         )
                     } else {
-                        MODE_REGULAR
+                        FileMode::REGULAR
                     };
                     if let Some(entry) = index.get_mut(key, 0) {
                         entry.oid = oid;
@@ -894,7 +894,7 @@ fn clear_fixup_staging_after_apply(
                     entry.mode = mode;
                 } else {
                     // A gitlink names a commit in the submodule's own object store.
-                    let size = if mode == crate::index::MODE_GITLINK {
+                    let size = if mode == FileMode::GITLINK {
                         0
                     } else {
                         repo.odb()
@@ -936,12 +936,12 @@ fn tree_entry_at_path(
     repo: &Repository,
     tree: ObjectId,
     path: &str,
-) -> crate::error::Result<Option<(ObjectId, u32)>> {
+) -> crate::error::Result<Option<(ObjectId, FileMode)>> {
     let entry = repo
         .odb()
         .tree_entry_at_path(&tree, path.as_bytes())
         .map_err(crate::history::error::worktree_apply_engine)?;
-    Ok(entry.map(|e| (e.oid, e.mode.bits())))
+    Ok(entry.map(|e| (e.oid, e.mode)))
 }
 
 pub(crate) fn commit_tree_for_apply(
@@ -1610,7 +1610,7 @@ pub(crate) struct WorktreePathSnapshot {
     pub(crate) from_old_tree: bool,
     /// Blob or tree identity from the pre-apply tree when `from_old_tree`.
     pub(crate) tree_oid: Option<ObjectId>,
-    pub(crate) tree_mode: u32,
+    pub(crate) tree_mode: FileMode,
     #[cfg(unix)]
     mode: u32,
 }
@@ -1623,10 +1623,10 @@ impl WorktreePathSnapshot {
 
     /// The file a checkout of a blob with Git `git_mode` writes (`0` permissions mean the
     /// process default).
-    pub(crate) fn file(git_mode: u32, bytes: Vec<u8>) -> Self {
+    pub(crate) fn file(git_mode: FileMode, bytes: Vec<u8>) -> Self {
         match git_mode {
-            0o120000 => Self::from_parts(WorktreePathKind::Symlink, Some(bytes), 0),
-            0o100755 => Self::from_parts(WorktreePathKind::Regular, Some(bytes), 0o755),
+            FileMode::SYMLINK => Self::from_parts(WorktreePathKind::Symlink, Some(bytes), 0),
+            FileMode::EXECUTABLE => Self::from_parts(WorktreePathKind::Regular, Some(bytes), 0o755),
             _ => Self::from_parts(WorktreePathKind::Regular, Some(bytes), 0),
         }
     }
@@ -1644,14 +1644,14 @@ impl WorktreePathSnapshot {
             bytes,
             from_old_tree: false,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
             #[cfg(unix)]
             mode: unix_mode,
         }
     }
 
     /// Pre-apply path that matches the old tree; rollback materializes it from the ODB.
-    pub(crate) fn from_old_tree(kind: WorktreePathKind, oid: ObjectId, mode: u32) -> Self {
+    pub(crate) fn from_old_tree(kind: WorktreePathKind, oid: ObjectId, mode: FileMode) -> Self {
         #[cfg(unix)]
         let unix_mode = match kind {
             WorktreePathKind::Directory => 0o755,
@@ -1682,7 +1682,7 @@ impl WorktreePathSnapshot {
             bytes: None,
             from_old_tree: true,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
             #[cfg(unix)]
             mode,
         }
@@ -1705,14 +1705,14 @@ impl WorktreePathSnapshot {
     }
 
     /// Whether this file is what checking out a blob of `git_mode` with `data` produces.
-    pub(crate) fn content_matches(&self, git_mode: u32, data: &[u8]) -> bool {
+    pub(crate) fn content_matches(&self, git_mode: FileMode, data: &[u8]) -> bool {
         let Some(bytes) = self.bytes.as_deref() else {
             return false;
         };
         let mode_matches = match self.kind {
-            WorktreePathKind::Symlink => git_mode == 0o120000,
-            WorktreePathKind::Regular if self.is_executable() => git_mode == 0o100755,
-            WorktreePathKind::Regular => git_mode == 0o100644,
+            WorktreePathKind::Symlink => git_mode == FileMode::SYMLINK,
+            WorktreePathKind::Regular if self.is_executable() => git_mode == FileMode::EXECUTABLE,
+            WorktreePathKind::Regular => git_mode == FileMode::REGULAR,
             WorktreePathKind::Absent | WorktreePathKind::Directory => false,
         };
         mode_matches && bytes == data
@@ -1748,7 +1748,7 @@ fn snapshot_worktree_for_tree_transition(
         };
         if index
             .get(path.as_bytes(), 0)
-            .is_some_and(|entry| entry.mode == crate::index::MODE_GITLINK)
+            .is_some_and(|entry| entry.mode == FileMode::GITLINK)
         {
             continue;
         }
@@ -1770,13 +1770,13 @@ fn worktree_snapshot_from_tree_change(
         return Ok(WorktreePathSnapshot::from_old_tree(
             WorktreePathKind::Absent,
             change.old_oid,
-            change.old_mode.bits(),
+            change.old_mode,
         ));
     }
-    let mode = change.old_mode.bits();
+    let mode = change.old_mode;
     let kind = match mode {
-        crate::index::MODE_TREE | crate::index::MODE_GITLINK => WorktreePathKind::Directory,
-        0o120000 => WorktreePathKind::Symlink,
+        FileMode::TREE | FileMode::GITLINK => WorktreePathKind::Directory,
+        FileMode::SYMLINK => WorktreePathKind::Symlink,
         _ => WorktreePathKind::Regular,
     };
     Ok(WorktreePathSnapshot::from_old_tree(
@@ -1803,7 +1803,7 @@ pub(crate) fn read_worktree_path_snapshot(
                 bytes: None,
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o644,
             });
@@ -1817,7 +1817,7 @@ pub(crate) fn read_worktree_path_snapshot(
             bytes: Some(target.as_os_str().as_encoded_bytes().to_vec()),
             from_old_tree: false,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
             #[cfg(unix)]
             mode: 0,
         });
@@ -1833,7 +1833,7 @@ pub(crate) fn read_worktree_path_snapshot(
                 bytes: Some(bytes),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 mode,
             });
         }
@@ -1844,7 +1844,7 @@ pub(crate) fn read_worktree_path_snapshot(
                 bytes: Some(bytes),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
             });
         }
     }
@@ -1853,7 +1853,7 @@ pub(crate) fn read_worktree_path_snapshot(
         bytes: None,
         from_old_tree: false,
         tree_oid: None,
-        tree_mode: 0,
+        tree_mode: FileMode::ABSENT,
         #[cfg(unix)]
         mode: 0o755,
     })
@@ -1905,7 +1905,7 @@ pub(crate) fn restore_worktree_after_failed_apply(
                 })?;
             }
             WorktreePathKind::Regular | WorktreePathKind::Symlink => {
-                if saved.tree_mode == crate::index::MODE_GITLINK {
+                if saved.tree_mode == FileMode::GITLINK {
                     materialize_gitlink_worktree(work_tree, path.as_str(), &mut dir_cache)
                         .map_err(|e| {
                             worktree_apply_str(format!("failed to restore gitlink '{path}': {e}"))
@@ -1967,7 +1967,7 @@ fn restore_worktree_path_from_old_tree(
             let Some((oid, mode)) = tree_entry_at_path(repo, *old_tree, path)? else {
                 return Ok(());
             };
-            if mode == crate::index::MODE_GITLINK {
+            if mode == FileMode::GITLINK {
                 return materialize_gitlink_worktree(work_tree, path, &mut LeadingDirCache::new());
             }
             let index = repo.load_index()?;
@@ -2096,7 +2096,9 @@ mod inject_and_apply_tests {
 
     use crate::error::Error;
     use crate::history::plan::plan_rewrite;
-    use crate::history::{CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions};
+    use crate::history::{
+        CommitEdit, CommitRewrite, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
+    };
     use crate::objects::{parse_commit, ObjectKind};
     use crate::reflog::ReflogEntry;
     use crate::refs::store::{
@@ -2215,7 +2217,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 5,
@@ -2260,7 +2262,7 @@ mod inject_and_apply_tests {
                     mtime_nsec: 0,
                     dev: 0,
                     ino: 0,
-                    mode: crate::index::MODE_REGULAR,
+                    mode: FileMode::REGULAR,
                     uid: 0,
                     gid: 0,
                     size: 4,
@@ -2283,12 +2285,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -2344,7 +2346,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 5,
@@ -2389,7 +2391,7 @@ mod inject_and_apply_tests {
                     mtime_nsec: 0,
                     dev: 0,
                     ino: 0,
-                    mode: crate::index::MODE_REGULAR,
+                    mode: FileMode::REGULAR,
                     uid: 0,
                     gid: 0,
                     size: 4,
@@ -2407,12 +2409,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -2498,7 +2500,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 5,
@@ -2540,7 +2542,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 4,
@@ -2555,12 +2557,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -2659,7 +2661,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 5,
@@ -2703,7 +2705,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 11,
@@ -2728,7 +2730,7 @@ mod inject_and_apply_tests {
                     mtime_nsec: 0,
                     dev: 0,
                     ino: 0,
-                    mode: crate::index::MODE_REGULAR,
+                    mode: FileMode::REGULAR,
                     uid: 0,
                     gid: 0,
                     size: 4,
@@ -2776,7 +2778,7 @@ mod inject_and_apply_tests {
                     mtime_nsec: 0,
                     dev: 0,
                     ino: 0,
-                    mode: crate::index::MODE_REGULAR,
+                    mode: FileMode::REGULAR,
                     uid: 0,
                     gid: 0,
                     size: 11,
@@ -2794,7 +2796,7 @@ mod inject_and_apply_tests {
                     mtime_nsec: 0,
                     dev: 0,
                     ino: 0,
-                    mode: crate::index::MODE_REGULAR,
+                    mode: FileMode::REGULAR,
                     uid: 0,
                     gid: 0,
                     size: 4,
@@ -2812,12 +2814,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(merged_tree),
                 message: None,
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -2888,7 +2890,7 @@ mod inject_and_apply_tests {
             bytes: Some(b"original file\n".to_vec()),
             from_old_tree: false,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
             #[cfg(unix)]
             mode: 0o100644,
         };
@@ -2918,7 +2920,7 @@ mod inject_and_apply_tests {
             bytes: Some(b"original file\n".to_vec()),
             from_old_tree: false,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
             mode: 0o100644,
         };
         restore_worktree_path(&tracked, &saved).expect("restore");
@@ -2946,7 +2948,7 @@ mod inject_and_apply_tests {
             bytes: Some(b"link-target.txt".to_vec()),
             from_old_tree: false,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
             mode: 0,
         };
         restore_worktree_path(&tracked, &saved).expect("restore symlink");
@@ -2983,7 +2985,7 @@ mod inject_and_apply_tests {
             bytes: Some(vec![0xff]),
             from_old_tree: false,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
         };
         let err = restore_worktree_path(&tracked, &saved).expect_err("non-utf8 target");
         assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
@@ -3029,7 +3031,7 @@ mod inject_and_apply_tests {
                 bytes: None,
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o755,
             },
@@ -3041,7 +3043,7 @@ mod inject_and_apply_tests {
                 bytes: Some(b"child\n".to_vec()),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -3077,7 +3079,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 6,
@@ -3125,7 +3127,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 12,
@@ -3140,12 +3142,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -3222,7 +3224,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 5,
@@ -3269,7 +3271,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_SYMLINK,
+            mode: FileMode::SYMLINK,
             uid: 0,
             gid: 0,
             size: 14,
@@ -3284,12 +3286,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -3351,7 +3353,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 5,
@@ -3397,7 +3399,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 7,
@@ -3412,12 +3414,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -3480,7 +3482,7 @@ mod inject_and_apply_tests {
 
     #[test]
     fn snapshot_worktree_for_tree_transition_skips_gitlink_directory() {
-        use crate::index::MODE_GITLINK;
+        use crate::objects::FileMode;
 
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
@@ -3516,7 +3518,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             uid: 0,
             gid: 0,
             size: 0,
@@ -3536,7 +3538,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 4,
@@ -3560,7 +3562,7 @@ mod inject_and_apply_tests {
 
     #[test]
     fn apply_rewrite_checkout_failure_preserves_gitlink_worktree() {
-        use crate::index::MODE_GITLINK;
+        use crate::objects::FileMode;
         use crate::test_support::inject::set_test_inject_index_write_fail_remaining;
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -3597,7 +3599,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             uid: 0,
             gid: 0,
             size: 0,
@@ -3638,7 +3640,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 4,
@@ -3653,12 +3655,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,
@@ -3738,7 +3740,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_EXECUTABLE,
+            mode: FileMode::EXECUTABLE,
             uid: 0,
             gid: 0,
             size: 11,
@@ -3778,7 +3780,7 @@ mod inject_and_apply_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_EXECUTABLE,
+            mode: FileMode::EXECUTABLE,
             uid: 0,
             gid: 0,
             size: 11,
@@ -3794,12 +3796,12 @@ mod inject_and_apply_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             root,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(child_tree),
                 message: Some("rewritten\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let plan = plan_rewrite(
             &repo,

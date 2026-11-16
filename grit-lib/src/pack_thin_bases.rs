@@ -202,11 +202,13 @@ pub(crate) fn find_thin_bases(
 
 /// `Some(true)` for a directory entry, `Some(false)` for a file or symlink, `None` for
 /// gitlinks and anything else that cannot be a delta base.
-fn entry_is_tree(mode: u32) -> Option<bool> {
-    match mode & 0o170000 {
-        0o040000 => Some(true),
-        0o100000 | 0o120000 => Some(false),
-        _ => None,
+fn entry_is_tree(mode: crate::objects::FileMode) -> Option<bool> {
+    if mode.is_tree() {
+        Some(true)
+    } else if mode.is_regular() || mode.is_symlink() {
+        Some(false)
+    } else {
+        None
     }
 }
 

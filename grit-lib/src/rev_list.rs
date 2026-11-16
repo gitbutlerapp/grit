@@ -21,12 +21,13 @@ use crate::diff::{detect_renames, diff_trees, diff_trees_for_pathspecs, DiffStat
 use crate::error::{Error, Result};
 use crate::ident::committer_unix_seconds_for_ordering;
 use crate::ignore::{parse_sparse_patterns_from_blob, ParsedSparsePatterns};
-use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
+use crate::index::{CacheTreeNode, Index};
 use crate::log_walk::WalkedCommits;
 use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_with_graph, RangeWalkHide,
     ReachableWalkCommitterCutoffs,
 };
+use crate::objects::FileMode;
 
 /// Excluded commits for a rev walk: either an explicit set (promisor, first-parent frontier)
 /// or a painted range hide predicate.
@@ -2836,7 +2837,7 @@ fn indexed_object_roots(repo: &Repository) -> Result<Vec<RootObject>> {
     let idx = Index::load(&index_path)?;
     let mut roots = Vec::new();
     for e in &idx.entries {
-        if e.stage() != 0 || e.mode == MODE_GITLINK || e.mode == MODE_TREE {
+        if e.stage() != 0 || e.mode == FileMode::GITLINK || e.mode == FileMode::TREE {
             continue;
         }
         let path_str = String::from_utf8_lossy(&e.path).into_owned();
@@ -3847,13 +3848,13 @@ fn commit_path_treesame_to_relevant_parents(
     }
     let mut tree_buf = Vec::new();
     let commit = load_commit(repo, oid)?;
-    let commit_map: HashMap<String, (ObjectId, u32)> =
+    let commit_map: HashMap<String, (ObjectId, FileMode)> =
         flatten_tree_with_mode(repo, commit.tree, "", &mut tree_buf)?
             .into_iter()
             .collect();
     for parent_oid in relevant {
         let parent = load_commit(repo, parent_oid)?;
-        let parent_map: HashMap<String, (ObjectId, u32)> =
+        let parent_map: HashMap<String, (ObjectId, FileMode)> =
             flatten_tree_with_mode(repo, parent.tree, "", &mut tree_buf)?
                 .into_iter()
                 .collect();
@@ -4174,7 +4175,7 @@ fn path_merge_survives_simplify(
     if commit.parents.len() <= 1 {
         return Ok(false);
     }
-    let commit_map: HashMap<String, (ObjectId, u32)> =
+    let commit_map: HashMap<String, (ObjectId, FileMode)> =
         flatten_tree_with_mode(repo, commit.tree, "", &mut tree_buf)?
             .into_iter()
             .collect();
@@ -4184,7 +4185,7 @@ fn path_merge_survives_simplify(
     let mut differing_parent_oids = Vec::new();
     for (nth, parent_oid) in commit.parents.iter().enumerate() {
         let parent = load_commit(repo, *parent_oid)?;
-        let parent_map: HashMap<String, (ObjectId, u32)> =
+        let parent_map: HashMap<String, (ObjectId, FileMode)> =
             flatten_tree_with_mode(repo, parent.tree, "", &mut tree_buf)?
                 .into_iter()
                 .collect();
@@ -4254,13 +4255,13 @@ fn path_treesame_parents(
 
     let mut tree_buf = Vec::new();
     let commit = load_commit(repo, oid)?;
-    let commit_map: HashMap<String, (ObjectId, u32)> =
+    let commit_map: HashMap<String, (ObjectId, FileMode)> =
         flatten_tree_with_mode(repo, commit.tree, "", &mut tree_buf)?
             .into_iter()
             .collect();
     for parent_oid in parents {
         let parent = load_commit(repo, *parent_oid)?;
-        let parent_map: HashMap<String, (ObjectId, u32)> =
+        let parent_map: HashMap<String, (ObjectId, FileMode)> =
             flatten_tree_with_mode(repo, parent.tree, "", &mut tree_buf)?
                 .into_iter()
                 .collect();
@@ -4878,7 +4879,7 @@ const COMPONENT_CACHE_MAX_ENTRIES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CachedTreeChild {
-    Found { oid: ObjectId, mode: u32 },
+    Found { oid: ObjectId, mode: FileMode },
     Missing,
 }
 
@@ -4957,7 +4958,7 @@ impl DenseWalkCache {
         )? {
             Some(entry) => CachedTreeChild::Found {
                 oid: entry.oid,
-                mode: entry.mode.bits(),
+                mode: entry.mode,
             },
             None => CachedTreeChild::Missing,
         };
@@ -5163,7 +5164,7 @@ fn literal_path_leaf_at_tree(
     tree: ObjectId,
     literal_path: &str,
     cache: &mut DenseWalkCache,
-) -> Result<Option<(ObjectId, u32)>> {
+) -> Result<Option<(ObjectId, FileMode)>> {
     let path_trimmed = literal_path.trim_end_matches('/');
     let parts: Vec<&str> = path_trimmed.split('/').filter(|p| !p.is_empty()).collect();
     if parts.is_empty() {
@@ -5765,7 +5766,7 @@ impl<'a> RevPathspecCheck<'a> {
         self.specs
     }
 
-    fn path_matches(&self, path: &str, mode: u32) -> bool {
+    fn path_matches(&self, path: &str, mode: FileMode) -> bool {
         if let Some(m) = &self.attr {
             m.matches_entry(path, mode)
         } else {
@@ -5773,7 +5774,7 @@ impl<'a> RevPathspecCheck<'a> {
         }
     }
 
-    fn entry_is_relevant(&self, path: &str, is_tree: bool, mode: u32) -> bool {
+    fn entry_is_relevant(&self, path: &str, is_tree: bool, mode: FileMode) -> bool {
         if !is_tree && self.path_matches(path, mode) {
             return true;
         }
@@ -5782,8 +5783,8 @@ impl<'a> RevPathspecCheck<'a> {
 }
 
 fn path_differs_for_specs(
-    current: &HashMap<String, (ObjectId, u32)>,
-    parent: &HashMap<String, (ObjectId, u32)>,
+    current: &HashMap<String, (ObjectId, FileMode)>,
+    parent: &HashMap<String, (ObjectId, FileMode)>,
     paths: &RevPathspecCheck<'_>,
 ) -> bool {
     let mut union = std::collections::BTreeSet::new();
@@ -5795,7 +5796,7 @@ fn path_differs_for_specs(
             .get(&path)
             .or_else(|| parent.get(&path))
             .map(|(_, m)| *m)
-            .unwrap_or(0o100644);
+            .unwrap_or(FileMode::REGULAR);
         if !paths.path_matches(&path, mode) {
             continue;
         }
@@ -5806,8 +5807,8 @@ fn path_differs_for_specs(
     false
 }
 
-fn is_tree_mode(mode: u32) -> bool {
-    mode == 0o040000
+fn is_tree_mode(mode: FileMode) -> bool {
+    mode == FileMode::TREE
 }
 
 fn read_parsed_tree(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
@@ -5925,20 +5926,16 @@ fn trees_differ_tree_entries(
             (Some(o), Some(n)) => {
                 let cmp = crate::objects::tree_name_cmp(
                     &o.name,
-                    is_tree_mode(o.mode.bits()),
+                    is_tree_mode(o.mode),
                     &n.name,
-                    is_tree_mode(n.mode.bits()),
+                    is_tree_mode(n.mode),
                 );
                 match cmp {
                     Ordering::Less => {
                         let name = String::from_utf8_lossy(&o.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        if paths.entry_is_relevant(
-                            &path,
-                            is_tree_mode(o.mode.bits()),
-                            o.mode.bits(),
-                        ) {
-                            if is_tree_mode(o.mode.bits()) {
+                        if paths.entry_is_relevant(&path, is_tree_mode(o.mode), o.mode) {
+                            if is_tree_mode(o.mode) {
                                 if tree_has_pathspec_match_cached(repo, o.oid, &path, paths, None)?
                                 {
                                     return Ok(true);
@@ -5952,12 +5949,8 @@ fn trees_differ_tree_entries(
                     Ordering::Greater => {
                         let name = String::from_utf8_lossy(&n.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        if paths.entry_is_relevant(
-                            &path,
-                            is_tree_mode(n.mode.bits()),
-                            n.mode.bits(),
-                        ) {
-                            if is_tree_mode(n.mode.bits()) {
+                        if paths.entry_is_relevant(&path, is_tree_mode(n.mode), n.mode) {
+                            if is_tree_mode(n.mode) {
                                 if tree_has_pathspec_match_cached(repo, n.oid, &path, paths, None)?
                                 {
                                     return Ok(true);
@@ -5971,15 +5964,14 @@ fn trees_differ_tree_entries(
                     Ordering::Equal => {
                         let name = String::from_utf8_lossy(&o.name);
                         let path = format_path_for_tree_diff(prefix, &name);
-                        let o_is_tree = is_tree_mode(o.mode.bits());
-                        let n_is_tree = is_tree_mode(n.mode.bits());
+                        let o_is_tree = is_tree_mode(o.mode);
+                        let n_is_tree = is_tree_mode(n.mode);
                         let mode = if o_is_tree { o.mode } else { n.mode };
-                        let relevant =
-                            paths.entry_is_relevant(&path, o_is_tree || n_is_tree, mode.bits());
+                        let relevant = paths.entry_is_relevant(&path, o_is_tree || n_is_tree, mode);
                         if relevant {
                             if o.oid != n.oid
-                                || crate::index::canon_mode(o.mode.bits())
-                                    != crate::index::canon_mode(n.mode.bits())
+                                || crate::index::canon_mode(o.mode)
+                                    != crate::index::canon_mode(n.mode)
                             {
                                 if o_is_tree && n_is_tree {
                                     if trees_differ_for_pathspecs_optional(
@@ -6021,8 +6013,8 @@ fn trees_differ_tree_entries(
             (Some(o), None) => {
                 let name = String::from_utf8_lossy(&o.name);
                 let path = format_path_for_tree_diff(prefix, &name);
-                if paths.entry_is_relevant(&path, is_tree_mode(o.mode.bits()), o.mode.bits()) {
-                    if is_tree_mode(o.mode.bits()) {
+                if paths.entry_is_relevant(&path, is_tree_mode(o.mode), o.mode) {
+                    if is_tree_mode(o.mode) {
                         if tree_has_pathspec_match_cached(repo, o.oid, &path, paths, None)? {
                             return Ok(true);
                         }
@@ -6035,8 +6027,8 @@ fn trees_differ_tree_entries(
             (None, Some(n)) => {
                 let name = String::from_utf8_lossy(&n.name);
                 let path = format_path_for_tree_diff(prefix, &name);
-                if paths.entry_is_relevant(&path, is_tree_mode(n.mode.bits()), n.mode.bits()) {
-                    if is_tree_mode(n.mode.bits()) {
+                if paths.entry_is_relevant(&path, is_tree_mode(n.mode), n.mode) {
+                    if is_tree_mode(n.mode) {
                         if tree_has_pathspec_match_cached(repo, n.oid, &path, paths, None)? {
                             return Ok(true);
                         }
@@ -6134,7 +6126,7 @@ fn trees_differ_at_literal_path(
                 tree_oids_at_literal_prefix_pair(repo, old_o, new_o, dir, cache)?;
             let leaf_entry = |tree: Option<ObjectId>,
                               cache: &mut DenseWalkCache|
-             -> Result<Option<(ObjectId, u32)>> {
+             -> Result<Option<(ObjectId, FileMode)>> {
                 let Some(oid) = tree else {
                     return Ok(None);
                 };
@@ -9585,7 +9577,7 @@ fn retain_objects_matching_pathspecs(
 ) {
     objects.retain(|(_, path)| {
         path.is_empty()
-            || paths.path_matches(path, 0o100644)
+            || paths.path_matches(path, FileMode::REGULAR)
             || paths
                 .specs()
                 .iter()
@@ -9631,7 +9623,7 @@ fn collect_pathspec_matching_tree_objects_inner(
     let oid_len = repo.odb().hash_algo().len();
     for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
         let entry = entry?;
-        if entry.mode == 0o160000 {
+        if entry.mode == FileMode::GITLINK {
             continue;
         }
         let name = String::from_utf8_lossy(entry.name);
@@ -9640,7 +9632,7 @@ fn collect_pathspec_matching_tree_objects_inner(
         } else {
             format!("{prefix}/{name}")
         };
-        let is_tree = entry.mode == 0o040000;
+        let is_tree = entry.mode == FileMode::TREE;
         let matches = paths.path_matches(&path, entry.mode);
         let wants_descent = paths
             .specs()
@@ -10222,7 +10214,7 @@ fn collect_tree_objects_filtered(
     for entry in TreeRefIter::with_oid_len(tree_blob.as_slice(), oid_len) {
         tree_state.poll_cancel()?;
         let entry = entry?;
-        if entry.mode == 0o160000 {
+        if entry.mode == FileMode::GITLINK {
             continue;
         }
         let name = String::from_utf8_lossy(entry.name).to_string();
@@ -10231,7 +10223,7 @@ fn collect_tree_objects_filtered(
         } else {
             format!("{prefix}/{name}")
         };
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             if global_tree_dedup && tree_state.fully_enumerated_trees.contains(&entry.oid) {
                 continue;
             }
@@ -10838,7 +10830,7 @@ fn flatten_tree_with_mode(
     tree_oid: ObjectId,
     prefix: &str,
     buf: &mut Vec<u8>,
-) -> Result<Vec<(String, (ObjectId, u32))>> {
+) -> Result<Vec<(String, (ObjectId, FileMode))>> {
     let mut result = Vec::new();
     let kind = match repo.odb().read_into(&tree_oid, buf) {
         Ok(k) => k,
@@ -12133,7 +12125,12 @@ mod line_coverage_tests {
     use std::fs;
     use tempfile::tempdir;
 
-    fn write_tree_entry(odb: &crate::odb::Odb, mode: u32, name: &str, oid: ObjectId) -> ObjectId {
+    fn write_tree_entry(
+        odb: &crate::odb::Odb,
+        mode: FileMode,
+        name: &str,
+        oid: ObjectId,
+    ) -> ObjectId {
         let mut body = format!("{mode:o} {name}\0").into_bytes();
         body.extend_from_slice(oid.as_bytes());
         odb.write(ObjectKind::Tree, &body).expect("tree")
@@ -12157,7 +12154,7 @@ mod line_coverage_tests {
             .odb()
             .write(ObjectKind::Blob, b"payload\n")
             .expect("blob");
-        let tree = write_tree_entry(&repo.odb(), 0o100644, "tracked.txt", blob);
+        let tree = write_tree_entry(&repo.odb(), FileMode::REGULAR, "tracked.txt", blob);
         let ident = "T <t@e.com> 100 +0000";
         let mut parent: Option<ObjectId> = None;
         let mut tips = Vec::new();
@@ -12721,7 +12718,7 @@ mod line_coverage_tests {
         let repo = Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty())
             .expect("open");
         let blob = repo.odb().write(ObjectKind::Blob, b"data\n").expect("blob");
-        let sub_tree = write_tree_entry(&repo.odb(), 0o100644, "inside.txt", blob);
+        let sub_tree = write_tree_entry(&repo.odb(), FileMode::REGULAR, "inside.txt", blob);
         let sub_commit_body = format!(
             "tree {sub_tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nsub\n"
         );
@@ -13214,11 +13211,11 @@ mod line_coverage_tests {
         let repo = Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty())
             .expect("open");
         let blob = repo.odb().write(ObjectKind::Blob, b"mode line\n")?;
-        let tree644 = write_tree_entry(&repo.odb(), 0o100644, "tracked.txt", blob);
+        let tree644 = write_tree_entry(&repo.odb(), FileMode::REGULAR, "tracked.txt", blob);
         let ident = "T <t@e.com> 100 +0000";
         let c1_body = format!("tree {tree644}\nauthor {ident}\ncommitter {ident}\n\nc1\n");
         let c1 = repo.odb().write(ObjectKind::Commit, c1_body.as_bytes())?;
-        let tree755 = write_tree_entry(&repo.odb(), 0o100755, "tracked.txt", blob);
+        let tree755 = write_tree_entry(&repo.odb(), FileMode::EXECUTABLE, "tracked.txt", blob);
         let c2_body =
             format!("tree {tree755}\nparent {c1}\nauthor {ident}\ncommitter {ident}\n\nc2\n");
         let c2 = repo.odb().write(ObjectKind::Commit, c2_body.as_bytes())?;
@@ -13836,7 +13833,7 @@ mod line_coverage_tests {
             cache.lookup_tree_component(&repo, root, "README.md")?,
             CachedTreeChild::Found {
                 oid: blob,
-                mode: 0o100644
+                mode: FileMode::REGULAR
             }
         );
         assert_eq!(
@@ -13848,14 +13845,14 @@ mod line_coverage_tests {
             cache.lookup_tree_component(&repo, root, "doc")?,
             CachedTreeChild::Found {
                 oid: sub,
-                mode: 0o040000
+                mode: FileMode::TREE
             }
         );
         assert_eq!(
             cache.lookup_tree_component(&repo, root, "doc.txt")?,
             CachedTreeChild::Found {
                 oid: other,
-                mode: 0o100644
+                mode: FileMode::REGULAR
             }
         );
         assert_eq!(

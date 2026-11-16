@@ -537,7 +537,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: crate::objects::FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

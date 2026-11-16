@@ -2,8 +2,9 @@
 
 use grit_lib::maintenance::fsck::{fsck_object, FsckObjectOptions};
 use grit_lib::maintenance::repository_fsck::{issue_msg_id, FsckOptions};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{HashAlgo, ObjectKind};
-use grit_lib::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
+use grit_lib::path_validate::{validate_path, PathValidationKind, ProtectOptions};
 use grit_lib::progress::{CancelToken, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{
@@ -190,7 +191,7 @@ fn validate_path_empty_separators_match_git_update_index_rejection() {
         assert!(
             validate_path(
                 path.as_bytes(),
-                EntryMode::new(0o100644),
+                FileMode::REGULAR,
                 opts,
                 PathValidationKind::Worktree,
             )
@@ -220,7 +221,7 @@ fn validate_path_empty_separators_match_git_update_index_rejection() {
     }
     assert!(validate_path(
         b"a/b",
-        EntryMode::new(0o100644),
+        FileMode::REGULAR,
         opts,
         PathValidationKind::Worktree,
     )

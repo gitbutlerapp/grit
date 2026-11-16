@@ -13,9 +13,10 @@ use crate::diff::{
 };
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, FilterError, Result, SubmoduleError};
-use crate::index::{Index, IndexEntry, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_SYMLINK};
+use crate::index::{Index, IndexEntry, IndexLock};
 use crate::index_name_hash_lazy::memihash;
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
+use crate::objects::FileMode;
 use crate::objects::ObjectKind;
 use crate::objects::{parse_commit, ObjectId};
 use crate::path_icase::{paths_equal, IcaseIndexCollisionGroups};
@@ -515,7 +516,7 @@ fn restore_conflict_side(
             }),
         });
     };
-    if entry.mode == MODE_GITLINK {
+    if entry.mode == FileMode::GITLINK {
         checkout_submodule_worktree_to_commit(
             &crate::repo_relpath::worktree_abs(work_tree, path),
             entry.oid,
@@ -589,12 +590,12 @@ fn restore_conflict_remerge(
             path: path.to_string(),
         }));
     };
-    if ours.mode == MODE_GITLINK || theirs.mode == MODE_GITLINK {
+    if ours.mode == FileMode::GITLINK || theirs.mode == FileMode::GITLINK {
         return Ok(());
     }
     if index
         .get(path_bytes.as_ref(), 1)
-        .is_some_and(|e| e.mode == MODE_GITLINK)
+        .is_some_and(|e| e.mode == FileMode::GITLINK)
     {
         return Ok(());
     }
@@ -644,12 +645,12 @@ fn path_has_unmerged(index: &Index, path: &[u8]) -> bool {
         .any(|e| e.path == path && e.stage() != 0)
 }
 
-fn conflict_worktree_mode(ours_mode: u32, theirs_mode: u32) -> u32 {
+fn conflict_worktree_mode(ours_mode: FileMode, theirs_mode: FileMode) -> FileMode {
+    let regular = |mode| matches!(mode, FileMode::REGULAR | FileMode::EXECUTABLE);
     if ours_mode == theirs_mode {
         ours_mode
-    } else if matches!(ours_mode, 0o100644 | 0o100755) && matches!(theirs_mode, 0o100644 | 0o100755)
-    {
-        0o100644
+    } else if regular(ours_mode) && regular(theirs_mode) {
+        FileMode::REGULAR
     } else {
         ours_mode
     }
@@ -889,7 +890,7 @@ fn index_stage0_paths_under(index: &Index, prefix: &str) -> Vec<String> {
 struct WorktreeWriteFromIndex {
     path: String,
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
 }
 
 fn build_restore_icase_collision_plan(
@@ -1196,7 +1197,7 @@ fn apply_worktree_restore_inner(
             if !pathspec_filter.matches_entry(&path, entry.mode) {
                 continue;
             }
-            if entry.mode == MODE_GITLINK {
+            if entry.mode == FileMode::GITLINK {
                 continue;
             }
             if worktree_index_entry_up_to_date(repo, work_tree, entry, &path, index_mtime, &rules)?
@@ -1371,7 +1372,7 @@ fn worktree_index_entry_up_to_date(
     index_mtime: Option<(u32, u32)>,
     rules: &WorktreeRules,
 ) -> Result<bool> {
-    if entry.mode != crate::index::MODE_REGULAR && entry.mode != MODE_EXECUTABLE {
+    if entry.mode != crate::objects::FileMode::REGULAR && entry.mode != FileMode::EXECUTABLE {
         return Ok(false);
     }
     let abs_path = crate::repo_relpath::worktree_abs(work_tree, path);
@@ -1410,7 +1411,7 @@ fn restore_blob_to_worktree(
     work_tree: &Path,
     path: &str,
     oid: &ObjectId,
-    mode: u32,
+    mode: FileMode,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<fs::Metadata> {
     write_blob_to_worktree(repo, rules, work_tree, path, oid, mode, dir_cache)?.ok_or_else(|| {
@@ -1426,7 +1427,7 @@ fn restore_worktree_blob_from_index(
     work_tree: &Path,
     path: &str,
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
     rules: &WorktreeRules,
     dir_cache: &mut LeadingDirCache,
     journal: &mut CheckoutJournal,
@@ -1434,7 +1435,7 @@ fn restore_worktree_blob_from_index(
     outcome: &mut RestoreOutcome,
     index_dirty: &mut bool,
 ) -> Result<()> {
-    if mode == MODE_GITLINK {
+    if mode == FileMode::GITLINK {
         return Ok(());
     }
     journal.preserve_before_write(path)?;
@@ -1468,7 +1469,7 @@ fn restore_worktree_entry(
     outcome: &mut RestoreOutcome,
     index_dirty: &mut bool,
 ) -> Result<()> {
-    if entry.mode == MODE_GITLINK {
+    if entry.mode == FileMode::GITLINK {
         return Ok(());
     }
     journal.preserve_before_write(path)?;
@@ -1502,8 +1503,12 @@ fn restore_worktree_entry(
     Ok(())
 }
 
-fn symlink_target_byte_len(repo: &Repository, oid: &ObjectId, mode: u32) -> Result<Option<usize>> {
-    if mode != MODE_SYMLINK {
+fn symlink_target_byte_len(
+    repo: &Repository,
+    oid: &ObjectId,
+    mode: FileMode,
+) -> Result<Option<usize>> {
+    if mode != FileMode::SYMLINK {
         return Ok(None);
     }
     Ok(Some(repo.odb().read(oid)?.data.len()))
@@ -1544,7 +1549,7 @@ fn refresh_restored_index_stats(
 }
 
 fn blob_index_size(repo: &Repository, entry: &FlatTreeEntry) -> Result<u32> {
-    if entry.mode == MODE_GITLINK {
+    if entry.mode == FileMode::GITLINK {
         return Ok(0);
     }
     let obj = repo.odb().read(&entry.oid)?;
@@ -1718,9 +1723,13 @@ mod tests {
         std::fs::write(wt.join("f"), "data\n").expect("write");
         let mut index = repo.load_index().expect("index");
         let oid = repo.odb().write(ObjectKind::Blob, b"data\n").expect("blob");
-        let entry =
-            crate::index::entry_from_stat(&wt.join("f"), b"f", oid, crate::index::MODE_REGULAR)
-                .expect("entry");
+        let entry = crate::index::entry_from_stat(
+            &wt.join("f"),
+            b"f",
+            oid,
+            crate::objects::FileMode::REGULAR,
+        )
+        .expect("entry");
         index.add_or_replace(entry);
         index.sort();
         let tree = write_tree_update_index(&repo.odb(), &mut index, "", WriteTreeFlags::silent())
@@ -1793,7 +1802,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: crate::objects::FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: data.len() as u32,
@@ -1952,7 +1961,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_GITLINK,
+            mode: FileMode::GITLINK,
             uid: 0,
             gid: 0,
             size: 0,
@@ -2081,17 +2090,17 @@ mod tests {
         let source = vec![
             FlatTreeEntry {
                 path: "conflict.txt".into(),
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 oid: blob_f,
             },
             FlatTreeEntry {
                 path: "replace.txt".into(),
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 oid: blob_b,
             },
             FlatTreeEntry {
                 path: "same.txt".into(),
-                mode: crate::index::MODE_REGULAR,
+                mode: crate::objects::FileMode::REGULAR,
                 oid: blob_a,
             },
         ];

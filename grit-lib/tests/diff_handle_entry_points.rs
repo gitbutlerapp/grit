@@ -10,7 +10,7 @@ use grit_lib::diff::{
     DiffStatus, DiffTarget, RenameDetection, SubmoduleIgnoreMode, TreeDiffOptions,
 };
 use grit_lib::error::{Error, RefError};
-use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index, IndexEntry};
 use grit_lib::objects::{serialize_tree, FileMode, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository, RepositoryError};
@@ -160,7 +160,7 @@ fn checkout(repo: &Repository, work_tree: &Path, files: &[(&str, String)]) -> In
             .odb()
             .write(ObjectKind::Blob, body.as_bytes())
             .expect("blob");
-        let entry = entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry");
+        let entry = entry_from_stat(&abs, path.as_bytes(), oid, FileMode::REGULAR).expect("entry");
         index.add_or_replace(entry);
     }
     index

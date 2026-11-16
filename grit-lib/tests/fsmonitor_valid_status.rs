@@ -8,7 +8,8 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use filetime::{set_file_mtime, FileTime};
-use grit_lib::index::{Index, MODE_REGULAR};
+use grit_lib::index::Index;
+use grit_lib::objects::FileMode;
 use grit_lib::porcelain::add::StageOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -129,7 +130,7 @@ fn parallel_fsmonitor_valid_after_clean_status() {
     let stage0: Vec<_> = index
         .entries()
         .iter()
-        .filter(|e| e.stage() == 0 && e.mode == MODE_REGULAR)
+        .filter(|e| e.stage() == 0 && e.mode == FileMode::REGULAR)
         .collect();
     assert_eq!(stage0.len(), FILES);
     let invalid = stage0.iter().filter(|e| !e.fsmonitor_valid()).count();

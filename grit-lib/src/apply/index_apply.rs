@@ -3,8 +3,9 @@
 use super::blob_apply::{apply_patch_to_blob, BlobApplyOptions};
 use super::FilePatch;
 use crate::error::{ApplyError, Error};
-use crate::index::{Index, IndexEntry, MODE_REGULAR};
+use crate::index::{Index, IndexEntry};
 use crate::merge_diff::read_blob_at_path;
+use crate::objects::FileMode;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 use std::collections::BTreeMap;
@@ -90,7 +91,7 @@ enum PlannedChange {
     Upsert {
         path: String,
         oid: ObjectId,
-        mode: u32,
+        mode: FileMode,
         blob: Vec<u8>,
     },
     Remove {
@@ -403,7 +404,7 @@ fn resolve_mode(
     index: &Index,
     patch: &FilePatch,
     target: &str,
-) -> std::result::Result<u32, ApplyError> {
+) -> std::result::Result<FileMode, ApplyError> {
     if let Some(mode) = patch.new_mode.as_deref() {
         return parse_mode(mode);
     }
@@ -424,15 +425,17 @@ fn resolve_mode(
     if let Some(entry) = index.get(target.as_bytes(), 0) {
         return Ok(entry.mode);
     }
-    Ok(MODE_REGULAR)
+    Ok(FileMode::REGULAR)
 }
 
-fn parse_mode(mode: &str) -> std::result::Result<u32, ApplyError> {
+fn parse_mode(mode: &str) -> std::result::Result<FileMode, ApplyError> {
     let trimmed = mode.trim();
-    u32::from_str_radix(trimmed, 8).map_err(|e| ApplyError::Failed {
-        path: String::new(),
-        message: format!("invalid mode '{trimmed}': {e}"),
-    })
+    u32::from_str_radix(trimmed, 8)
+        .map(FileMode::new)
+        .map_err(|e| ApplyError::Failed {
+            path: String::new(),
+            message: format!("invalid mode '{trimmed}': {e}"),
+        })
 }
 
 fn hash_blob(repo: &Repository, data: &[u8]) -> std::result::Result<ObjectId, ApplyError> {
@@ -445,7 +448,7 @@ fn hash_blob(repo: &Repository, data: &[u8]) -> std::result::Result<ObjectId, Ap
         })
 }
 
-fn upsert_index_entry(index: &mut Index, path: &str, oid: ObjectId, mode: u32) {
+fn upsert_index_entry(index: &mut Index, path: &str, oid: ObjectId, mode: FileMode) {
     let path_bytes = path.as_bytes().to_vec();
     let flags = (path.len().min(0xfff) as u16) & 0x0fff;
     let entry = IndexEntry {
@@ -455,7 +458,11 @@ fn upsert_index_entry(index: &mut Index, path: &str, oid: ObjectId, mode: u32) {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: if mode == 0 { MODE_REGULAR } else { mode },
+        mode: if mode == FileMode::ABSENT {
+            FileMode::REGULAR
+        } else {
+            mode
+        },
         uid: 0,
         gid: 0,
         size: 0,
@@ -547,7 +554,7 @@ mod tests {
         let mut index = Index::new();
         for (path, data) in files {
             let oid = repo.odb().write(ObjectKind::Blob, data).unwrap();
-            upsert_index_entry(&mut index, path, oid, MODE_REGULAR);
+            upsert_index_entry(&mut index, path, oid, FileMode::REGULAR);
         }
         (dir, repo, index)
     }

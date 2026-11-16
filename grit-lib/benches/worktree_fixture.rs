@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use filetime::{set_file_mtime, FileTime};
 use grit_lib::config::environment::Environment;
 use grit_lib::config::{ConfigSet, LoadConfigOptions};
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
@@ -369,7 +369,7 @@ impl WorktreeBenchFixtures {
                 .expect("hash scan 100k blob");
             let meta = std::fs::symlink_metadata(&path).expect("stat scan 100k file");
             let entry =
-                grit_lib::index::entry_from_metadata(&meta, rel.as_bytes(), oid, MODE_REGULAR);
+                grit_lib::index::entry_from_metadata(&meta, rel.as_bytes(), oid, FileMode::REGULAR);
             scan_100k_index.add_or_replace(entry);
         }
         scan_100k_index

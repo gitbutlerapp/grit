@@ -33,7 +33,8 @@ mod imp {
     use hashbrown::HashMap;
 
     use crate::error::{Error, Result};
-    use crate::index::{IndexStatFields, MODE_REGULAR, MODE_SYMLINK, MODE_TREE};
+    use crate::index::IndexStatFields;
+    use crate::objects::FileMode;
     use crate::worktree_scan::BlobDiskStat;
 
     fn path_to_wide(path: &Path) -> Vec<u16> {
@@ -90,11 +91,11 @@ mod imp {
                 size, ctime_sec, ctime_nsec, mtime_sec, mtime_nsec,
             );
             let git_mode = if is_dir && !is_reparse {
-                MODE_TREE
+                FileMode::TREE
             } else if is_reparse {
-                MODE_SYMLINK
+                FileMode::SYMLINK
             } else {
-                MODE_REGULAR
+                FileMode::REGULAR
             };
             let stat = BlobDiskStat {
                 fields,

@@ -21,7 +21,6 @@ use crate::hash::Parallelism;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{
     entry_from_metadata, index_file_mtime, index_path_outcome_key, Index, IndexEntry, IndexLock,
-    MODE_GITLINK, MODE_REGULAR, MODE_TREE,
 };
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
@@ -30,7 +29,7 @@ use crate::path_icase::{
     DentrySpellingCache, IcaseCheckoutCollisionMap, IcaseIndexCollisionGroups,
     Stage0IcaseDirSpellingMap, Stage0IcasePathMap,
 };
-use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
+use crate::path_validate::{validate_path, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
     context_from_mode_bits, exact_literal_pathspec_set, has_glob_chars,
     matches_pathspec_list_with_context, pathspec_has_attr_magic, pathspec_is_exclude,
@@ -347,7 +346,7 @@ fn normalized_staging_pathspecs(pathspecs: &[String]) -> Cow<'_, [String]> {
 
 fn staging_pathspec_context_for_mode(
     base: PathspecMatchContext,
-    mode: u32,
+    mode: FileMode,
 ) -> PathspecMatchContext {
     let from_mode = context_from_mode_bits(mode);
     PathspecMatchContext {
@@ -360,7 +359,7 @@ fn staging_pathspec_context_for_mode(
 
 fn index_path_matches_staging_pathspecs(
     path: &str,
-    mode: u32,
+    mode: FileMode,
     pathspecs: &[String],
     base_ctx: PathspecMatchContext,
 ) -> bool {
@@ -386,7 +385,7 @@ fn staging_pathspecs_need_entry_mode_context(pathspecs: &[String]) -> bool {
         .any(|s| !pathspec_is_exclude(s) && s.ends_with('/'))
 }
 
-fn staging_index_path_modes(index: &Index) -> HashMap<Vec<u8>, u32> {
+fn staging_index_path_modes(index: &Index) -> HashMap<Vec<u8>, FileMode> {
     let mut modes = HashMap::new();
     for entry in &index.entries {
         if entry.stage() == 0 {
@@ -401,7 +400,7 @@ fn staging_index_path_modes(index: &Index) -> HashMap<Vec<u8>, u32> {
 
 fn staging_path_matches(
     path: &str,
-    index_path_modes: &HashMap<Vec<u8>, u32>,
+    index_path_modes: &HashMap<Vec<u8>, FileMode>,
     pathspecs: &[String],
     base_ctx: PathspecMatchContext,
 ) -> bool {
@@ -419,7 +418,7 @@ fn staging_path_matches(
 /// magic and `:(exclude)` semantics.
 pub(crate) fn blob_path_matches_restrict_pathspecs(
     path: &str,
-    mode: u32,
+    mode: FileMode,
     pathspecs: &[String],
     base_ctx: PathspecMatchContext,
     attr_matcher: Option<&PathspecMatcher<'_>>,
@@ -463,7 +462,7 @@ pub(crate) fn restricted_index_paths_for_pathspecs(
         if exact.iter().all(|p| {
             index
                 .get(p.as_bytes(), 0)
-                .is_some_and(|e| e.mode != MODE_TREE)
+                .is_some_and(|e| e.mode != FileMode::TREE)
         }) {
             return Ok(exact);
         }
@@ -507,11 +506,11 @@ enum StagingPathspecFilter<'a> {
     ModeAware {
         pathspecs: &'a [String],
         base_ctx: PathspecMatchContext,
-        index_path_modes: HashMap<Vec<u8>, u32>,
+        index_path_modes: HashMap<Vec<u8>, FileMode>,
     },
     Attr {
         matcher: PathspecMatcher<'a>,
-        index_path_modes: HashMap<Vec<u8>, u32>,
+        index_path_modes: HashMap<Vec<u8>, FileMode>,
     },
 }
 
@@ -1082,7 +1081,7 @@ fn stage_unmerged_paths_matching_pathspecs(
             .iter()
             .find(|e| e.path == *raw_path)
             .map(|e| e.mode)
-            .unwrap_or(MODE_REGULAR);
+            .unwrap_or(FileMode::REGULAR);
         if crate::rerere::worktree_metadata_needs_conflict_marker_inspection(&meta, idx_mode) {
             let wt_bytes = fs::read(&abs).map_err(Error::Io)?;
             if crate::rerere::worktree_bytes_have_unresolved_conflict_markers(
@@ -1109,7 +1108,7 @@ fn stage_unmerged_paths_matching_pathspecs(
             if index
                 .entries
                 .iter()
-                .any(|e| e.path == *raw_path && e.mode == MODE_GITLINK)
+                .any(|e| e.path == *raw_path && e.mode == FileMode::GITLINK)
             {
                 return Err(SubmoduleError::HeadUnreadable {
                     path: rel.to_string(),
@@ -1211,7 +1210,7 @@ fn collapsed_conflicts_with_markers(
 struct TrackedStagePlan {
     remove: bool,
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
     gitlink: bool,
 }
 
@@ -1249,30 +1248,30 @@ fn merge_tracked_stage_plan(
                 TrackedStagePlan {
                     remove: true,
                     oid: ObjectId::zero(),
-                    mode: 0,
+                    mode: FileMode::ABSENT,
                     gitlink: false,
                 },
             );
         }
         DiffStatus::Modified | DiffStatus::TypeChanged | DiffStatus::Added => {
-            let mode = entry.new_mode.bits();
+            let mode = entry.new_mode;
             changes.insert(
                 path,
                 TrackedStagePlan {
                     remove: false,
                     oid: entry.new_oid,
                     mode,
-                    gitlink: mode == MODE_GITLINK,
+                    gitlink: mode == FileMode::GITLINK,
                 },
             );
         }
         DiffStatus::Unmerged if entry.new_mode != FileMode::ABSENT => {
-            let mode = entry.new_mode.bits();
+            let mode = entry.new_mode;
             changes.entry(path).or_insert(TrackedStagePlan {
                 remove: false,
                 oid: entry.new_oid,
                 mode,
-                gitlink: mode == MODE_GITLINK,
+                gitlink: mode == FileMode::GITLINK,
             });
         }
         _ => {}
@@ -1280,11 +1279,11 @@ fn merge_tracked_stage_plan(
 }
 
 fn mode_with_executable_hint(
-    base_mode: u32,
+    base_mode: FileMode,
     rel_path: &str,
     hint: StageExecutableHint,
     matches: &impl Fn(&str) -> bool,
-) -> u32 {
+) -> FileMode {
     if hint == StageExecutableHint::None || !matches(rel_path) {
         return base_mode;
     }
@@ -1361,7 +1360,7 @@ fn stage_ignorecase_spelling_updates(
     let candidates: Vec<&str> = index
         .entries
         .iter()
-        .filter(|e| e.stage() == 0 && e.mode != MODE_GITLINK && e.mode != MODE_TREE)
+        .filter(|e| e.stage() == 0 && e.mode != FileMode::GITLINK && e.mode != FileMode::TREE)
         .filter_map(|e| std::str::from_utf8(&e.path).ok())
         .filter(|path| matches(path) && !collision_groups.has_collision_sibling(path))
         .collect();
@@ -1620,7 +1619,7 @@ fn stage_untracked_paths_parallel(
         outcome.added.push(path.clone());
         if index
             .get(storage_bytes(&path).as_ref(), 0)
-            .is_some_and(|e| e.mode == MODE_GITLINK)
+            .is_some_and(|e| e.mode == FileMode::GITLINK)
         {
             outcome.embedded_gitlinks.push(path);
         }
@@ -1712,7 +1711,7 @@ fn validate_worktree_paths_for_staging(rules: &WorktreeRules, paths: &[String]) 
         }
         validate_path(
             path.as_bytes(),
-            EntryMode::new(0o100644),
+            FileMode::REGULAR,
             protect,
             PathValidationKind::Worktree,
         )
@@ -2103,7 +2102,8 @@ fn stage_gitlink_at(
     head_oid: ObjectId,
     index: &mut Index,
 ) -> Result<()> {
-    let mut entry = entry_from_metadata(meta, &storage_bytes(rel_path), head_oid, MODE_GITLINK);
+    let mut entry =
+        entry_from_metadata(meta, &storage_bytes(rel_path), head_oid, FileMode::GITLINK);
     entry.size = 0;
     index.stage_file(entry);
     mark_fsmonitor_staged(index, rel_path);
@@ -2126,7 +2126,8 @@ mod tests {
     use crate::environment::RepositoryOptions;
 
     use super::*;
-    use crate::index::{entry_from_stat, IndexEntry, MODE_GITLINK, MODE_REGULAR};
+    use crate::index::{entry_from_stat, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::ObjectKind;
     use crate::progress::NullProgress;
     use std::fs;
@@ -2154,7 +2155,7 @@ mod tests {
         }
         fs::write(&abs, contents).unwrap();
         let oid = repo.odb().write(ObjectKind::Blob, contents).unwrap();
-        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR).unwrap();
+        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR).unwrap();
         index.add_or_replace(entry);
     }
 
@@ -2211,7 +2212,7 @@ mod tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_REGULAR,
+                mode: FileMode::REGULAR,
                 uid: 0,
                 gid: 0,
                 size: 1,
@@ -2270,7 +2271,7 @@ mod tests {
                 (i / 400) % 10,
                 i % 50
             );
-            index.add_or_replace(conflict_index_entry(&path, 0, null, MODE_REGULAR));
+            index.add_or_replace(conflict_index_entry(&path, 0, null, FileMode::REGULAR));
         }
         index.sort();
 
@@ -2929,7 +2930,7 @@ mod tests {
         assert_eq!(cache_tree_node_valid(&index, "beta"), Some(false));
     }
 
-    fn conflict_index_entry(path: &str, stage: u8, oid: ObjectId, mode: u32) -> IndexEntry {
+    fn conflict_index_entry(path: &str, stage: u8, oid: ObjectId, mode: FileMode) -> IndexEntry {
         let path_bytes = path.as_bytes().to_vec();
         IndexEntry {
             ctime_sec: 0,
@@ -2980,13 +2981,13 @@ mod tests {
         let theirs_oid = repo.odb().write(ObjectKind::Blob, theirs).unwrap();
         index
             .entries
-            .push(conflict_index_entry(path, 1, base_oid, MODE_REGULAR));
+            .push(conflict_index_entry(path, 1, base_oid, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry(path, 2, ours_oid, MODE_REGULAR));
+            .push(conflict_index_entry(path, 2, ours_oid, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry(path, 3, theirs_oid, MODE_REGULAR));
+            .push(conflict_index_entry(path, 3, theirs_oid, FileMode::REGULAR));
     }
 
     #[test]
@@ -3166,10 +3167,10 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+            .push(conflict_index_entry("f", 1, base, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+            .push(conflict_index_entry("f", 3, theirs, FileMode::REGULAR));
         write_index(&repo, &mut index);
         fs::write(
             root.join("f"),
@@ -3223,7 +3224,7 @@ mod tests {
         );
         index
             .entries
-            .push(conflict_index_entry("c.txt", 0, c_oid, MODE_REGULAR));
+            .push(conflict_index_entry("c.txt", 0, c_oid, FileMode::REGULAR));
         write_index(&repo, &mut index);
         fs::write(root.join("a.txt"), b"1\n2\n3\nok\n").unwrap();
         fs::write(
@@ -3272,10 +3273,10 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+            .push(conflict_index_entry("f", 1, base, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+            .push(conflict_index_entry("f", 3, theirs, FileMode::REGULAR));
         write_index(&repo, &mut index);
 
         fs::write(root.join("f"), b"base\nfeat\n").unwrap();
@@ -3309,13 +3310,13 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("f.txt", 1, base, MODE_REGULAR));
+            .push(conflict_index_entry("f.txt", 1, base, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f.txt", 2, ours, MODE_REGULAR));
+            .push(conflict_index_entry("f.txt", 2, ours, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f.txt", 3, theirs, MODE_REGULAR));
+            .push(conflict_index_entry("f.txt", 3, theirs, FileMode::REGULAR));
         write_index(&repo, &mut index);
 
         fs::write(root.join("f.txt"), b"resolved\n").unwrap();
@@ -3547,7 +3548,7 @@ mod tests {
 
         let index = repo.load_index().unwrap();
         let entry = index.get(b"inner", 0).expect("gitlink at inner");
-        assert_eq!(entry.mode, MODE_GITLINK);
+        assert_eq!(entry.mode, FileMode::GITLINK);
         assert_eq!(entry.oid, head);
         assert!(index.get(b"inner/i", 0).is_none());
     }
@@ -3642,7 +3643,7 @@ mod tests {
         .unwrap()
     }
 
-    fn stage0_entries(repo: &Repository) -> Vec<(Vec<u8>, u32, ObjectId)> {
+    fn stage0_entries(repo: &Repository) -> Vec<(Vec<u8>, FileMode, ObjectId)> {
         repo.load_index()
             .unwrap()
             .entries
@@ -3729,7 +3730,7 @@ mod tests {
 
         let index = repo.load_index().unwrap();
         let gitlink = index.get(b"top/inner", 0).expect("gitlink at top/inner");
-        assert_eq!(gitlink.mode, MODE_GITLINK);
+        assert_eq!(gitlink.mode, FileMode::GITLINK);
         assert_eq!(gitlink.oid, head);
         assert!(index.get(b"top/a/keep.txt", 0).is_some());
         assert!(index.get(b"top/a/build/out.bin", 0).is_none());
@@ -3749,7 +3750,7 @@ mod tests {
         set_branch_head(&sub_repo, old_head);
 
         let mut index = Index::new();
-        let mut gitlink = conflict_index_entry("sub", 0, old_head, MODE_GITLINK);
+        let mut gitlink = conflict_index_entry("sub", 0, old_head, FileMode::GITLINK);
         gitlink.size = 0;
         index.push_entry_unsorted(gitlink);
         write_index(&repo, &mut index);
@@ -3771,7 +3772,7 @@ mod tests {
 
         let index = repo.load_index().unwrap();
         let entry = index.get(b"sub", 0).unwrap();
-        assert_eq!(entry.mode, MODE_GITLINK);
+        assert_eq!(entry.mode, FileMode::GITLINK);
         assert_eq!(entry.oid, new_head);
     }
 
@@ -3791,13 +3792,16 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("sub", 1, base_oid, MODE_GITLINK));
+            .push(conflict_index_entry("sub", 1, base_oid, FileMode::GITLINK));
         index
             .entries
-            .push(conflict_index_entry("sub", 2, ours_oid, MODE_GITLINK));
-        index
-            .entries
-            .push(conflict_index_entry("sub", 3, theirs_oid, MODE_GITLINK));
+            .push(conflict_index_entry("sub", 2, ours_oid, FileMode::GITLINK));
+        index.entries.push(conflict_index_entry(
+            "sub",
+            3,
+            theirs_oid,
+            FileMode::GITLINK,
+        ));
         write_index(&repo, &mut index);
         let index_path = repo.git_dir().join("index");
         let index_before = fs::read(&index_path).unwrap();
@@ -3838,13 +3842,16 @@ mod tests {
             let mut index = Index::new();
             index
                 .entries
-                .push(conflict_index_entry("sub", 1, base_oid, MODE_GITLINK));
+                .push(conflict_index_entry("sub", 1, base_oid, FileMode::GITLINK));
             index
                 .entries
-                .push(conflict_index_entry("sub", 2, ours_oid, MODE_GITLINK));
-            index
-                .entries
-                .push(conflict_index_entry("sub", 3, theirs_oid, MODE_GITLINK));
+                .push(conflict_index_entry("sub", 2, ours_oid, FileMode::GITLINK));
+            index.entries.push(conflict_index_entry(
+                "sub",
+                3,
+                theirs_oid,
+                FileMode::GITLINK,
+            ));
             write_index(&repo, &mut index);
             let outcome = stage(
                 &repo,
@@ -3863,7 +3870,7 @@ mod tests {
                 "pathspec {spec:?} should collapse unmerged gitlink stages"
             );
             let entry = index.get(b"sub", 0).expect("stage-0 gitlink");
-            assert_eq!(entry.mode, MODE_GITLINK);
+            assert_eq!(entry.mode, FileMode::GITLINK);
             assert_eq!(entry.oid, theirs_oid);
             assert_ne!(entry.oid, empty_blob_oid());
         }
@@ -3941,22 +3948,31 @@ mod tests {
             )
             .unwrap();
         let mut index = Index::new();
-        index
-            .entries
-            .push(conflict_index_entry("sub", 1, gitlink_oid, MODE_GITLINK));
-        index
-            .entries
-            .push(conflict_index_entry("sub", 2, gitlink_oid, MODE_GITLINK));
-        index
-            .entries
-            .push(conflict_index_entry("sub", 3, gitlink_oid, MODE_GITLINK));
+        index.entries.push(conflict_index_entry(
+            "sub",
+            1,
+            gitlink_oid,
+            FileMode::GITLINK,
+        ));
+        index.entries.push(conflict_index_entry(
+            "sub",
+            2,
+            gitlink_oid,
+            FileMode::GITLINK,
+        ));
+        index.entries.push(conflict_index_entry(
+            "sub",
+            3,
+            gitlink_oid,
+            FileMode::GITLINK,
+        ));
         write_index(&repo, &mut index);
         fs::write(root.join("sub"), b"plain file\n").unwrap();
 
         stage_with_pathspecs(&repo, &["sub"]);
         let index = repo.load_index().unwrap();
         let entry = index.get(b"sub", 0).expect("resolved stage 0");
-        assert_eq!(entry.mode, MODE_REGULAR);
+        assert_eq!(entry.mode, FileMode::REGULAR);
         assert_ne!(entry.oid, empty_blob_oid());
     }
 
@@ -4072,10 +4088,10 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+            .push(conflict_index_entry("f", 1, base, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+            .push(conflict_index_entry("f", 3, theirs, FileMode::REGULAR));
         write_index(&repo, &mut index);
         fs::write(root.join("f"), b"base\nfeat\n").unwrap();
 
@@ -4132,10 +4148,10 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+            .push(conflict_index_entry("f", 1, base, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+            .push(conflict_index_entry("f", 3, theirs, FileMode::REGULAR));
         write_index(&repo, &mut index);
         let _ = fs::remove_file(root.join("f"));
 
@@ -4189,10 +4205,10 @@ mod tests {
         let mut index2 = Index::new();
         index2
             .entries
-            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+            .push(conflict_index_entry("f", 1, base, FileMode::REGULAR));
         index2
             .entries
-            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+            .push(conflict_index_entry("f", 3, theirs, FileMode::REGULAR));
         write_index(&repo2, &mut index2);
         let _ = fs::remove_file(root2.join("f"));
         grit_test_support::git(root2, &["add", "-u"]);
@@ -4595,7 +4611,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

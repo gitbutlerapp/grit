@@ -14,7 +14,7 @@ use grit_lib::diff::merge_diff::{
 };
 use grit_lib::diff::{BreakRewrites, CopyDetection, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR, MODE_SYMLINK};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::merge_base::MergeBaseForDiffError;
@@ -304,10 +304,10 @@ fn index_symlink_and_merge_base_diff_errors() -> grit_lib::error::Result<()> {
     let mut index = Index::new();
     index
         .entries_mut()
-        .push(index_entry("link", blob, MODE_SYMLINK));
+        .push(index_entry("link", blob, FileMode::SYMLINK));
     index
         .entries_mut()
-        .push(index_entry("tracked.txt", blob, MODE_REGULAR));
+        .push(index_entry("tracked.txt", blob, FileMode::REGULAR));
     index.write_to_path(&repo.git_dir().join("index"), false)?;
     let head_tree = write_tree_from_index(repo.odb(), &index, "")?;
     let _ = repo

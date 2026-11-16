@@ -12,7 +12,7 @@ use grit_lib::index::sparse_checkout::{
     path_in_sparse_checkout_patterns, path_matches_sparse_patterns, ConePatterns, NonConePatterns,
 };
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::Repository;
 

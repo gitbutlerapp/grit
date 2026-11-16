@@ -6,12 +6,11 @@
 //! `core.protectNTFS` and `core.protectHFS`.
 //!
 //! ```rust
-//! use grit_lib::path_validate::{
-//!     validate_path, EntryMode, PathValidationKind, ProtectOptions,
-//! };
+//! use grit_lib::objects::FileMode;
+//! use grit_lib::path_validate::{validate_path, PathValidationKind, ProtectOptions};
 //!
 //! let opts = ProtectOptions::default();
-//! let blob = EntryMode::new(0o100644);
+//! let blob = FileMode::REGULAR;
 //! let kind = PathValidationKind::Worktree;
 //! validate_path(b"src/lib.rs", blob, opts, kind).unwrap();
 //! assert!(validate_path(b"GIT~1./hooks", blob, opts, kind).is_err());
@@ -23,25 +22,8 @@ use crate::dotfile::{
     is_hfs_dotgit, is_ntfs_dot_gitattributes, is_ntfs_dot_gitignore, is_ntfs_dot_gitmodules,
     is_ntfs_dot_mailmap, is_ntfs_dotgit,
 };
+use crate::objects::FileMode;
 use thiserror::Error;
-
-/// Git tree/index file mode for validation (symlink vs blob affects dot-file rules).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct EntryMode(u32);
-
-impl EntryMode {
-    /// Wrap a raw Git mode octal value (for example `0o100644`).
-    #[must_use]
-    pub const fn new(mode: u32) -> Self {
-        Self(mode)
-    }
-
-    /// `true` when this entry is a symbolic link (`0o120000`).
-    #[must_use]
-    pub fn is_symlink(self) -> bool {
-        self.0 == 0o120000
-    }
-}
 
 /// Which Git path rules to apply ([`validate_component`] / [`validate_path`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
@@ -209,7 +191,7 @@ impl TreeEntryNameAudit {
 /// when multiple rules apply.
 pub fn validate_component(
     name: &[u8],
-    mode: EntryMode,
+    mode: FileMode,
     opts: ProtectOptions,
     kind: PathValidationKind,
 ) -> Result<(), PathComponentError> {
@@ -271,7 +253,7 @@ pub fn validate_component(
 /// Same as [`validate_component`] for the first failing segment.
 pub fn validate_path(
     path: &[u8],
-    mode: EntryMode,
+    mode: FileMode,
     opts: ProtectOptions,
     kind: PathValidationKind,
 ) -> Result<(), PathComponentError> {
@@ -375,7 +357,7 @@ fn may_alias_dotgit(name: &[u8]) -> bool {
 
 fn validate_component_symlink_dotfile(
     name: &[u8],
-    mode: EntryMode,
+    mode: FileMode,
     opts: ProtectOptions,
     kind: PathValidationKind,
 ) -> Option<PathComponentError> {
@@ -584,8 +566,8 @@ fn win32_piece_starts_with_reserved_device(piece: &[u8]) -> bool {
 mod tests {
     use super::*;
 
-    const BLOB: EntryMode = EntryMode::new(0o100644);
-    const SYMLINK: EntryMode = EntryMode::new(0o120000);
+    const BLOB: FileMode = FileMode::REGULAR;
+    const SYMLINK: FileMode = FileMode::SYMLINK;
     const FSCK: ProtectOptions = ProtectOptions::fsck();
     const OFF: ProtectOptions = ProtectOptions {
         protect_ntfs: false,

@@ -8,7 +8,7 @@ use grit_lib::maintenance::repository_fsck::{
     format_fsck_line, issue_msg_id, issue_severity, issue_visible_by_default, FsckIssue,
     FsckOptions, FsckSeverity,
 };
-use grit_lib::objects::ObjectId;
+use grit_lib::objects::{FileMode, ObjectId};
 use grit_lib::refs::refs_fsck::RefsFsckIssue;
 use std::path::PathBuf;
 
@@ -118,7 +118,7 @@ fn issue_msg_id_and_severity_and_format() {
     let _ = FsckIssue::BrokenLink {
         tree: oid,
         name: "a".into(),
-        mode: 0o100644,
+        mode: FileMode::REGULAR,
         target: oid,
     };
     let _ = FsckIssue::MidxInvalid {

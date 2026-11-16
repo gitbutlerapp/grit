@@ -26,7 +26,7 @@ use crate::diff::{
 };
 use crate::diff::{hunk_ids, DiffSide, HunkId};
 use crate::error::{ApplyError, Error};
-use crate::index::{Index, IndexLock, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR};
+use crate::index::{Index, IndexLock};
 use crate::objects::FileMode;
 use crate::objects::ObjectKind;
 use crate::porcelain::checkout::{
@@ -1292,7 +1292,7 @@ fn push_restored_path(restored: &mut Vec<String>, path: &str) {
 struct WorktreeReversePlan {
     path: String,
     clean_bytes: Vec<u8>,
-    mode: u32,
+    mode: FileMode,
     /// Whether the restored file can match its index entry again, which is the only case where
     /// refreshing the entry's stat data changes anything. A file that keeps some unstaged hunk
     /// stays different from the index, and leaving its stat data alone is what `git apply` does.
@@ -1324,8 +1324,8 @@ fn plan_worktree_reverse(
             return Err(HunkSelectError::Gitlink { path }.into());
         }
         let entry = index.get(path.as_bytes(), 0);
-        let mode = entry.map(|e| e.mode).unwrap_or(MODE_REGULAR);
-        if mode != MODE_REGULAR && mode != MODE_EXECUTABLE {
+        let mode = entry.map(|e| e.mode).unwrap_or(FileMode::REGULAR);
+        if mode != FileMode::REGULAR && mode != FileMode::EXECUTABLE {
             return Err(HunkSelectError::Binary { path: path.clone() }.into());
         }
         let abs = crate::repo_relpath::worktree_abs(work_tree, &path);
@@ -1488,7 +1488,7 @@ pub(crate) fn reverse_apply_patches_to_worktree(
             let Some(entry) = index.get(path.as_bytes(), 0) else {
                 return Err(ApplyError::NotInIndex { path: path.clone() });
             };
-            if entry.mode == MODE_GITLINK {
+            if entry.mode == FileMode::GITLINK {
                 continue;
             }
             if !opts.dry_run {
@@ -1524,8 +1524,8 @@ pub(crate) fn reverse_apply_patches_to_worktree(
         let mode = index
             .get(path.as_bytes(), 0)
             .map(|e| e.mode)
-            .unwrap_or(MODE_REGULAR);
-        if mode == MODE_GITLINK {
+            .unwrap_or(FileMode::REGULAR);
+        if mode == FileMode::GITLINK {
             continue;
         }
         let index_entry = index.get(path.as_bytes(), 0);

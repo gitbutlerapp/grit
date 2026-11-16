@@ -6,7 +6,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::rerere::{repo_rerere, RerereAutoupdate, RerereEventKind};
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::reflog::{

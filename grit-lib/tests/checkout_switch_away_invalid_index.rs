@@ -1,6 +1,6 @@
 //! Switching away from a branch must not fail because the current index lists a hostile path.
 
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::switch::SwitchOptions;

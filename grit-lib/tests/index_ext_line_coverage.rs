@@ -449,7 +449,7 @@ fn untracked_cache_global_excludes_and_gitlink_skip() {
         .load(&grit_lib::index::IndexLoadOptions::default())
         .expect("load");
     let mut sub = entry_from_worktree_path(&repo, "submod", b"gitlink");
-    sub.mode = grit_lib::index::MODE_GITLINK;
+    sub.mode = grit_lib::objects::FileMode::GITLINK;
     idx.add_or_replace(sub);
     repo.index()
         .write(&mut idx, &grit_lib::index::IndexWriteOptions::default())

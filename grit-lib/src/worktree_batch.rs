@@ -14,7 +14,7 @@ use crate::hash::{
     hash_object, try_par_hash_forced, try_par_hash_with, ParallelHashError, Parallelism,
 };
 use crate::index::IndexEntry;
-use crate::objects::{HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{FileMode, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::{self, Odb, WriteOptions};
 use crate::progress::poll_watch;
 use crate::repo::RepositoryError;
@@ -95,7 +95,7 @@ pub(crate) struct WorktreeBlob {
     /// Worktree metadata captured during the read pass.
     pub meta: fs::Metadata,
     /// Git mode derived from `meta`.
-    pub mode: u32,
+    pub mode: FileMode,
 }
 
 impl WorktreeBlob {

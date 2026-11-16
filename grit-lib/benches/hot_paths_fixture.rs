@@ -13,7 +13,8 @@ use grit_lib::diff::merge_trees::{
 use grit_lib::diff::TreeDiffOptions;
 use grit_lib::error::Result;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index, IndexEntry};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
@@ -111,7 +112,8 @@ impl HotPathsFixture {
                 .odb()
                 .write(ObjectKind::Blob, &data)
                 .expect("blob");
-            let entry = entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry");
+            let entry =
+                entry_from_stat(&abs, path.as_bytes(), oid, FileMode::REGULAR).expect("entry");
             index.add_or_replace(entry);
         }
         index.sort();
@@ -273,7 +275,8 @@ impl HotPathsFixture {
                 .odb()
                 .write(ObjectKind::Blob, &data)
                 .expect("blob");
-            let entry = entry_from_stat(&abs, path.as_bytes(), oid, MODE_REGULAR).expect("entry");
+            let entry =
+                entry_from_stat(&abs, path.as_bytes(), oid, FileMode::REGULAR).expect("entry");
             index.add_or_replace(entry);
         }
         index.sort();
@@ -364,7 +367,7 @@ fn commit_all(repo: &Repository, message: &str) -> Result<ObjectId> {
         let abs = work_tree.join(&rel);
         let data = std::fs::read(&abs)?;
         let oid = repo.odb().write(ObjectKind::Blob, &data)?;
-        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, MODE_REGULAR)?;
+        let entry = entry_from_stat(&abs, rel.as_bytes(), oid, FileMode::REGULAR)?;
         index.add_or_replace(entry);
     }
     index.sort();

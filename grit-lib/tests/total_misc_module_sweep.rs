@@ -15,16 +15,19 @@ use grit_lib::config::mailmap::{
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
-use grit_lib::objects::ObjectKind;
+use grit_lib::objects::{FileMode, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
 
 #[test]
 fn gitmodules_mailmap_path_and_signing_helpers() -> grit_lib::error::Result<()> {
     assert!(looks_like_command_line_option("--help"));
-    assert!(tree_entry_is_gitmodules_blob(0o100644, b".gitmodules"));
+    assert!(tree_entry_is_gitmodules_blob(
+        FileMode::REGULAR,
+        b".gitmodules"
+    ));
     assert!(tree_entry_is_gitattributes_blob(
-        0o100644,
+        FileMode::REGULAR,
         b".gitattributes"
     ));
     assert!(check_submodule_name("valid-name"));

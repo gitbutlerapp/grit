@@ -3934,7 +3934,8 @@ pub(crate) fn list_all_abbrev_matches(repo: &Repository, prefix: &str) -> Result
 mod line_coverage_tests {
     use super::*;
     use crate::error::{Error, NotARepositoryReason, Result};
-    use crate::index::{entry_from_stat, Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{entry_from_stat, Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::ObjectId;
     use crate::objects::ObjectKind;
 
@@ -4230,7 +4231,7 @@ mod line_coverage_tests {
             .odb()
             .write_loose_materialize(ObjectKind::Blob, b"line\n")?;
         fs::write(dir.path().join("f.txt"), b"line\n").map_err(crate::error::Error::Io)?;
-        let entry = entry_from_stat(&dir.path().join("f.txt"), b"f.txt", blob, MODE_REGULAR)?;
+        let entry = entry_from_stat(&dir.path().join("f.txt"), b"f.txt", blob, FileMode::REGULAR)?;
         let mut index = Index::new();
         index.entries_mut().push(entry);
         index.write_to_path(&repo.git_dir().join("index"), false)?;
@@ -5345,7 +5346,7 @@ mod line_coverage_tests {
             &dir.path().join("tracked.txt"),
             b"tracked.txt",
             blob,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )?;
         let mut index = Index::new();
         index.entries_mut().push(entry);
@@ -5506,7 +5507,7 @@ mod line_coverage_tests {
         Ok(())
     }
 
-    fn conflict_index_entry(path: &str, stage: u8, oid: ObjectId, mode: u32) -> IndexEntry {
+    fn conflict_index_entry(path: &str, stage: u8, oid: ObjectId, mode: FileMode) -> IndexEntry {
         let path_bytes = path.as_bytes().to_vec();
         IndexEntry {
             ctime_sec: 0,
@@ -5541,17 +5542,23 @@ mod line_coverage_tests {
             .odb()
             .write_loose_materialize(ObjectKind::Blob, b"theirs\n")?;
         let mut index = Index::new();
-        index
-            .entries_mut()
-            .push(conflict_index_entry("conflict.txt", 1, base, MODE_REGULAR));
-        index
-            .entries_mut()
-            .push(conflict_index_entry("conflict.txt", 2, ours, MODE_REGULAR));
+        index.entries_mut().push(conflict_index_entry(
+            "conflict.txt",
+            1,
+            base,
+            FileMode::REGULAR,
+        ));
+        index.entries_mut().push(conflict_index_entry(
+            "conflict.txt",
+            2,
+            ours,
+            FileMode::REGULAR,
+        ));
         index.entries_mut().push(conflict_index_entry(
             "conflict.txt",
             3,
             theirs,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         ));
         let nested_blob = repo
             .odb()
@@ -5562,7 +5569,7 @@ mod line_coverage_tests {
             &dir.path().join("sub/leaf.txt"),
             b"sub/leaf.txt",
             nested_blob,
-            MODE_REGULAR,
+            FileMode::REGULAR,
         )?;
         index.entries_mut().push(nested_entry);
         index.write_to_path(&repo.git_dir().join("index"), false)?;

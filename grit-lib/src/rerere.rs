@@ -10,8 +10,9 @@ use std::path::{Path, PathBuf};
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::hash::ChecksumHasher;
-use crate::index::{entry_from_metadata, Index, IndexEntry, MODE_REGULAR};
+use crate::index::{entry_from_metadata, Index, IndexEntry};
 use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
+use crate::objects::FileMode;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::repo::Repository;
 
@@ -365,10 +366,10 @@ fn conflict_marker_size(_path: &str) -> usize {
 /// symlinks use other staging paths (`read_submodule_head_oid`, `read_link`, …).
 pub(crate) fn worktree_metadata_needs_conflict_marker_inspection(
     meta: &std::fs::Metadata,
-    index_mode: u32,
+    index_mode: crate::objects::FileMode,
 ) -> bool {
-    use crate::index::MODE_GITLINK;
-    index_mode != MODE_GITLINK && !meta.is_dir() && !meta.file_type().is_symlink()
+    use crate::objects::FileMode;
+    index_mode != FileMode::GITLINK && !meta.is_dir() && !meta.file_type().is_symlink()
 }
 
 /// Whether worktree bytes still contain Git-style merge conflict markers.
@@ -484,8 +485,8 @@ fn check_one_conflict(index: &Index, start: usize) -> (usize, u8) {
             && e3.path == e.path
             && e2.stage() == 2
             && e3.stage() == 3
-            && matches!(e2.mode, MODE_REGULAR | 0o100755)
-            && matches!(e3.mode, MODE_REGULAR | 0o100755)
+            && matches!(e2.mode, FileMode::REGULAR | FileMode::EXECUTABLE)
+            && matches!(e3.mode, FileMode::REGULAR | FileMode::EXECUTABLE)
         {
             ty = 2;
         }
@@ -539,7 +540,7 @@ fn synthesize_conflict_from_index(
         {
             for stage in 1..=3 {
                 let idx = stage - 1;
-                if record.modes[idx] == 0 {
+                if record.modes[idx] == FileMode::ABSENT {
                     continue;
                 }
                 stages[idx] = Some(IndexEntry {
@@ -771,7 +772,7 @@ fn stage_resolved_path(repo: &Repository, index: &mut Index, path: &str) -> Resu
                 .find(|e| e.path == path_b && e.stage() == 3)
         })
         .map(|e| e.mode)
-        .unwrap_or(MODE_REGULAR);
+        .unwrap_or(FileMode::REGULAR);
 
     // Fill the stat cache from the on-disk file (mirroring git's `add_index_entry` after a
     // rerere autoupdate) so `git diff-files` sees the resolved path as clean (t3504). Without
@@ -1383,7 +1384,7 @@ pub(crate) fn rerere_forget_path(repo: &Repository, path: &str) -> Result<Vec<Re
             .resolve_undo
             .as_ref()
             .and_then(|records| records.get(path.as_bytes()))
-            .is_some_and(|record| record.modes[0] != 0);
+            .is_some_and(|record| record.modes[0] != FileMode::ABSENT);
     if !has_base_stage {
         events.push(RerereEvent {
             path: path.to_string(),

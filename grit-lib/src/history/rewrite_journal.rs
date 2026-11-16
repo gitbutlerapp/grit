@@ -12,7 +12,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::index::IndexLock;
 use crate::lockfile::{LockFile, LockHolder, LockWait};
-use crate::objects::ObjectId;
+use crate::objects::{FileMode, ObjectId};
 use crate::refs::store::RefName;
 use crate::repo::Repository;
 
@@ -627,6 +627,7 @@ fn read_worktree_from_tree_manifest(
                 let oid = ObjectId::from_hex(oid_hex)
                     .map_err(|e| undo_record_read_str(format!("from-tree manifest oid: {e}")))?;
                 let mode = u32::from_str_radix(mode_raw, 8)
+                    .map(FileMode::new)
                     .map_err(|e| undo_record_read_str(format!("from-tree manifest mode: {e}")))?;
                 WorktreePathSnapshot::from_old_tree(kind, oid, mode)
             }
@@ -777,7 +778,7 @@ fn parse_worktree_snapshot_file(
             bytes,
             from_old_tree,
             tree_oid: None,
-            tree_mode: 0,
+            tree_mode: FileMode::ABSENT,
             #[cfg(unix)]
             mode,
         },
@@ -816,7 +817,7 @@ mod tests {
                 bytes: Some(b"hello".to_vec()),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -864,7 +865,7 @@ mod tests {
                 bytes: Some(Vec::new()),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -914,7 +915,7 @@ mod tests {
                 bytes: Some(b"file".to_vec()),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -926,7 +927,7 @@ mod tests {
                 bytes: Some(b"nested".to_vec()),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -979,7 +980,7 @@ mod tests {
                 bytes: Some(b"payload".to_vec()),
                 from_old_tree: false,
                 tree_oid: None,
-                tree_mode: 0,
+                tree_mode: FileMode::ABSENT,
                 #[cfg(unix)]
                 mode: 0o644,
             },
@@ -1028,7 +1029,11 @@ mod tests {
                 .expect("hash");
             snaps.insert(
                 format!("path/{i}.txt"),
-                WorktreePathSnapshot::from_old_tree(WorktreePathKind::Regular, oid, 0o100644),
+                WorktreePathSnapshot::from_old_tree(
+                    WorktreePathKind::Regular,
+                    oid,
+                    FileMode::REGULAR,
+                ),
             );
         }
         snaps.insert(
@@ -1036,7 +1041,7 @@ mod tests {
             WorktreePathSnapshot::from_old_tree(
                 WorktreePathKind::Absent,
                 ObjectId::from_hex("0000000000000000000000000000000000000000").expect("zero"),
-                0,
+                FileMode::ABSENT,
             ),
         );
         let plan = RewritePlan {
@@ -1076,7 +1081,10 @@ mod tests {
         let restored = record.worktree_before.expect("snapshots");
         assert_eq!(restored.len(), 51);
         assert!(restored.get("path/0.txt").is_some_and(|s| {
-            s.from_old_tree && s.bytes.is_none() && s.tree_oid.is_some() && s.tree_mode == 0o100644
+            s.from_old_tree
+                && s.bytes.is_none()
+                && s.tree_oid.is_some()
+                && s.tree_mode == FileMode::REGULAR
         }));
         clear_rewrite_apply_journal(&repo).expect("clear");
     }

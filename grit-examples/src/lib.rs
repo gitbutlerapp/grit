@@ -4,7 +4,7 @@ use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
-use grit_lib::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;
@@ -65,7 +65,7 @@ fn append_tree_entries(
         } else {
             entries.push(index_entry(
                 path.as_os_str().as_encoded_bytes().to_vec(),
-                entry.mode.bits(),
+                entry.mode,
                 entry.oid,
                 0,
                 0,
@@ -116,12 +116,12 @@ fn checkout_tree_at(repo: &Repository, tree_oid: ObjectId, dir: &Path) -> Result
 /// Build an index entry for a path and blob oid.
 pub fn index_entry(
     path: Vec<u8>,
-    mode: u32,
+    mode: FileMode,
     oid: ObjectId,
     size: u32,
     mtime_sec: u32,
 ) -> IndexEntry {
-    IndexEntry::new(path, oid, FileMode::new(mode))
+    IndexEntry::new(path, oid, mode)
         .with_ctime(mtime_sec, 0)
         .with_mtime(mtime_sec, 0)
         .with_size(size)
@@ -141,9 +141,9 @@ pub fn add_path(repo: &Repository, index: &mut Index, path: &Path) -> Result<()>
         fs::read(&full_path).with_context(|| format!("could not read {}", path.display()))?;
     let metadata = fs::metadata(&full_path)?;
     let mode = if metadata.permissions().mode() & 0o111 != 0 {
-        MODE_EXECUTABLE
+        FileMode::EXECUTABLE
     } else {
-        MODE_REGULAR
+        FileMode::REGULAR
     };
     let oid = repo.odb().write(ObjectKind::Blob, &data)?;
     let rel = path_relative_to_worktree(work_tree, &full_path)?;

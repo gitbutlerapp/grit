@@ -3,7 +3,8 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::init_filesystem::FilesystemCapabilities;
 use grit_lib::diff::{mode_from_metadata, SubmoduleIgnoreMode, TreeDiffOptions};
-use grit_lib::index::{Index, MODE_EXECUTABLE};
+use grit_lib::index::Index;
+use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
 use std::fs;
@@ -116,7 +117,7 @@ fn filemode_false_suppresses_executable_mode_only_diff() {
         mode_from_metadata(&meta),
     )
     .expect("entry");
-    entry.mode = MODE_EXECUTABLE;
+    entry.mode = FileMode::EXECUTABLE;
     let mut index = Index::new();
     index.entries_mut().push(entry);
 
@@ -217,7 +218,7 @@ fn separate_git_dir_honors_filemode_false_in_external_config() {
         mode_from_metadata(&meta),
     )
     .expect("entry");
-    entry.mode = MODE_EXECUTABLE;
+    entry.mode = FileMode::EXECUTABLE;
     let mut index = Index::new();
     index.entries_mut().push(entry);
 

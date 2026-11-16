@@ -176,10 +176,10 @@ struct StaticProvider {
 
 impl CredentialProvider for StaticProvider {
     fn fill(&self, input: &Credential) -> grit_lib::error::Result<Credential> {
-        let mut out = input.clone();
-        out.username = Some(self.username.clone());
-        out.password = Some(self.password.clone());
-        Ok(out)
+        Ok(input
+            .clone()
+            .with_username(Some(self.username.clone()))
+            .with_password(Some(self.password.clone())))
     }
 
     fn approve(&self, _cred: &Credential) -> grit_lib::error::Result<()> {

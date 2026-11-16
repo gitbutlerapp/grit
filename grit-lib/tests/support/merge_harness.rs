@@ -146,7 +146,7 @@ pub fn grit_unmerged_rows(merged: &TreeMergeOutput) -> Vec<GitUnmergedRow> {
             continue;
         }
         rows.push(GitUnmergedRow {
-            mode: entry.mode,
+            mode: entry.mode.bits(),
             oid: entry.oid,
             stage: u32::from(stage),
             path: String::from_utf8_lossy(&entry.path).into_owned(),

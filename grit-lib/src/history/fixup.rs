@@ -8,7 +8,9 @@ use super::error::{worktree_apply_engine, worktree_apply_io, HistoryError};
 use super::plan::{conflict_error, plan_rewrite};
 use super::reword::normalize_rewrite_message;
 use super::types::{AppliedRewrite, ApplyOptions};
-use super::types::{CommitEdit, EmptyPolicy, HistoryEdits, RewriteOptions, RewritePlan};
+use super::types::{
+    CommitEdit, CommitRewrite, EmptyPolicy, HistoryEdits, RewriteOptions, RewritePlan,
+};
 use super::undo_work::capture_path_states;
 use super::PlanningError;
 use super::{commit_tree, load_commit};
@@ -16,12 +18,13 @@ use crate::apply::{apply_patch_to_blob, BlobApplyOptions};
 use crate::diff::diff_index_to_tree;
 use crate::diff::DiffSide;
 use crate::index::write_tree::write_tree_from_index;
-use crate::index::{Index, IndexEntry, MODE_REGULAR};
+use crate::index::{Index, IndexEntry};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
+use crate::objects::FileMode;
 use crate::objects::{CommitData, ObjectId, ObjectKind};
 use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, stage_hunks, HunkSelection,
@@ -161,24 +164,24 @@ pub(crate) fn fixup(
             EmptyPolicy::Keep => {
                 edits.insert(
                     target,
-                    CommitEdit::Rewrite {
+                    CommitEdit::Rewrite(CommitRewrite {
                         tree: Some(merged_tree),
                         message,
                         author: None,
                         parents: None,
-                    },
+                    }),
                 );
             }
         }
     } else {
         edits.insert(
             target,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(merged_tree),
                 message,
                 author: None,
                 parents: None,
-            },
+            }),
         );
     }
 
@@ -382,7 +385,7 @@ fn upsert_index_blob(
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: bytes.len() as u32,

@@ -9,7 +9,7 @@ use grit_lib::blame::BlameOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{CopyDetection, RenameDetection, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{parse_commit, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 

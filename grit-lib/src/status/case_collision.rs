@@ -3,7 +3,8 @@
 use std::collections::HashSet;
 
 use crate::error::Result;
-use crate::index::{Index, MODE_EXECUTABLE, MODE_REGULAR};
+use crate::index::Index;
+use crate::objects::FileMode;
 use crate::path_icase::{
     worktree_path_collision_options, worktree_path_for_index_entry_with_options,
     IcaseCheckoutCollisionMap,
@@ -75,7 +76,7 @@ pub(crate) fn worktree_case_collision_groups(
             let Some(ie) = index.get(path_bytes, 0) else {
                 continue;
             };
-            if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE {
+            if ie.mode != FileMode::REGULAR && ie.mode != FileMode::EXECUTABLE {
                 continue;
             }
             let file_attrs = crate::crlf::get_file_attrs(&attrs, member, false, config.as_ref());

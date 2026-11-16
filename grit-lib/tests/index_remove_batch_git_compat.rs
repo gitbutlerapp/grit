@@ -3,7 +3,7 @@
 use grit_lib::objects::FileMode;
 use std::process::Command;
 
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git;

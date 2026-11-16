@@ -123,11 +123,11 @@ fn fill_returns_helper_username_and_password() {
 
     let provider = HelperCredentialProvider::new(cfg);
     let filled = provider.fill(&sample_input()).expect("fill should succeed");
-    assert_eq!(filled.username.as_deref(), Some("alice"));
-    assert_eq!(filled.password.as_deref(), Some("secret"));
+    assert_eq!(filled.username(), Some("alice"));
+    assert_eq!(filled.password(), Some("secret"));
     // The provider must preserve the original target fields.
-    assert_eq!(filled.protocol.as_deref(), Some("https"));
-    assert_eq!(filled.host.as_deref(), Some("example.com"));
+    assert_eq!(filled.protocol(), Some("https"));
+    assert_eq!(filled.host(), Some("example.com"));
 }
 
 #[test]
@@ -253,8 +253,8 @@ fn fill_short_circuits_when_input_already_complete() {
     let filled = provider
         .fill(&input)
         .expect("complete input should not call helper");
-    assert_eq!(filled.username.as_deref(), Some("bob"));
-    assert_eq!(filled.password.as_deref(), Some("hunter2"));
+    assert_eq!(filled.username(), Some("bob"));
+    assert_eq!(filled.password(), Some("hunter2"));
 }
 
 #[test]
@@ -288,7 +288,7 @@ fn url_scoped_helper_applies_only_to_matching_target() {
         .with_protocol(Some("https".into()))
         .with_host(Some("github.com".into()));
     let filled = provider.fill(&github).expect("matching scope fills");
-    assert_eq!(filled.username.as_deref(), Some("scoped"));
+    assert_eq!(filled.username(), Some("scoped"));
 
     // Non-matching target -> helper does not apply -> typed non-interactive err.
     let other = Credential::default()
@@ -399,8 +399,8 @@ fn github_token_stored_by_grit_is_filled_and_erased_for_system_git() {
     };
 
     let filled = git_fill();
-    assert_eq!(filled.username.as_deref(), Some(TOKEN_USERNAME));
-    assert_eq!(filled.password.as_deref(), Some("gho_roundtrip"));
+    assert_eq!(filled.username(), Some(TOKEN_USERNAME));
+    assert_eq!(filled.password(), Some("gho_roundtrip"));
 
     provider
         .reject(&github_token_credential(None))
@@ -411,7 +411,7 @@ fn github_token_stored_by_grit_is_filled_and_erased_for_system_git() {
             .contains("gho_roundtrip"),
         "erase must remove the stored token"
     );
-    assert_eq!(git_fill().password, None);
+    assert_eq!(git_fill().password(), None);
 }
 
 /// `grit auth` on Windows stored `"\"C:/…/grit.exe\" manager"`, which system
@@ -472,8 +472,8 @@ fn helper_config_value_written_by_grit_runs_under_system_git() {
     );
     assert!(out.status.success(), "git credential fill failed: {stderr}");
     let filled = Credential::parse_bytes(&out.stdout);
-    assert_eq!(filled.username.as_deref(), Some("alice"));
-    assert_eq!(filled.password.as_deref(), Some("secret"));
+    assert_eq!(filled.username(), Some("alice"));
+    assert_eq!(filled.password(), Some("secret"));
 
     let file = ConfigFile::from_path(&global, ConfigScope::Global)
         .expect("read config back")
@@ -489,15 +489,15 @@ fn helper_config_value_written_by_grit_runs_under_system_git() {
     let filled = HelperCredentialProvider::new(cfg)
         .fill(&sample_input())
         .expect("grit runs the same helper");
-    assert_eq!(filled.password.as_deref(), Some("secret"));
+    assert_eq!(filled.password(), Some("secret"));
 }
 
 #[test]
 fn credential_wire_format_round_trips() {
     let input = "protocol=https\nhost=example.com\nusername=alice\npassword=secret\n";
     let cred = Credential::parse(input);
-    assert_eq!(cred.username.as_deref(), Some("alice"));
-    assert_eq!(cred.password.as_deref(), Some("secret"));
+    assert_eq!(cred.username(), Some("alice"));
+    assert_eq!(cred.password(), Some("secret"));
     assert_eq!(cred.serialize(), input);
 }
 

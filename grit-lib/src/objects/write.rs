@@ -17,9 +17,6 @@ use crate::objects::{tree_name_cmp, CommitData, HashAlgo, ObjectId, ObjectKind, 
 use crate::odb::Odb;
 use crate::path_validate::{audit_tree_entry_name, PathComponentError, ProtectOptions};
 
-const MODE_TREE: u32 = 0o040000;
-const MODE_GITLINK: u32 = 0o160000;
-
 /// Why [`Objects::write_tree`](super::Objects::write_tree) refused an entry.
 ///
 /// Each variant carries the offending entry name as raw bytes (tree entry names
@@ -167,10 +164,10 @@ pub(crate) fn validate_tree_entry_stored_kinds(
     Ok(())
 }
 
-fn expected_kind_for_tree_mode(mode: u32) -> ObjectKind {
+fn expected_kind_for_tree_mode(mode: FileMode) -> ObjectKind {
     match mode {
-        MODE_TREE => ObjectKind::Tree,
-        MODE_GITLINK => ObjectKind::Commit,
+        FileMode::TREE => ObjectKind::Tree,
+        FileMode::GITLINK => ObjectKind::Commit,
         _ => ObjectKind::Blob,
     }
 }
@@ -180,7 +177,7 @@ fn validate_one_tree_entry_stored_kind(
     entry: &TreeEntry,
     allow_missing: bool,
 ) -> Result<(), Error> {
-    let expected = expected_kind_for_tree_mode(entry.mode.bits());
+    let expected = expected_kind_for_tree_mode(entry.mode);
     let stored = odb.stored_object_kind(&entry.oid)?;
     if entry.mode == FileMode::GITLINK {
         if let Some(actual) = stored {
@@ -379,9 +376,9 @@ mod tests {
         ObjectId::from_bytes(&[byte; 20]).unwrap()
     }
 
-    fn entry(mode: u32, name: &[u8], byte: u8) -> TreeEntry {
+    fn entry(mode: FileMode, name: &[u8], byte: u8) -> TreeEntry {
         TreeEntry {
-            mode: FileMode::new(mode),
+            mode,
             name: name.to_vec(),
             oid: oid(byte),
         }
@@ -391,10 +388,10 @@ mod tests {
     fn sorts_into_git_tree_order() {
         let sorted = canonical_tree_entries(
             [
-                entry(0o100644, b"foo.c", 1),
-                entry(MODE_TREE, b"foo", 2),
-                entry(0o100644, b"foo-bar", 3),
-                entry(0o100644, b"a", 4),
+                entry(FileMode::REGULAR, b"foo.c", 1),
+                entry(FileMode::TREE, b"foo", 2),
+                entry(FileMode::REGULAR, b"foo-bar", 3),
+                entry(FileMode::REGULAR, b"a", 4),
             ],
             HashAlgo::Sha1,
         )
@@ -410,9 +407,9 @@ mod tests {
     fn rejects_file_and_directory_with_the_same_name() {
         let err = canonical_tree_entries(
             [
-                entry(0o100644, b"foo", 1),
-                entry(0o100644, b"foo.c", 2),
-                entry(MODE_TREE, b"foo", 3),
+                entry(FileMode::REGULAR, b"foo", 1),
+                entry(FileMode::REGULAR, b"foo.c", 2),
+                entry(FileMode::TREE, b"foo", 3),
             ],
             HashAlgo::Sha1,
         )
@@ -429,49 +426,49 @@ mod tests {
     fn rejects_bad_names_modes_and_ids() {
         let cases: [(TreeEntry, TreeEntryError); 7] = [
             (
-                entry(0o100644, &[b'x'; MAX_TREE_ENTRY_LEN + 1], 1),
+                entry(FileMode::REGULAR, &[b'x'; MAX_TREE_ENTRY_LEN + 1], 1),
                 TreeEntryError::NameTooLong {
                     name: vec![b'x'; MAX_TREE_ENTRY_LEN + 1],
                     max: MAX_TREE_ENTRY_LEN,
                 },
             ),
             (
-                entry(0o100644, b"", 1),
+                entry(FileMode::REGULAR, b"", 1),
                 TreeEntryError::InvalidName {
                     name: Vec::new(),
                     reason: PathComponentError::Empty,
                 },
             ),
             (
-                entry(0o100644, b"a/b", 1),
+                entry(FileMode::REGULAR, b"a/b", 1),
                 TreeEntryError::InvalidName {
                     name: b"a/b".to_vec(),
                     reason: PathComponentError::ContainsSlash,
                 },
             ),
             (
-                entry(0o100644, b"..", 1),
+                entry(FileMode::REGULAR, b"..", 1),
                 TreeEntryError::InvalidName {
                     name: b"..".to_vec(),
                     reason: PathComponentError::DotDot,
                 },
             ),
             (
-                entry(MODE_TREE, b".GIT", 1),
+                entry(FileMode::TREE, b".GIT", 1),
                 TreeEntryError::InvalidName {
                     name: b".GIT".to_vec(),
                     reason: PathComponentError::DotGit,
                 },
             ),
             (
-                entry(0o100664, b"a", 1),
+                entry(FileMode::new(0o100664), b"a", 1),
                 TreeEntryError::InvalidMode {
                     name: b"a".to_vec(),
                     mode: FileMode::new(0o100664),
                 },
             ),
             (
-                entry(0o100644, b"a", 0),
+                entry(FileMode::REGULAR, b"a", 0),
                 TreeEntryError::NullObjectId {
                     name: b"a".to_vec(),
                 },
@@ -487,7 +484,8 @@ mod tests {
 
     #[test]
     fn rejects_object_ids_of_the_other_hash_algorithm() {
-        let err = canonical_tree_entries([entry(0o100644, b"a", 1)], HashAlgo::Sha256).unwrap_err();
+        let err = canonical_tree_entries([entry(FileMode::REGULAR, b"a", 1)], HashAlgo::Sha256)
+            .unwrap_err();
         assert!(matches!(
             err,
             TreeEntryError::HashAlgoMismatch {

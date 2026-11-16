@@ -12,7 +12,8 @@ use crate::crlf::FileAttrs;
 use crate::crlf::{self, ConversionConfig};
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedProcessCheckout, FilterSmudgeMeta};
-use crate::index::{IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+use crate::index::IndexEntry;
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::pack_store::PackReadContextGuard;
 use crate::parallel::{
@@ -45,7 +46,7 @@ const PREPARED_WRITE_BYTES: usize = 1024 * 1024;
 /// One blob checkout after attribute/conversion resolution on the caller thread.
 pub(crate) struct CheckoutWriteJob<'a> {
     pub path: String,
-    pub mode: u32,
+    pub mode: FileMode,
     pub oid: ObjectId,
     pub change: &'a crate::diff::DiffEntry,
     pub file_attrs: Arc<FileAttrs>,
@@ -60,7 +61,7 @@ impl<'a> CheckoutWriteJob<'a> {
     /// Job writing `change`'s new blob to `path` with `mode`.
     pub fn new(
         path: String,
-        mode: u32,
+        mode: FileMode,
         change: &'a crate::diff::DiffEntry,
         file_attrs: Arc<FileAttrs>,
         smudge_context: Option<Arc<FilterSmudgeMeta>>,
@@ -175,8 +176,8 @@ pub(crate) fn paths_needing_serial_checkout_str(
 
 /// Git parallel-checkout eligibility for regular files (`parallel-checkout.c`).
 #[must_use]
-pub(crate) fn is_eligible_for_parallel_checkout(mode: u32, attrs: &FileAttrs) -> bool {
-    if mode != MODE_REGULAR && mode != MODE_EXECUTABLE {
+pub(crate) fn is_eligible_for_parallel_checkout(mode: FileMode, attrs: &FileAttrs) -> bool {
+    if mode != FileMode::REGULAR && mode != FileMode::EXECUTABLE {
         return false;
     }
     if attrs.filter_smudge.is_some() || attrs.filter_process.is_some() {
@@ -345,7 +346,7 @@ fn worktree_bytes_for_parallel_job(
     job: &CheckoutWriteJob<'_>,
     blob: &[u8],
 ) -> Result<Vec<u8>> {
-    if job.mode == MODE_SYMLINK {
+    if job.mode == FileMode::SYMLINK {
         return Ok(blob.to_vec());
     }
     let oid_hex = job.oid.to_string();
@@ -877,7 +878,10 @@ mod tests {
             filter_smudge: Some("rot13".into()),
             ..FileAttrs::default()
         };
-        assert!(!is_eligible_for_parallel_checkout(MODE_REGULAR, &attrs));
+        assert!(!is_eligible_for_parallel_checkout(
+            FileMode::REGULAR,
+            &attrs
+        ));
     }
 
     fn checkout_options(threads: usize, threshold: i64) -> ParallelOptions {

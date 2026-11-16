@@ -24,8 +24,8 @@ use super::subject::{
     commit_message_subject_line, replay_conflict_labels, subject_for_rewrite_row,
 };
 use super::types::{
-    CommitEdit, EmptyPolicy, HeadEffect, HistoryEdits, PlannedRefUpdate, RefScope, RewriteOptions,
-    RewritePlan, RewrittenCommit,
+    CommitEdit, CommitRewrite, EmptyPolicy, HeadEffect, HistoryEdits, PlannedRefUpdate, RefScope,
+    RewriteOptions, RewritePlan, RewrittenCommit,
 };
 use crate::refs::store::RefName;
 
@@ -583,12 +583,12 @@ fn plan_rewrite_with_order_impl(
                     };
                     Ok((oid, Some(oid)))
                 }
-                Some(CommitEdit::Rewrite {
+                Some(CommitEdit::Rewrite(CommitRewrite {
                     tree,
                     message,
                     author,
                     parents,
-                }) => {
+                })) => {
                     let parent_list = if let Some(parents) = parents {
                         parents.clone()
                     } else if let Some(inserted) = insert_parent {
@@ -1304,12 +1304,12 @@ fn replay_stop_parent(
 ) -> crate::error::Result<ObjectId> {
     let parent_list = match edit {
         Some(CommitEdit::Reparent { parent }) => reparent_parent_list(old, *parent, mapping),
-        Some(CommitEdit::Rewrite {
+        Some(CommitEdit::Rewrite(CommitRewrite {
             tree: _,
             message: _,
             author: _,
             parents,
-        }) => {
+        })) => {
             if let Some(parents) = parents {
                 parents.clone()
             } else if let Some(inserted) = insert_parent {
@@ -1962,7 +1962,8 @@ mod merge_call_tests {
     use super::*;
     use crate::config::environment::RepositoryOptions;
     use crate::index::write_tree::write_tree_from_index;
-    use crate::index::{Index, IndexEntry, MODE_REGULAR};
+    use crate::index::{Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::refs::write_ref;
 
     fn ident(n: i64) -> String {
@@ -1980,7 +1981,7 @@ mod merge_call_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: bytes.len() as u32,
@@ -2014,7 +2015,7 @@ mod merge_call_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: bytes.len() as u32,
@@ -2120,12 +2121,12 @@ mod merge_call_tests {
         let mut edits = HistoryEdits::new();
         edits.insert(
             a,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: None,
                 message: Some("reword\n".into()),
                 author: None,
                 parents: None,
-            },
+            }),
         );
         test_reset_merge_tree_call_count();
         plan_rewrite(

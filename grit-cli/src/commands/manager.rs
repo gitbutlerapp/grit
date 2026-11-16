@@ -44,10 +44,12 @@ fn get(cred: &Credential) -> Result<()> {
     if let Some(found) = grit_lib::remote::credentials::windows_store::get(cred)? {
         // Echo back the input identity fields so Git can match the response,
         // then the username/password we found.
-        let mut response = found;
-        if response.username.is_none() {
-            response.username = cred.username.clone();
-        }
+        let response = if found.username().is_none() {
+            let username = cred.username().map(str::to_owned);
+            found.with_username(username)
+        } else {
+            found
+        };
         std::io::stdout()
             .write_all(response.serialize().as_bytes())
             .context("writing the credential to stdout")?;

@@ -10,7 +10,8 @@ use crate::check_ref_format::RefName;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_checkout, HookName, PostOperationHooks};
-use crate::index::{Index, IndexLock, MODE_GITLINK};
+use crate::index::{Index, IndexLock};
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::porcelain::branch::resolve_create_tracking;
 use crate::porcelain::branch_error::{BranchError, TrackMode};
@@ -1045,8 +1046,8 @@ fn plan_allow_local_tree_transition_core(
         .filter(|c| c.status == DiffStatus::Deleted)
         .filter_map(|c| {
             let path = c.old_path.as_ref()?;
-            let mode = c.old_mode.bits();
-            (mode == MODE_GITLINK).then(|| path.clone())
+            let mode = c.old_mode;
+            (mode == FileMode::GITLINK).then(|| path.clone())
         })
         .collect();
     let (preverified_wholesale_dirs, wholesale_safety_precomputed) = if delete_paths.is_empty() {
@@ -1162,7 +1163,7 @@ fn path_from_diff(entry: &DiffEntry) -> Option<&str> {
 #[derive(Clone, Copy)]
 struct TargetTreeEntry {
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
 }
 
 fn target_tree_entry_from_diff(change: &DiffEntry) -> Option<(&str, TargetTreeEntry)> {
@@ -1170,7 +1171,7 @@ fn target_tree_entry_from_diff(change: &DiffEntry) -> Option<(&str, TargetTreeEn
     if change.status == DiffStatus::Deleted {
         return None;
     }
-    let mode = change.new_mode.bits();
+    let mode = change.new_mode;
     Some((
         path,
         TargetTreeEntry {
@@ -1200,10 +1201,10 @@ fn index_matches_target_tree_entry(
 /// Like Git, such drift is not a local edit the transition would overwrite: the index gitlink
 /// still advances to the target commit, and checkout leaves the directory as it is.
 fn gitlink_drift_survives_gitlink_target(entry: &DiffEntry, target: TargetTreeEntry) -> bool {
-    target.mode == MODE_GITLINK
+    target.mode == FileMode::GITLINK
         && entry.status == DiffStatus::Modified
-        && entry.old_mode.bits() == MODE_GITLINK
-        && entry.new_mode.bits() == MODE_GITLINK
+        && entry.old_mode == FileMode::GITLINK
+        && entry.new_mode == FileMode::GITLINK
 }
 
 /// Failure while verifying a tree transition without overwriting local edits.
@@ -1613,7 +1614,7 @@ mod tests {
                     &abs,
                     rel.as_bytes(),
                     oid,
-                    crate::index::MODE_REGULAR,
+                    crate::objects::FileMode::REGULAR,
                 )
                 .expect("entry"),
             );
@@ -1701,7 +1702,7 @@ mod tests {
                     &abs,
                     rel.as_bytes(),
                     oid,
-                    crate::index::MODE_REGULAR,
+                    crate::objects::FileMode::REGULAR,
                 )
                 .expect("entry"),
             );
@@ -1761,7 +1762,7 @@ mod tests {
             &wt.join(path),
             path.as_bytes(),
             oid,
-            crate::index::MODE_REGULAR,
+            crate::objects::FileMode::REGULAR,
         )
         .expect("entry");
         index.add_or_replace(entry);
@@ -1797,7 +1798,7 @@ mod tests {
         use std::io::Write;
         use std::os::unix::fs::PermissionsExt;
 
-        fn commit_x_sh(repo: &Repository, mode: u32, parent: Option<ObjectId>) -> ObjectId {
+        fn commit_x_sh(repo: &Repository, mode: FileMode, parent: Option<ObjectId>) -> ObjectId {
             let wt = repo.work_tree().expect("wt");
             std::fs::write(wt.join("x.sh"), "#!/bin/sh\n").expect("write");
             #[cfg(unix)]
@@ -1805,7 +1806,7 @@ mod tests {
                 let mut perms = std::fs::metadata(wt.join("x.sh"))
                     .expect("meta")
                     .permissions();
-                perms.set_mode(if mode == crate::index::MODE_EXECUTABLE {
+                perms.set_mode(if mode == crate::objects::FileMode::EXECUTABLE {
                     0o100755
                 } else {
                     0o100644
@@ -1844,9 +1845,9 @@ mod tests {
 
         let (_dir, repo) = init_repo();
         let wt = repo.work_tree().expect("wt");
-        let c1 = commit_x_sh(&repo, crate::index::MODE_EXECUTABLE, None);
+        let c1 = commit_x_sh(&repo, crate::objects::FileMode::EXECUTABLE, None);
         refs::write_ref(&repo.git_dir(), "refs/heads/main", &c1).expect("branch");
-        let c2 = commit_x_sh(&repo, crate::index::MODE_REGULAR, Some(c1));
+        let c2 = commit_x_sh(&repo, crate::objects::FileMode::REGULAR, Some(c1));
         refs::write_ref(&repo.git_dir(), "refs/heads/main", &c2).expect("branch");
 
         std::fs::OpenOptions::new()
@@ -1891,8 +1892,13 @@ mod tests {
         let mut index = repo.load_index().expect("index");
         let oid = repo.odb().write(ObjectKind::Blob, b"two\n").expect("blob");
         index.add_or_replace(
-            crate::index::entry_from_stat(&wt.join("f"), b"f", oid, crate::index::MODE_REGULAR)
-                .expect("entry"),
+            crate::index::entry_from_stat(
+                &wt.join("f"),
+                b"f",
+                oid,
+                crate::objects::FileMode::REGULAR,
+            )
+            .expect("entry"),
         );
         repo.write_index(&mut index).expect("write index");
         std::fs::write(wt.join("f"), "precious\n").expect("unstaged");
@@ -1938,8 +1944,13 @@ mod tests {
             .write(ObjectKind::Blob, b"three\n")
             .expect("blob");
         index.add_or_replace(
-            crate::index::entry_from_stat(&wt.join("f"), b"f", oid, crate::index::MODE_REGULAR)
-                .expect("entry"),
+            crate::index::entry_from_stat(
+                &wt.join("f"),
+                b"f",
+                oid,
+                crate::objects::FileMode::REGULAR,
+            )
+            .expect("entry"),
         );
         repo.write_index(&mut index).expect("write index");
 

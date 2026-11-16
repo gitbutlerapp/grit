@@ -141,7 +141,7 @@ pub fn grit_index_stage0_map(index: &Index) -> BTreeMap<String, (u32, ObjectId)>
         .map(|e| {
             (
                 String::from_utf8_lossy(&e.path).into_owned(),
-                (e.mode, e.oid),
+                (e.mode.bits(), e.oid),
             )
         })
         .collect()

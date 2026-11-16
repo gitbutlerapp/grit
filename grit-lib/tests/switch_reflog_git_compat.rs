@@ -56,7 +56,7 @@ fn grit_commit(
             &work_tree.join(path),
             path.as_bytes(),
             oid,
-            grit_lib::index::MODE_REGULAR,
+            grit_lib::objects::FileMode::REGULAR,
         )
         .expect("entry"),
     );
@@ -109,7 +109,7 @@ fn grit_commit_to_ref(
             &work_tree.join(path),
             path.as_bytes(),
             oid,
-            grit_lib::index::MODE_REGULAR,
+            grit_lib::objects::FileMode::REGULAR,
         )
         .expect("entry"),
     );

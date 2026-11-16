@@ -30,7 +30,8 @@ use crate::diff::{
 use crate::error::{ConfigError, Result};
 use crate::hash::{try_par_hash_with, ParallelHashError};
 use crate::ignore::IgnoreMatcher;
-use crate::index::{index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
+use crate::index::{index_file_mtime, Index};
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::operation::{
     conflict_kind_from_stagemask, conflicts_from_index, Conflict, ConflictKind,
@@ -1094,7 +1095,7 @@ fn stage0_gitlink_paths(index: &Index) -> HashSet<String> {
     index
         .entries
         .iter()
-        .filter(|e| e.mode == MODE_GITLINK)
+        .filter(|e| e.mode == FileMode::GITLINK)
         .map(|e| crate::repo_relpath::storage_string(&e.path))
         .collect()
 }
@@ -1511,7 +1512,7 @@ fn visit_untracked_dir_entry(
         let skip = !is_dir
             || index
                 .get(&child_bytes, 0)
-                .is_some_and(|e| e.mode == MODE_TREE || e.mode == MODE_GITLINK);
+                .is_some_and(|e| e.mode == FileMode::TREE || e.mode == FileMode::GITLINK);
         if skip {
             return Ok(UntrackedWalkStep::Continue);
         }
@@ -2352,20 +2353,20 @@ pub(crate) fn status_path_matches_worktree_with_rules_and_globals(
     crate::pathspec::matches_pathspec_list_for_object(normalized, mode, &attrs, pathspecs)
 }
 
-fn worktree_path_mode(path: &Path) -> u32 {
+fn worktree_path_mode(path: &Path) -> FileMode {
     let Ok(meta) = fs::symlink_metadata(path) else {
-        return 0;
+        return FileMode::ABSENT;
     };
     if meta.file_type().is_symlink() {
-        return 0o120000;
+        return FileMode::SYMLINK;
     }
     if meta.is_dir() {
-        return MODE_TREE;
+        return FileMode::TREE;
     }
     if is_executable_file(&meta) {
-        0o100755
+        FileMode::EXECUTABLE
     } else {
-        0o100644
+        FileMode::REGULAR
     }
 }
 
@@ -2627,7 +2628,7 @@ pub(crate) fn status(
         .now_unix_seconds
         .unwrap_or_else(crate::environment::wall_clock_unix_timestamp_seconds);
     let rewrite_clears_racy_entries = index.entries.iter().any(|e| {
-        e.mode != crate::index::MODE_GITLINK
+        e.mode != crate::objects::FileMode::GITLINK
             && crate::diff::entry_is_racy_with_policy(e, diff_index_mtime, stat_policy)
             && i64::from(e.mtime_sec) < now_unix_seconds
     });
@@ -3806,7 +3807,8 @@ mod status_op_tests {
 
     #[test]
     fn unmerged_gitlink_is_conflict_not_untracked() {
-        use crate::index::{Index, IndexEntry, MODE_GITLINK};
+        use crate::index::{Index, IndexEntry};
+        use crate::objects::FileMode;
         use crate::objects::ObjectKind;
 
         let tmp = TempDir::new().unwrap();
@@ -3854,7 +3856,7 @@ mod status_op_tests {
                 mtime_nsec: 0,
                 dev: 0,
                 ino: 0,
-                mode: MODE_GITLINK,
+                mode: FileMode::GITLINK,
                 uid: 0,
                 gid: 0,
                 size: 0,
@@ -3962,7 +3964,7 @@ mod status_op_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: crate::index::MODE_REGULAR,
+            mode: crate::objects::FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

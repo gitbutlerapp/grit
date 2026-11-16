@@ -11,7 +11,7 @@ use std::process::Command;
 use std::sync::OnceLock;
 
 use grit_lib::index::write_tree::{write_tree_from_index, write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::{
     serialize_commit, serialize_tag, CommitData, ObjectId, ObjectKind, TagData,
@@ -66,8 +66,8 @@ fn write_grit_commit_graph(_objects_dir: &Path, odb: &Odb) -> std::result::Resul
     odb.write_commit_graph().map_err(|e| e.to_string())
 }
 
-fn index_entry(path: &[u8], oid: ObjectId, size: usize, mode: u32) -> IndexEntry {
-    IndexEntry::new(path.to_vec(), oid, FileMode::new(mode))
+fn index_entry(path: &[u8], oid: ObjectId, size: usize, mode: FileMode) -> IndexEntry {
+    IndexEntry::new(path.to_vec(), oid, mode)
         .with_ctime(1_700_000_000, 0)
         .with_mtime(1_700_000_000, 0)
         .with_size(size as u32)
@@ -87,7 +87,7 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
         .odb()
         .write(ObjectKind::Blob, b"history bench seed\n")
         .expect("seed blob");
-    index.add_or_replace(index_entry(b"seed.txt", blob, 18, MODE_REGULAR));
+    index.add_or_replace(index_entry(b"seed.txt", blob, 18, FileMode::REGULAR));
 
     let mut parent: Option<ObjectId> = None;
     let mut commits: Vec<ObjectId> = Vec::with_capacity(commit_count);
@@ -102,7 +102,7 @@ fn build_history_repo(dir: &Path, commit_count: usize) -> Repository {
                 format!("churn/{i:05}.txt").as_bytes(),
                 oid,
                 body.len(),
-                MODE_REGULAR,
+                FileMode::REGULAR,
             ));
         }
         let tree = if i == 0 {
@@ -168,7 +168,7 @@ fn build_flat_tree(odb: &Odb, entry_count: usize, label: &str) -> ObjectId {
             format!("f{i:05}.txt").as_bytes(),
             oid,
             body.len(),
-            MODE_REGULAR,
+            FileMode::REGULAR,
         ));
     }
     write_tree_from_index(odb, &index, "").expect("flat tree")
@@ -195,7 +195,7 @@ fn build_flat_tree_changed(
             format!("f{i:05}.txt").as_bytes(),
             oid,
             body.len(),
-            MODE_REGULAR,
+            FileMode::REGULAR,
         ));
     }
     write_tree_from_index(odb, &index, "").expect("flat tree changed")
@@ -219,7 +219,12 @@ fn build_deep_tree(odb: &Odb, depth: usize, leaves: usize) -> ObjectId {
         let oid = odb
             .write(ObjectKind::Blob, body.as_bytes())
             .expect("deep blob");
-        index.add_or_replace(index_entry(path.as_bytes(), oid, body.len(), MODE_REGULAR));
+        index.add_or_replace(index_entry(
+            path.as_bytes(),
+            oid,
+            body.len(),
+            FileMode::REGULAR,
+        ));
     }
     write_tree_from_index(odb, &index, "").expect("deep tree")
 }
@@ -242,7 +247,12 @@ fn build_deep_tree_changed(
         let oid = odb
             .write(ObjectKind::Blob, body.as_bytes())
             .expect("deep blob");
-        index.add_or_replace(index_entry(path.as_bytes(), oid, body.len(), MODE_REGULAR));
+        index.add_or_replace(index_entry(
+            path.as_bytes(),
+            oid,
+            body.len(),
+            FileMode::REGULAR,
+        ));
     }
     write_tree_from_index(odb, &index, "").expect("deep tree changed")
 }

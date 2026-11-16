@@ -11,7 +11,6 @@ use grit_lib::diff::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
 };
-use grit_lib::index::MODE_REGULAR;
 use grit_lib::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::TempDir;

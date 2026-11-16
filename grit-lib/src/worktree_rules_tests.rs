@@ -13,7 +13,8 @@ mod tests {
     use crate::diff::diff_index_to_worktree_with_options;
     use crate::diff::diff_tree_to_worktree_with_git_dir_and_rules;
     use crate::diff::DiffIndexToWorktreeOptions;
-    use crate::index::{entry_from_stat, MODE_REGULAR};
+    use crate::index::entry_from_stat;
+    use crate::objects::FileMode;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::{CancelToken, NullProgress};
@@ -184,7 +185,7 @@ mod tests {
         fs::write(wt.join("d/f.txt"), b"line one\r\nline two\r\n").unwrap();
         let blob_oid = index.get(b"d/f.txt", 0).unwrap().oid;
         index.add_or_replace(
-            entry_from_stat(&wt.join("d/f.txt"), b"d/f.txt", blob_oid, MODE_REGULAR).unwrap(),
+            entry_from_stat(&wt.join("d/f.txt"), b"d/f.txt", blob_oid, FileMode::REGULAR).unwrap(),
         );
 
         let rules = crate::worktree_rules::WorktreeRules::from_repository(&repo, &index).unwrap();

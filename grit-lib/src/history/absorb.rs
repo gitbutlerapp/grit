@@ -24,7 +24,7 @@ use super::error::HistoryError;
 use super::fixup::staged_fixup_paths;
 use super::message::commit_subject_single_line;
 use super::plan::{conflict_error, plan_rewrite};
-use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
+use super::types::{CommitEdit, CommitRewrite, HistoryEdits, RewriteOptions, RewritePlan};
 use super::PlanningError;
 use super::{commit_tree, load_commit};
 
@@ -377,12 +377,12 @@ pub(crate) fn absorb(repo: &Repository, opts: &AbsorbOptions) -> crate::error::R
         )?;
         edits.insert(
             target,
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree: Some(merged_tree),
                 message: None,
                 author: None,
                 parents: None,
-            },
+            }),
         );
         let prefix = plan_rewrite(repo, &edits, &rewrite_opts)?;
         let post_head_tree = prefix

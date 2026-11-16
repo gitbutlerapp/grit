@@ -91,7 +91,7 @@ pub(crate) fn directory_renames_from_file_renames(
 mod tests {
     use super::*;
     use crate::diff::zero_oid;
-    use crate::index::MODE_REGULAR;
+    use crate::objects::FileMode;
 
     fn entry(path: &str) -> IndexEntry {
         IndexEntry {
@@ -101,7 +101,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,
@@ -147,7 +147,7 @@ mod tests {
             .into_iter()
             .map(|path| (path.as_bytes().to_vec(), entry(path)))
             .collect();
-        side.get_mut(b"mode-change".as_slice()).expect("entry").mode = 0o100755;
+        side.get_mut(b"mode-change".as_slice()).expect("entry").mode = FileMode::EXECUTABLE;
         let added: Vec<_> = side
             .iter()
             .filter(|(path, _)| !base.contains_key(*path))

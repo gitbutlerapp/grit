@@ -6,7 +6,8 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
-use grit_lib::index::{entry_from_stat, Index, IndexWriteOptions, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index, IndexWriteOptions};
+use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::commit::{CommitRequest, CommitScope};
 use grit_lib::progress::{CancelToken, NullProgress};
@@ -64,13 +65,13 @@ fn build_readme_collision_repo(root: &Path) -> grit_lib::error::Result<()> {
         &dest.join("readme.txt"),
         b"Readme.TXT",
         oid_upper,
-        MODE_REGULAR,
+        FileMode::REGULAR,
     )?);
     index.add_or_replace(entry_from_stat(
         &dest.join("readme.txt"),
         b"readme.txt",
         oid_lower,
-        MODE_REGULAR,
+        FileMode::REGULAR,
     )?);
     index.sort();
     write_tree_update_index(repo.odb(), &mut index, "", WriteTreeFlags::silent())?;

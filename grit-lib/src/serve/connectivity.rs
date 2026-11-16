@@ -34,12 +34,10 @@ use std::rc::Rc;
 use super::promised_objects::PromisorObjects;
 use crate::commit_graph_file::CommitGraphChain;
 use crate::error::{Error, Result};
-use crate::objects::{tag_object_line_oid, CommitRef, Object, ObjectId, ObjectKind, TreeRefIter};
+use crate::objects::{
+    tag_object_line_oid, CommitRef, FileMode, Object, ObjectId, ObjectKind, TreeRefIter,
+};
 use crate::odb::Odb;
-
-const GITLINK_MODE: u32 = 0o160000;
-const TYPE_MASK: u32 = 0o170000;
-const TREE_MODE: u32 = 0o040000;
 
 /// Painted on commits the new tips reach.
 const NEW: u8 = 1;
@@ -483,10 +481,10 @@ impl<'p, 'a> Walk<'p, 'a> {
                 .collect();
             for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
                 let entry = entry?;
-                if entry.mode == GITLINK_MODE {
+                if entry.mode == FileMode::GITLINK {
                     continue;
                 }
-                let is_tree = entry.mode & TYPE_MASK == TREE_MODE;
+                let is_tree = entry.mode.is_tree();
                 // Trees are sorted, so each parent's entry at this path is found by
                 // moving its cursor forward. An unsorted or corrupt parent tree only
                 // makes entries look changed, which checks more, never less.
@@ -494,7 +492,7 @@ impl<'p, 'a> Walk<'p, 'a> {
                 let mut sub_bases = Vec::new();
                 for cursor in &mut cursors {
                     while let Some(Ok(base)) = cursor.peek() {
-                        let base_is_tree = base.mode & TYPE_MASK == TREE_MODE;
+                        let base_is_tree = base.mode.is_tree();
                         match tree_order(base.name, base_is_tree, entry.name, is_tree) {
                             std::cmp::Ordering::Less => {
                                 cursor.next();

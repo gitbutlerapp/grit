@@ -11,7 +11,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{
     entry_from_metadata, index_entries_stat_equivalent, munge_index_size, normalize_mode,
-    worktree_path_from_index_rel, Index, IndexEntry, IndexLock, StatMatchPolicy, MODE_REGULAR,
+    worktree_path_from_index_rel, Index, IndexEntry, IndexLock, StatMatchPolicy,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -46,7 +46,7 @@ fn index_stat_helpers_and_normalize_mode() {
     let tmp = tempfile::tempdir().expect("tempdir");
     fs::write(tmp.path().join("f"), b"x").expect("write");
     let meta = fs::symlink_metadata(tmp.path().join("f")).expect("meta");
-    let _ = entry_from_metadata(&meta, b"f", ObjectId::zero(), MODE_REGULAR);
+    let _ = entry_from_metadata(&meta, b"f", ObjectId::zero(), FileMode::REGULAR);
     let wt = tmp.path();
     assert!(worktree_path_from_index_rel(wt, b"a/b").ends_with("a/b"));
 }

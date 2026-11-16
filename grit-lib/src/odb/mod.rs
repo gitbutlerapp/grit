@@ -1534,7 +1534,7 @@ impl Odb {
         };
         dirs.clear();
         for e in &index.entries {
-            if e.stage() != 0 || e.mode != crate::index::MODE_GITLINK {
+            if e.stage() != 0 || e.mode != crate::objects::FileMode::GITLINK {
                 continue;
             }
             let path_str = String::from_utf8_lossy(&e.path);

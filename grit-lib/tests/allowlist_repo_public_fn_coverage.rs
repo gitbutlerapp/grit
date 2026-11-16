@@ -32,7 +32,6 @@ use grit_lib::config::{ConfigFile, ConfigScope};
 use grit_lib::diff::merge_trees::index_tree_oid_matches_head;
 use grit_lib::diff::rerere::rerere_forget_path;
 use grit_lib::index::write_tree::build_cache_tree_from_tree;
-use grit_lib::index::MODE_REGULAR;
 use grit_lib::notes::remove_note_entry;
 use grit_lib::notes::NotesTreeEntry;
 use grit_lib::objects::index_pack::{
@@ -43,6 +42,7 @@ use grit_lib::objects::odb::store::enumerate_loose_objects;
 use grit_lib::objects::pack_objects::{
     build_pack_from_send_list_with_write_threads, reachable_closure,
 };
+use grit_lib::objects::FileMode;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::apply_index_file_mode;
 use grit_lib::porcelain::commit::CommitRequest;
@@ -349,9 +349,9 @@ fn porcelain_stash_tag_status_and_worktree() {
     fs::write(&file, b"x\n").expect("write");
     #[cfg(unix)]
     {
-        apply_index_file_mode(&file, grit_lib::index::MODE_EXECUTABLE).expect("chmod");
+        apply_index_file_mode(&file, grit_lib::objects::FileMode::EXECUTABLE).expect("chmod");
     }
-    let _ = worktree_bytes_for_index_mode(&file, MODE_REGULAR);
+    let _ = worktree_bytes_for_index_mode(&file, FileMode::REGULAR);
 
     let empty_tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("tree");
     let _ = prepare_tree_switch(&repo, None, &empty_tree).ok();

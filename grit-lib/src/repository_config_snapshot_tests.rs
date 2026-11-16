@@ -16,7 +16,8 @@ mod tests {
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::diff::diff_tree_to_worktree_with_git_dir;
     use crate::environment::{Environment, RepositoryOptions};
-    use crate::index::{entry_from_stat, Index, MODE_REGULAR};
+    use crate::index::{entry_from_stat, Index};
+    use crate::objects::FileMode;
     use crate::objects::ObjectKind;
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::checkout::checkout_between_trees;
@@ -433,8 +434,13 @@ mod tests {
             .write(ObjectKind::Blob, b"line\n")
             .unwrap();
         let mut index = Index::new();
-        let entry =
-            entry_from_stat(&linked.join("crlf.txt"), b"crlf.txt", wt_oid, MODE_REGULAR).unwrap();
+        let entry = entry_from_stat(
+            &linked.join("crlf.txt"),
+            b"crlf.txt",
+            wt_oid,
+            FileMode::REGULAR,
+        )
+        .unwrap();
         index.add_or_replace(entry);
         let tree_oid =
             crate::write_tree::write_tree_from_index(linked_repo.odb(), &index, "").expect("tree");
@@ -476,7 +482,7 @@ mod tests {
         let blob = gitfile_repo.odb().write(ObjectKind::Blob, b"a\n").unwrap();
         let mut idx = Index::new();
         idx.add_or_replace(
-            entry_from_stat(&wt.join("g.txt"), b"g.txt", blob, MODE_REGULAR).unwrap(),
+            entry_from_stat(&wt.join("g.txt"), b"g.txt", blob, FileMode::REGULAR).unwrap(),
         );
         let tree =
             crate::write_tree::write_tree_from_index(gitfile_repo.odb(), &idx, "").expect("tree");

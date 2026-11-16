@@ -22,7 +22,8 @@ use super::{
 };
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, Result};
-use crate::index::{Index, MODE_GITLINK};
+use crate::index::Index;
+use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::progress::NullProgress;
 use crate::repo::Repository;
@@ -190,7 +191,7 @@ impl PathList {
 struct ReplacedPath {
     path: String,
     oid: ObjectId,
-    mode: u32,
+    mode: FileMode,
 }
 
 /// Everything one checkout pass changed in the work tree, until the pass commits.
@@ -253,7 +254,7 @@ impl CheckoutJournal {
             self.replaced.push(ReplacedPath {
                 path: path.to_owned(),
                 oid: change.old_oid,
-                mode: change.old_mode.bits(),
+                mode: change.old_mode,
             });
         }
     }
@@ -423,7 +424,7 @@ impl CheckoutJournal {
             }
             let (oid, mode) =
                 index_entry_or_fallback(index.as_ref(), &entry.path, entry.oid, entry.mode);
-            if mode == MODE_GITLINK {
+            if mode == FileMode::GITLINK {
                 if materialize_gitlink_worktree(&self.work_tree, &entry.path, &mut dir_cache)
                     .is_err()
                 {
@@ -451,7 +452,7 @@ impl CheckoutJournal {
                 if !path_under_wholesale_directory(&rel, &removed_dirs) || spooled.contains(&rel) {
                     continue;
                 }
-                if entry.mode == MODE_GITLINK {
+                if entry.mode == FileMode::GITLINK {
                     if materialize_gitlink_worktree(&self.work_tree, &rel, &mut dir_cache).is_err()
                     {
                         unrestored.push(rel);
@@ -490,8 +491,8 @@ fn index_entry_or_fallback(
     index: Option<&Index>,
     rel: &str,
     fallback_oid: ObjectId,
-    fallback_mode: u32,
-) -> (ObjectId, u32) {
+    fallback_mode: FileMode,
+) -> (ObjectId, FileMode) {
     let key = crate::repo_relpath::storage_bytes(rel);
     index
         .and_then(|index| index.get(&key, 0))

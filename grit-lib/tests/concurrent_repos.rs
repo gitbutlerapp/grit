@@ -19,7 +19,7 @@ use grit_lib::diff::merge_trees::{
 };
 use grit_lib::diff::rerere::{repo_rerere, RerereAutoupdate, RerereEventKind};
 use grit_lib::ident::Signature;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::notes::NotesTreeEntry;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::StageOptions;

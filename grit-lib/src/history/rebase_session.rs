@@ -40,8 +40,8 @@ use super::rebase::{
 };
 use super::types::RefScope;
 use super::types::{
-    AppliedRewrite, ApplyOptions, CommitEdit, HistoryEdits, PlannedRefUpdate, RewriteOptions,
-    RewritePlan, RewrittenCommit,
+    AppliedRewrite, ApplyOptions, CommitEdit, CommitRewrite, HistoryEdits, PlannedRefUpdate,
+    RewriteOptions, RewritePlan, RewrittenCommit,
 };
 use super::{commit_tree, load_commit};
 use crate::operation::Conflict;
@@ -729,12 +729,12 @@ pub(crate) fn continue_rebase(
     let mut edits = state.edits.clone();
     edits.insert(
         current,
-        CommitEdit::Rewrite {
+        CommitEdit::Rewrite(CommitRewrite {
             tree: Some(new_tree),
             message: None,
             author: None,
             parents: Some(parents),
-        },
+        }),
     );
     edits.retain(|commit, _| resume_order.contains(commit));
 
@@ -1024,12 +1024,12 @@ fn edits_to_persist(edits: &HistoryEdits) -> Vec<PersistedEdit> {
             CommitEdit::Drop => PersistedEdit::Drop {
                 commit: oid_hex(commit),
             },
-            CommitEdit::Rewrite {
+            CommitEdit::Rewrite(CommitRewrite {
                 tree,
                 message,
                 author,
                 parents: _,
-            } => PersistedEdit::Rewrite {
+            }) => PersistedEdit::Rewrite {
                 commit: oid_hex(commit),
                 tree: tree.as_ref().map(oid_hex),
                 message: message.clone(),
@@ -1080,12 +1080,12 @@ fn edits_from_persist(rows: &[PersistedEdit]) -> crate::error::Result<HistoryEdi
             } => {
                 edits.insert(
                     parse_oid(commit)?,
-                    CommitEdit::Rewrite {
+                    CommitEdit::Rewrite(CommitRewrite {
                         tree: tree.as_deref().map(parse_oid).transpose()?,
                         message: message.clone(),
                         author: author.clone(),
                         parents: None,
-                    },
+                    }),
                 );
             }
         }
@@ -1802,7 +1802,7 @@ mod tests {
         author_script, edits_from_persist, edits_to_persist, parse_oid, PersistedEdit,
         RebaseSessionError,
     };
-    use crate::history::types::{CommitEdit, HistoryEdits};
+    use crate::history::types::{CommitEdit, CommitRewrite, HistoryEdits};
     use crate::history::HistoryError;
     use crate::objects::ObjectId;
 

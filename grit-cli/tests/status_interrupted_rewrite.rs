@@ -8,7 +8,7 @@ use std::process::{Command, Output};
 
 use grit_lib::progress::CancelToken;
 use grit_lib::revwalk::history::{
-    ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
+    ApplyOptions, CommitEdit, CommitRewrite, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
 };
 use grit_test_support::configure_git_env;
 
@@ -89,10 +89,9 @@ fn interrupted_rewrite_repo() -> (tempfile::TempDir, String) {
     edits.insert(
         tip.parse().expect("oid"),
         CommitEdit::rewrite(
-            Some(tree.parse().expect("tree oid")),
-            Some("rewritten\n".into()),
-            None,
-            None,
+            CommitRewrite::default()
+                .with_tree(tree.parse().expect("tree oid"))
+                .with_message("rewritten\n"),
         ),
     );
     let plan = repo

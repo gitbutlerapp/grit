@@ -9,7 +9,7 @@ use std::collections::{BinaryHeap, HashSet, VecDeque};
 use crate::error::Error;
 use crate::ewah_bitmap::Bitmap;
 use crate::objects::{
-    empty_oid_set, oid_hash_set, parse_tag, CommitRef, ObjectId, ObjectKind, OidHashSet,
+    empty_oid_set, oid_hash_set, parse_tag, CommitRef, FileMode, ObjectId, ObjectKind, OidHashSet,
     TreeRefIter,
 };
 use crate::pack::read_object_info_from_packs;
@@ -695,10 +695,10 @@ fn walk_tree(
     for entry in TreeRefIter::with_oid_len(&object.data, oid_len) {
         let entry = entry?;
         // Submodule gitlinks name commits in another object store; do not walk them.
-        if entry.mode == 0o160000 {
+        if entry.mode == FileMode::GITLINK {
             continue;
         }
-        if entry.mode == 0o040000 {
+        if entry.mode == FileMode::TREE {
             walk_tree(
                 repo,
                 index,

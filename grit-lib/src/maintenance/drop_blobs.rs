@@ -1085,7 +1085,7 @@ fn promised_by_promisor_packs(
                 let mut queue = queue;
                 for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
                     let entry = entry?;
-                    match entry.mode & 0o170000 {
+                    match entry.mode.bits() & 0o170000 {
                         0o040000 => {
                             if let Some(q) = queue.as_deref_mut() {
                                 q.push_back(entry.oid);
@@ -1192,7 +1192,7 @@ impl<'a> ProtectionWalk<'a> {
             }
             for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
                 let entry = entry?;
-                match entry.mode & 0o170000 {
+                match entry.mode.bits() & 0o170000 {
                     0o040000 => stack.push(entry.oid),
                     0o160000 => {}
                     _ => self.mark(entry.oid),
@@ -1245,7 +1245,7 @@ impl<'a> ProtectionWalk<'a> {
             crate::index::IndexParseContext::from_policy(repo.thread_policy()),
         )?;
         for entry in index.entries() {
-            match entry.mode & 0o170000 {
+            match entry.mode.bits() & 0o170000 {
                 0o040000 => self.walk_tree(entry.oid)?,
                 0o160000 => {}
                 _ => self.mark(entry.oid),

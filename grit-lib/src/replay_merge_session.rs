@@ -5,7 +5,7 @@ use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 
 use crate::diff::{detect_renames, diff_trees, DiffEntry, DiffStatus};
-use crate::index::{Index, IndexEntry, MODE_TREE};
+use crate::index::{Index, IndexEntry};
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     lookup_index_entry_at_path_cached, merge_trees_replay_transplant, merge_trees_three_way_cached,
@@ -696,7 +696,7 @@ fn is_tree_path(
     path: &[u8],
 ) -> crate::error::Result<bool> {
     Ok(lookup_index_entry_at_path_cached(cache, odb, tree, path)?
-        .is_some_and(|e| e.mode == MODE_TREE))
+        .is_some_and(|e| e.mode == FileMode::TREE))
 }
 
 fn touches_upstream(path: &[u8], upstream: &HashSet<Vec<u8>>) -> bool {
@@ -758,7 +758,9 @@ fn parent_dir_ready(
     let new_e = lookup_index_entry_at_path_cached(cache, odb, &new_parent, dir)?;
     Ok(match (old_e, new_e) {
         (None, None) => true,
-        (Some(a), Some(b)) if a.mode == MODE_TREE && b.mode == MODE_TREE => a.oid == b.oid,
+        (Some(a), Some(b)) if a.mode == FileMode::TREE && b.mode == FileMode::TREE => {
+            a.oid == b.oid
+        }
         _ => false,
     })
 }
@@ -800,7 +802,7 @@ fn index_entry_from_diff(entry: &DiffEntry, path: Vec<u8>) -> IndexEntry {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: entry.new_mode.bits(),
+        mode: entry.new_mode,
         uid: 0,
         gid: 0,
         size: 0,
@@ -816,8 +818,8 @@ fn index_entry_from_diff(entry: &DiffEntry, path: Vec<u8>) -> IndexEntry {
 mod upstream_cache_tests {
     use super::*;
     use crate::error::Error;
-    use crate::index::MODE_REGULAR;
     use crate::merge_trees::TreeMergeConflictPresentation;
+    use crate::objects::FileMode;
     use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::merge::tree_to_index_entries;
     use crate::repo::{InitOptions, Repository};
@@ -843,7 +845,7 @@ mod upstream_cache_tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: bytes.len() as u32,

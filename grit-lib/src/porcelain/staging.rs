@@ -12,9 +12,8 @@ use crate::diff::{
     WorktreeAddRefreshParams,
 };
 use crate::error::Result;
-use crate::index::{
-    entry_from_metadata, index_file_mtime, Index, WorktreeModePolicy, MODE_GITLINK, MODE_TREE,
-};
+use crate::index::{entry_from_metadata, index_file_mtime, Index, WorktreeModePolicy};
+use crate::objects::FileMode;
 use crate::objects::ObjectKind;
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
@@ -240,7 +239,7 @@ fn stage_new_worktree_path(
             classify_embedded_git_repo_for_stage(index, &index_relpath, &abs)?
         {
             let mut entry =
-                entry_from_metadata(&meta, index_relpath.as_bytes(), head_oid, MODE_GITLINK);
+                entry_from_metadata(&meta, index_relpath.as_bytes(), head_oid, FileMode::GITLINK);
             entry.size = 0;
             index.add_or_replace(entry);
             embedded_gitlinks.push(index_relpath);
@@ -251,7 +250,7 @@ fn stage_new_worktree_path(
     let recorded_mode = index.get(index_relpath.as_bytes(), 0).map(|e| e.mode);
     let mode = WorktreeModePolicy::from_config(rules.config())
         .index_mode_for_worktree(mode_from_metadata(&meta), recorded_mode);
-    if mode == MODE_TREE {
+    if mode == FileMode::TREE {
         return Ok(false);
     }
 

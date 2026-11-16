@@ -7,21 +7,21 @@ use std::collections::BTreeMap;
 
 use crate::error::{Error, Result};
 use crate::index::{IndexCorrupt, IndexCorruptReason, IndexEntry, IndexError};
-use crate::objects::ObjectId;
+use crate::objects::{FileMode, ObjectId};
 
 /// Per-path undo data: up to three conflict stages (index 0 = stage 1).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolveUndoRecord {
-    /// File modes for stages 1–3 (`0` means absent).
-    pub modes: [u32; 3],
-    /// Blob OIDs for stages 1–3 (only meaningful when `modes[i] != 0`).
+    /// File modes for stages 1–3 ([`FileMode::ABSENT`] means the stage is absent).
+    pub modes: [FileMode; 3],
+    /// Blob OIDs for stages 1–3 (only meaningful when `modes[i]` is not absent).
     pub oids: [ObjectId; 3],
 }
 
 impl Default for ResolveUndoRecord {
     fn default() -> Self {
         Self {
-            modes: [0; 3],
+            modes: [FileMode::ABSENT; 3],
             oids: [ObjectId::zero(); 3],
         }
     }
@@ -79,7 +79,13 @@ pub fn parse_resolve_undo_payload(data: &[u8]) -> Result<BTreeMap<Vec<u8>, Resol
             })?;
             pos += 20;
         }
-        out.insert(path, ResolveUndoRecord { modes, oids });
+        out.insert(
+            path,
+            ResolveUndoRecord {
+                modes: modes.map(FileMode::new),
+                oids,
+            },
+        );
     }
     Ok(out)
 }
@@ -88,7 +94,7 @@ pub fn parse_resolve_undo_payload(data: &[u8]) -> Result<BTreeMap<Vec<u8>, Resol
 pub fn write_resolve_undo_payload(map: &BTreeMap<Vec<u8>, ResolveUndoRecord>) -> Vec<u8> {
     let mut sb = Vec::new();
     for (path, ru) in map {
-        if !ru.modes.iter().any(|m| *m != 0) {
+        if !ru.modes.iter().any(|m| *m != FileMode::ABSENT) {
             continue;
         }
         sb.extend_from_slice(path);
@@ -99,7 +105,7 @@ pub fn write_resolve_undo_payload(map: &BTreeMap<Vec<u8>, ResolveUndoRecord>) ->
             sb.push(0);
         }
         for i in 0..3 {
-            if ru.modes[i] != 0 {
+            if ru.modes[i] != FileMode::ABSENT {
                 sb.extend_from_slice(ru.oids[i].as_bytes());
             }
         }
@@ -126,7 +132,8 @@ pub(crate) fn record_resolve_undo_for_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::index::{IndexEntry, MODE_REGULAR};
+    use crate::index::IndexEntry;
+    use crate::objects::FileMode;
 
     #[test]
     fn payload_roundtrip_and_record_merge() {
@@ -135,7 +142,7 @@ mod tests {
         map.insert(
             b"f".to_vec(),
             ResolveUndoRecord {
-                modes: [0o100644, 0, 0o100644],
+                modes: [FileMode::REGULAR, FileMode::ABSENT, FileMode::REGULAR],
                 oids: [oid, ObjectId::zero(), oid],
             },
         );
@@ -150,7 +157,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 0,

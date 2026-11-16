@@ -9,7 +9,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::index::MODE_GITLINK;
+use grit_lib::objects::FileMode;
 use grit_lib::porcelain::status::StatusOptions;
 use grit_lib::progress::CancelToken;
 use grit_lib::progress::NullProgress;
@@ -83,7 +83,7 @@ fn non_utf8_gitlink_path_is_not_untracked() {
     let entry = index
         .get(gitlink_path_bytes, 0)
         .expect("gitlink path bytes in index");
-    assert_eq!(entry.mode, MODE_GITLINK);
+    assert_eq!(entry.mode, FileMode::GITLINK);
 
     assert!(
         git_porcelain(repo_root).trim().is_empty(),

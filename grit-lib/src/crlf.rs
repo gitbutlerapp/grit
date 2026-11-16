@@ -2795,7 +2795,8 @@ mod tests {
         huge.seek(SeekFrom::Start(10_000)).expect("seek");
         assert!(worktree_allows_raw_byte_stream(&conv, &attrs, None, &mut huge, 20_000).unwrap());
 
-        use crate::index::{IndexEntry, MODE_REGULAR};
+        use crate::index::IndexEntry;
+        use crate::objects::FileMode;
         use crate::objects::ObjectId;
         let indexed = IndexEntry {
             ctime_sec: 1,
@@ -2804,7 +2805,7 @@ mod tests {
             mtime_nsec: 0,
             dev: 0,
             ino: 0,
-            mode: MODE_REGULAR,
+            mode: FileMode::REGULAR,
             uid: 0,
             gid: 0,
             size: 9000,

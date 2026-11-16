@@ -17,7 +17,7 @@ use std::path::Path;
 
 use crate::config::ConfigSet;
 use crate::error::Result;
-use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, TreeRefIter};
+use crate::objects::{parse_commit, parse_tag, FileMode, ObjectId, ObjectKind, TreeRefIter};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use std::ops::ControlFlow;
@@ -257,10 +257,10 @@ pub(crate) fn maintenance_promise_boundary(odb: &Odb) -> Result<HashSet<ObjectId
             ObjectKind::Tree => {
                 for entry in TreeRefIter::with_oid_len(&obj.data, odb.hash_algo().len()) {
                     let entry = entry?;
-                    if entry.mode == 0o160000 {
+                    if entry.mode == FileMode::GITLINK {
                         continue;
                     }
-                    if entry.mode & 0o170000 == 0o040000 {
+                    if entry.mode.is_tree() {
                         queue.push_back(entry.oid);
                     } else {
                         // Files are leaves: record the promise without probing absent blobs.
@@ -291,10 +291,10 @@ pub(crate) fn maintenance_promise_boundary(odb: &Odb) -> Result<HashSet<ObjectId
 ///
 /// Worktree listing, index parse and object read failures.
 pub(crate) fn blobs_needed_by_checkouts(repo: &Repository) -> Result<crate::objects::OidHashSet> {
-    use crate::index::MODE_GITLINK;
+    use crate::objects::FileMode;
     use crate::state::HeadState;
 
-    let is_file_mode = |mode: u32| matches!(mode & 0o170000, 0o100000 | 0o120000);
+    let is_file_mode = |mode: FileMode| mode.is_regular() || mode.is_symlink();
     let odb = repo.odb();
     let mut blobs = crate::objects::oid_hash_set();
     let mut trees_seen = crate::objects::oid_hash_set();
@@ -311,7 +311,7 @@ pub(crate) fn blobs_needed_by_checkouts(repo: &Repository) -> Result<crate::obje
             index
                 .entries()
                 .iter()
-                .filter(|e| e.mode != MODE_GITLINK && is_file_mode(e.mode) && !e.oid.is_zero())
+                .filter(|e| e.mode != FileMode::GITLINK && is_file_mode(e.mode) && !e.oid.is_zero())
                 .map(|e| e.oid),
         );
         let head = match wt.head {
@@ -334,7 +334,7 @@ pub(crate) fn blobs_needed_by_checkouts(repo: &Repository) -> Result<crate::obje
             };
             for entry in TreeRefIter::with_oid_len(&obj.data, odb.hash_algo().len()) {
                 let entry = entry?;
-                if entry.mode & 0o170000 == 0o040000 {
+                if entry.mode.is_tree() {
                     trees.push(entry.oid);
                 } else if is_file_mode(entry.mode) {
                     blobs.insert(entry.oid);

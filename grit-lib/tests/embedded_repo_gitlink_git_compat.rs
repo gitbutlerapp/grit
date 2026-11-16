@@ -5,7 +5,7 @@ use std::fs;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::index::MODE_GITLINK;
+use grit_lib::objects::FileMode;
 use grit_lib::porcelain::add::{StageMode, StageOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -70,7 +70,7 @@ fn add_stages_unregistered_embedded_repo_as_gitlink() {
     let entry = index
         .get(b"inner", 0)
         .expect("index must contain inner gitlink, not inner/i blob");
-    assert_eq!(entry.mode, MODE_GITLINK);
+    assert_eq!(entry.mode, FileMode::GITLINK);
     assert!(
         index.get(b"inner/i", 0).is_none(),
         "inner repository files must not be indexed in the outer repo"
@@ -234,7 +234,7 @@ fn add_stages_nested_linked_worktree_as_gitlink() {
     let entry = index
         .get(b"inner", 0)
         .expect("linked nested worktree must stage as gitlink at inner");
-    assert_eq!(entry.mode, MODE_GITLINK);
+    assert_eq!(entry.mode, FileMode::GITLINK);
     assert!(
         index.get(b"inner/x", 0).is_none(),
         "must not flatten linked worktree files into outer index"

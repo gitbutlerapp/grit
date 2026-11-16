@@ -270,7 +270,7 @@ fn load_worktree_new_side(
         odb,
         side.work_tree,
         path,
-        entry.new_mode.bits(),
+        entry.new_mode,
         rules.config(),
         index_entry,
         Some(&rules),
@@ -327,7 +327,7 @@ pub(crate) fn pathspec_restrict_paths_for_scan(
         for (path, mode, _) in super::flatten_tree_entries(repo.odb(), tree)? {
             if crate::porcelain::add::blob_path_matches_restrict_pathspecs(
                 &path,
-                mode.bits(),
+                mode,
                 pathspecs,
                 base_ctx,
                 attr_matcher.as_ref(),

@@ -97,7 +97,7 @@ pub(crate) fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<P
 ///
 /// Mirrors the fields Git's credential protocol exchanges. Round-trips through
 /// the `key=value\n…\n\n` wire format via [`Credential::parse`] and
-/// [`Credential::serialize`]. Any keys outside the named fields below
+/// [`Credential::serialize`]. Any keys outside the named fields
 /// (`capability[]`, `authtype`, `password_expiry_utc`, …) are preserved in
 /// [`extra`](Credential::extra) so they survive a parse/serialize round-trip
 /// and are forwarded to helpers unchanged.
@@ -117,31 +117,32 @@ pub(crate) fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<P
 ///     .with_username(Some("ada".into()))
 ///     .with_password(Some("hunter2".into()));
 /// assert!(cred.is_complete());
+/// assert_eq!(cred.password(), Some("hunter2"));
 /// assert!(!format!("{cred:?}").contains("hunter2"));
 /// ```
 #[derive(Clone, Default, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Credential {
     /// `protocol` field (e.g. `https`, `http`, `ssh`).
-    pub protocol: Option<String>,
+    pub(crate) protocol: Option<String>,
     /// `host` field, optionally including a `:port` suffix.
-    pub host: Option<String>,
+    pub(crate) host: Option<String>,
     /// `path` field (repository path on the host).
-    pub path: Option<String>,
+    pub(crate) path: Option<String>,
     /// `username` field.
-    pub username: Option<String>,
+    pub(crate) username: Option<String>,
     /// `password` field (the secret).
-    pub password: Option<String>,
+    pub(crate) password: Option<String>,
     /// `url` field — a full URL Git can decompose into the fields above.
     ///
     /// [`HelperCredentialProvider`] uses it to match `credential.<url>.*`
     /// config (see [`target_url`](Credential::target_url)) and to fill a
     /// missing protocol/host, but never writes it to a helper: helpers such as
     /// `git-credential-store` would otherwise key the lookup on its path.
-    pub url: Option<String>,
+    pub(crate) url: Option<String>,
     /// Any additional `key=value` pairs, in wire order. Multi-valued keys such
     /// as `capability[]` may appear more than once.
-    pub extra: Vec<(String, String)>,
+    pub(crate) extra: Vec<(String, String)>,
 }
 
 /// Keys in [`Credential::extra`] whose values are secrets and are redacted by `Debug`.
@@ -430,6 +431,54 @@ impl Credential {
     /// Did a helper signal `quit=1`/`quit=true` (stop querying further helpers)?
     fn wants_quit(&self) -> bool {
         matches!(self.extra_get("quit"), Some("1") | Some("true"))
+    }
+
+    /// `protocol` field (e.g. `https`, `http`, `ssh`).
+    #[must_use]
+    pub fn protocol(&self) -> Option<&str> {
+        self.protocol.as_deref()
+    }
+
+    /// `host` field, optionally including a `:port` suffix.
+    #[must_use]
+    pub fn host(&self) -> Option<&str> {
+        self.host.as_deref()
+    }
+
+    /// `path` field (repository path on the host).
+    #[must_use]
+    pub fn path(&self) -> Option<&str> {
+        self.path.as_deref()
+    }
+
+    /// `username` field.
+    #[must_use]
+    pub fn username(&self) -> Option<&str> {
+        self.username.as_deref()
+    }
+
+    /// `password` field: the secret. `Debug` never prints it.
+    #[must_use]
+    pub fn password(&self) -> Option<&str> {
+        self.password.as_deref()
+    }
+
+    /// `url` field: a full URL Git can decompose into the other fields.
+    ///
+    /// [`HelperCredentialProvider`] uses it to match `credential.<url>.*` config (see
+    /// [`target_url`](Self::target_url)) and to fill a missing protocol or host, but never
+    /// writes it to a helper: helpers such as `git-credential-store` would otherwise key the
+    /// lookup on its path.
+    #[must_use]
+    pub fn url(&self) -> Option<&str> {
+        self.url.as_deref()
+    }
+
+    /// Any additional `key=value` pairs, in wire order. Multi-valued keys such as
+    /// `capability[]` may appear more than once.
+    #[must_use]
+    pub fn extra(&self) -> &[(String, String)] {
+        &self.extra
     }
 
     /// Sets [`protocol`](Self::protocol).

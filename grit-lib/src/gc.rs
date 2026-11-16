@@ -24,7 +24,9 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use crate::error::{Error, Result};
-use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter};
+use crate::objects::{
+    parse_commit, parse_tag, FileMode, ObjectId, ObjectKind, OidHashSet, TreeRefIter,
+};
 use crate::odb::store::PrunableObjectStore;
 use crate::odb::{Odb, PruneTarget};
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
@@ -359,10 +361,6 @@ impl<'a> LazyReachable<'a> {
     }
 }
 
-/// File type bits of a tree entry mode, and the value that marks a directory.
-pub(crate) const S_IFMT: u32 = 0o170000;
-pub(crate) const S_IFDIR: u32 = 0o040000;
-
 /// Compute the full object closure reachable from `roots` (commits → parents and
 /// tree, trees → entries, tags → target). Mirrors the reachability walk used by
 /// the transfer pack builder, but specialized for prune (no exclusion set).
@@ -418,7 +416,7 @@ fn reachable_closure(
                 for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
                     let entry = entry?;
                     // Skip submodule (gitlink) entries.
-                    if entry.mode == 0o160000 {
+                    if entry.mode == FileMode::GITLINK {
                         continue;
                     }
                     if !seen.insert(entry.oid) {
@@ -429,7 +427,7 @@ fn reachable_closure(
                     }
                     // Classify by file type bits, as Git does, so non-canonical directory
                     // modes from old trees still count as trees.
-                    if entry.mode & S_IFMT == S_IFDIR {
+                    if entry.mode.is_tree() {
                         queue.push_back(entry.oid);
                     } else {
                         blobs.push(entry.oid);

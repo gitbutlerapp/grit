@@ -3,7 +3,6 @@
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
 use criterion::{criterion_group, criterion_main, Criterion};
-use grit_lib::index::MODE_REGULAR;
 use grit_lib::objects::FileMode;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository};

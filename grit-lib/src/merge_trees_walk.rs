@@ -1,6 +1,5 @@
 //! Recursive three-tree merge: skip identical subtrees and compose the result tree in the ODB.
 
-use crate::objects::FileMode;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use super::merge_tree_cache::{
@@ -13,12 +12,10 @@ use crate::merge_trees::{
     merge_one_path, merge_rename_rename, renamed_file_content, PathMergeContext,
     RenameRenameConflict, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
-use crate::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{serialize_tree, FileMode, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use crate::write_tree::is_empty_tree_oid;
-
-const MODE_DIR: u32 = 0o040000;
 
 /// Index over a set of paths answering "is anything at or under `prefix`" and
 /// "is anything strictly under `prefix/`" with hash lookups instead of scans.
@@ -72,7 +69,7 @@ pub(crate) fn tree_entry_to_index(path: &[u8], te: &TreeEntry) -> IndexEntry {
         mtime_nsec: 0,
         dev: 0,
         ino: 0,
-        mode: te.mode.bits(),
+        mode: te.mode,
         uid: 0,
         gid: 0,
         size: 0,
@@ -103,7 +100,10 @@ fn file_entry_at_path(
     tree_oid: &ObjectId,
     path: &[u8],
 ) -> crate::error::Result<Option<IndexEntry>> {
-    Ok(lookup_index_entry_at_path(cache, odb, tree_oid, path)?.filter(|e| e.mode != MODE_DIR))
+    Ok(
+        lookup_index_entry_at_path(cache, odb, tree_oid, path)?
+            .filter(|e| e.mode != FileMode::TREE),
+    )
 }
 
 type SparseSideMaps = (
@@ -331,7 +331,7 @@ pub(crate) fn compose_merged_tree_oid(
 
         if let Some(entry) = stage0_by_path.get(fp.as_slice()) {
             out_entries.push(TreeEntry {
-                mode: FileMode::new(entry.mode),
+                mode: entry.mode,
                 name,
                 oid: entry.oid,
             });
@@ -341,14 +341,14 @@ pub(crate) fn compose_merged_tree_oid(
         // Merged rows under `fp/` make it a directory, whatever ours has there: a side that
         // turned a file into a directory wins over a side that left the file alone.
         let mode = if has_rows_under(stage0_by_path, &fp) {
-            MODE_DIR
+            FileMode::TREE
         } else {
             o_te.or(t_te)
                 .or(b_te)
-                .map(|e| e.mode.bits())
-                .unwrap_or(MODE_DIR)
+                .map(|e| e.mode)
+                .unwrap_or(FileMode::TREE)
         };
-        if mode == MODE_DIR {
+        if mode == FileMode::TREE {
             let b_sub = b_te
                 .filter(|e| e.mode == FileMode::TREE)
                 .map(|e| e.oid)

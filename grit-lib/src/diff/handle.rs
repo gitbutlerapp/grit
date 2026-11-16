@@ -231,13 +231,7 @@ impl<'repo> Diff<'repo> {
                 .entries
                 .iter()
                 .filter(|e| e.stage() == 0 && !e.is_sparse_directory_placeholder())
-                .map(|e| {
-                    (
-                        String::from_utf8_lossy(&e.path).into_owned(),
-                        FileMode::new(e.mode),
-                        e.oid,
-                    )
-                })
+                .map(|e| (String::from_utf8_lossy(&e.path).into_owned(), e.mode, e.oid))
                 .collect();
             self.pair_with_sources(entries, &sources, Some(work_tree), None, false, options)?
         };

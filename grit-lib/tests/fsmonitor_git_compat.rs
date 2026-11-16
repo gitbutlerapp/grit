@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
+use grit_lib::index::{Index, IndexEntry};
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::repo::Repository;
@@ -568,7 +568,7 @@ fn grit_status_marks_fsmonitor_valid_after_clean_scan() {
     let stage0: Vec<_> = index
         .entries()
         .iter()
-        .filter(|e| e.stage() == 0 && e.mode == MODE_REGULAR)
+        .filter(|e| e.stage() == 0 && e.mode == FileMode::REGULAR)
         .collect();
     assert!(
         !stage0.is_empty(),

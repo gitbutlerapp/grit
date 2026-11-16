@@ -19,8 +19,9 @@ use crate::hash::Parallelism;
 use crate::index::index_file_mtime;
 use crate::index::{
     entry_from_metadata, entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry,
-    WorktreeModePolicy, MODE_GITLINK,
+    WorktreeModePolicy,
 };
+use crate::objects::FileMode;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::{WriteOptions, BULK_TRACKED_RESTAGE_LOOSE_WRITE};
 pub use crate::porcelain::bulk_index::IndexStagingThresholds;
@@ -314,7 +315,7 @@ fn stage_tracked_modifications_in_index_body(
     for e in &index.entries {
         if e.stage() != 0 {
             unmerged_paths.insert(e.path.clone());
-        } else if e.mode == MODE_GITLINK
+        } else if e.mode == FileMode::GITLINK
             || e.intent_to_add()
             || std::str::from_utf8(&e.path).is_err()
         {
@@ -637,7 +638,7 @@ fn refresh_unmerged_tracked_path(
                 .find(|e| e.path == raw_path)
                 .map(|e| e.mode)
         })
-        .unwrap_or(0o100644);
+        .unwrap_or(FileMode::REGULAR);
     let index_relpath = crate::repo_relpath::storage_string(raw_path);
     match symlink_metadata_for_staging(&index_relpath, abs_path)? {
         Some(meta) => {
@@ -661,7 +662,7 @@ fn refresh_unmerged_tracked_path(
                     return Ok(());
                 }
             }
-            if idx_mode == MODE_GITLINK {
+            if idx_mode == FileMode::GITLINK {
                 let oid = if meta.is_dir() && !meta.file_type().is_symlink() {
                     match classify_embedded_git_repo_for_stage(index, &index_relpath, abs_path)? {
                         EmbeddedGitRepoStage::Gitlink(oid) => Some(oid),
@@ -811,8 +812,8 @@ struct DeferredRestageContext<'a> {
 
 const S_IFMT: u32 = 0o170000;
 
-fn git_entry_type(mode: u32) -> u32 {
-    mode & S_IFMT
+fn git_entry_type(mode: FileMode) -> u32 {
+    mode.bits() & S_IFMT
 }
 
 /// What refreshing one present tracked worktree path did to its index row.
@@ -855,7 +856,7 @@ fn refresh_present_tracked_path(
     let idx_oid = idx_e.oid;
 
     if stat.is_dir {
-        let is_gitlink = idx_mode == MODE_GITLINK;
+        let is_gitlink = idx_mode == FileMode::GITLINK;
         if !is_gitlink && !abs_path.join(".git").exists() {
             return Ok(PresentRefresh::Removed);
         }
@@ -1233,7 +1234,7 @@ fn stage_gitlink_from_stat(
     oid: ObjectId,
     index: &mut Index,
 ) -> Result<()> {
-    let mut entry = entry_from_stat(abs_path, raw_path, oid, MODE_GITLINK)?;
+    let mut entry = entry_from_stat(abs_path, raw_path, oid, FileMode::GITLINK)?;
     entry.size = 0;
     index.add_or_replace(entry);
     Ok(())
@@ -1244,7 +1245,7 @@ fn stage_blob_from_worktree(
     index: &mut Index,
     abs_path: &Path,
     raw_path: &[u8],
-    mode_override: Option<u32>,
+    mode_override: Option<FileMode>,
     rules: &mut WorktreeRules,
 ) -> Result<()> {
     let meta = fs::symlink_metadata(abs_path)?;
@@ -1258,7 +1259,7 @@ fn stage_blob_from_worktree(
         }
         #[cfg(not(unix))]
         {
-            crate::index::MODE_REGULAR
+            crate::objects::FileMode::REGULAR
         }
     });
     let entry = entry_from_stat(abs_path, raw_path, oid, mode)?;
@@ -1375,10 +1376,8 @@ mod tests {
     use std::io::Write;
 
     use crate::diff::{entry_is_racy, mode_from_metadata, stat_matches};
-    use crate::index::{
-        entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK,
-        MODE_REGULAR,
-    };
+    use crate::index::{entry_from_metadata, index_file_mtime, Index, IndexEntry};
+    use crate::objects::FileMode;
     use crate::objects::{ObjectId, ObjectKind};
     use crate::odb::Odb;
     use crate::repo::{init_repository, Repository};
@@ -1903,7 +1902,7 @@ mod tests {
         let meta = fs::symlink_metadata(&file_path).unwrap();
         let stale_oid = repo.odb().hash(ObjectKind::Blob, content_a).expect("hash");
         let mut index = repo.load_index().unwrap();
-        let entry = entry_from_metadata(&meta, b"racy.txt", stale_oid, MODE_REGULAR);
+        let entry = entry_from_metadata(&meta, b"racy.txt", stale_oid, FileMode::REGULAR);
         assert!(stat_matches(&entry, &meta));
         assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
 
@@ -1940,7 +1939,7 @@ mod tests {
         let stale_oid = repo.odb().hash(ObjectKind::Blob, content_a).expect("hash");
 
         let mut index = Index::new();
-        let entry = entry_from_metadata(&meta, b"f.txt", stale_oid, MODE_REGULAR);
+        let entry = entry_from_metadata(&meta, b"f.txt", stale_oid, FileMode::REGULAR);
         assert!(stat_matches(&entry, &meta));
         assert!(entry_is_racy(&entry, Some(INDEX_MTIME)));
         index.add_or_replace(entry);
@@ -2001,7 +2000,7 @@ mod tests {
         assert_eq!(summary.modified, vec![b"run.sh".to_vec()]);
         let index = repo.load_index().unwrap();
         let e = index.entries.iter().find(|e| e.path == b"run.sh").unwrap();
-        assert_eq!(e.mode, MODE_EXECUTABLE);
+        assert_eq!(e.mode, FileMode::EXECUTABLE);
     }
 
     #[test]
@@ -2137,7 +2136,7 @@ mod tests {
         let abs = wt.join("run.sh");
         let meta = fs::symlink_metadata(&abs).unwrap();
         let mut entry = entry_from_stat(&abs, b"run.sh", oid, mode_from_metadata(&meta)).unwrap();
-        entry.mode = MODE_EXECUTABLE;
+        entry.mode = FileMode::EXECUTABLE;
         let mut index = Index::new();
         index.add_or_replace(entry);
         repo.write_index(&mut index).unwrap();
@@ -2150,7 +2149,7 @@ mod tests {
         );
         let loaded = repo.load_index().unwrap();
         let e = loaded.entries.iter().find(|e| e.path == b"run.sh").unwrap();
-        assert_eq!(e.mode, MODE_EXECUTABLE);
+        assert_eq!(e.mode, FileMode::EXECUTABLE);
     }
 
     #[test]
@@ -2283,7 +2282,7 @@ mod tests {
         fs::set_permissions(&blocked, fs::Permissions::from_mode(0o644)).unwrap();
     }
 
-    fn conflict_index_entry(path: &str, stage: u8, oid: ObjectId, mode: u32) -> IndexEntry {
+    fn conflict_index_entry(path: &str, stage: u8, oid: ObjectId, mode: FileMode) -> IndexEntry {
         let path_bytes = path.as_bytes().to_vec();
         IndexEntry {
             ctime_sec: 0,
@@ -2364,13 +2363,16 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("sub", 1, base_oid, MODE_GITLINK));
+            .push(conflict_index_entry("sub", 1, base_oid, FileMode::GITLINK));
         index
             .entries
-            .push(conflict_index_entry("sub", 2, ours_oid, MODE_GITLINK));
-        index
-            .entries
-            .push(conflict_index_entry("sub", 3, theirs_oid, MODE_GITLINK));
+            .push(conflict_index_entry("sub", 2, ours_oid, FileMode::GITLINK));
+        index.entries.push(conflict_index_entry(
+            "sub",
+            3,
+            theirs_oid,
+            FileMode::GITLINK,
+        ));
         repo.write_index(&mut index).unwrap();
         let index_path = repo.index_path();
         let index_before = fs::read(&index_path).unwrap();
@@ -2399,13 +2401,16 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("sub", 1, base_oid, MODE_GITLINK));
+            .push(conflict_index_entry("sub", 1, base_oid, FileMode::GITLINK));
         index
             .entries
-            .push(conflict_index_entry("sub", 2, ours_oid, MODE_GITLINK));
-        index
-            .entries
-            .push(conflict_index_entry("sub", 3, theirs_oid, MODE_GITLINK));
+            .push(conflict_index_entry("sub", 2, ours_oid, FileMode::GITLINK));
+        index.entries.push(conflict_index_entry(
+            "sub",
+            3,
+            theirs_oid,
+            FileMode::GITLINK,
+        ));
         repo.write_index(&mut index).unwrap();
 
         let summary = stage_tracked_modifications(&repo, wt).unwrap();
@@ -2417,7 +2422,7 @@ mod tests {
             "checked-out submodule should collapse unmerged gitlink stages"
         );
         let staged = index.get(b"sub", 0).expect("stage-0 gitlink");
-        assert_eq!(staged.mode, MODE_GITLINK);
+        assert_eq!(staged.mode, FileMode::GITLINK);
         assert_eq!(staged.oid, theirs_oid);
     }
 
@@ -2433,9 +2438,12 @@ mod tests {
         repo.reload_config().unwrap();
         let gitlink_oid = repo.odb().write(ObjectKind::Commit, b"tree 0000000000000000000000000000000000000000\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\n\nsub\n").unwrap();
         let mut index = Index::new();
-        index
-            .entries
-            .push(conflict_index_entry("sub", 0, gitlink_oid, MODE_GITLINK));
+        index.entries.push(conflict_index_entry(
+            "sub",
+            0,
+            gitlink_oid,
+            FileMode::GITLINK,
+        ));
         repo.write_index(&mut index).unwrap();
 
         fs::write(wt.join("sub"), b"plain file\n").unwrap();
@@ -2446,7 +2454,8 @@ mod tests {
         let index = repo.load_index().unwrap();
         let staged = index.get(b"sub", 0).expect("stage-0 blob");
         assert_eq!(
-            staged.mode, MODE_REGULAR,
+            staged.mode,
+            FileMode::REGULAR,
             "core.filemode=false must not preserve gitlink mode on type change"
         );
         assert_ne!(staged.oid, gitlink_oid);
@@ -2468,13 +2477,13 @@ mod tests {
         let mut index = Index::new();
         index
             .entries
-            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+            .push(conflict_index_entry("f", 1, base, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f", 2, ours, MODE_REGULAR));
+            .push(conflict_index_entry("f", 2, ours, FileMode::REGULAR));
         index
             .entries
-            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+            .push(conflict_index_entry("f", 3, theirs, FileMode::REGULAR));
         repo.write_index(&mut index).unwrap();
 
         symlink(target, &link_path).unwrap();
@@ -2489,7 +2498,7 @@ mod tests {
         );
         let staged = index.get(b"f", 0).expect("stage-0 symlink");
         assert!(
-            staged.mode & 0o170000 == 0o120000,
+            staged.mode.is_symlink(),
             "expected symlink mode, got {:o}",
             staged.mode
         );

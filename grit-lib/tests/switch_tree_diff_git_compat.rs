@@ -649,7 +649,8 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
     use std::process::Command;
 
     use filetime::FileTime;
-    use grit_lib::index::{entry_from_metadata, Index, MODE_REGULAR};
+    use grit_lib::index::{entry_from_metadata, Index};
+    use grit_lib::objects::FileMode;
     use grit_lib::objects::ObjectKind;
 
     fn pin_mtime(path: &Path, sec: u32, nsec: u32) {
@@ -708,7 +709,7 @@ fn switch_refuses_racy_same_size_dirty_file_like_git() {
         &meta,
         b"hot.txt",
         stale_oid,
-        MODE_REGULAR,
+        FileMode::REGULAR,
     ));
     racy_index.sort();
     let index_path = tmp.path().join(".git").join("index");
@@ -963,7 +964,8 @@ fn switch_refuses_racy_second_path_when_first_has_stat_drift_only_like_git() {
     use std::path::Path;
 
     use filetime::FileTime;
-    use grit_lib::index::{entry_from_metadata, Index, MODE_REGULAR};
+    use grit_lib::index::{entry_from_metadata, Index};
+    use grit_lib::objects::FileMode;
     use grit_lib::objects::ObjectKind;
 
     fn pin_mtime(path: &Path, sec: u32, nsec: u32) {
@@ -1030,7 +1032,7 @@ fn switch_refuses_racy_second_path_when_first_has_stat_drift_only_like_git() {
         &meta_b,
         b"b.txt",
         stale_b_oid,
-        MODE_REGULAR,
+        FileMode::REGULAR,
     ));
     racy_index.sort();
     let index_path = tmp.path().join(".git").join("index");

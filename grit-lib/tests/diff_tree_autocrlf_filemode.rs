@@ -3,7 +3,7 @@
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{mode_from_metadata, TreeDiffOptions};
 use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{entry_from_stat, Index, MODE_EXECUTABLE, MODE_REGULAR};
+use grit_lib::index::{entry_from_stat, Index};
 use grit_lib::objects::FileMode;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::Repository;
@@ -43,7 +43,7 @@ fn repo_with_autocrlf_filemode_false(
     let mut entry = entry_from_stat(&wt.join("a.txt"), b"a.txt", oid, mode_from_metadata(&meta))
         .expect("entry");
     // Index/tree still record executable bit from `git update-index --chmod=+x`.
-    entry.mode = MODE_EXECUTABLE;
+    entry.mode = FileMode::EXECUTABLE;
     let mut index = Index::new();
     index.entries_mut().push(entry);
 
@@ -118,17 +118,19 @@ fn explicit_index_chmod_reported_when_filemode_false() {
     let meta = fs::symlink_metadata(wt.join("run.sh")).expect("stat");
     let wt_mode = mode_from_metadata(&meta);
     assert_eq!(
-        wt_mode, MODE_REGULAR,
+        wt_mode,
+        FileMode::REGULAR,
         "fixture expects non-executable worktree file (100644 HEAD/worktree)"
     );
 
-    let entry = entry_from_stat(&wt.join("run.sh"), b"run.sh", oid, MODE_REGULAR).expect("entry");
+    let entry =
+        entry_from_stat(&wt.join("run.sh"), b"run.sh", oid, FileMode::REGULAR).expect("entry");
     let mut index = Index::new();
     index.entries_mut().push(entry);
     let tree_oid = write_tree_from_index(odb, &index, "").expect("tree");
 
     // Staged `git update-index --chmod=+x` while HEAD/worktree stay 100644.
-    index.entries_mut()[0].mode = MODE_EXECUTABLE;
+    index.entries_mut()[0].mode = FileMode::EXECUTABLE;
 
     let diff = repo
         .diff()
