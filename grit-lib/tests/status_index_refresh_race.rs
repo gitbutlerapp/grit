@@ -3,7 +3,9 @@
 use std::fs;
 use std::path::Path;
 use std::process::Command;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::time::{Duration, SystemTime};
 
 use grit_lib::porcelain::status::{StatusOptions, UntrackedMode};
 use grit_lib::progress::NullProgress;
@@ -36,15 +38,32 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let dir = tmp.path();
     init_repo(dir);
+    fs::write(dir.join("other.txt"), "other\n").expect("write other");
+    git(dir, &["add", "other.txt"]);
+    git(dir, &["commit", "-qm", "other"]);
+    // Same content, older mtime: status must refresh the cached stat data, so it always
+    // reaches the opportunistic index write instead of only when an entry is racily clean.
+    fs::File::options()
+        .write(true)
+        .open(dir.join("other.txt"))
+        .expect("open other")
+        .set_modified(SystemTime::UNIX_EPOCH + Duration::from_secs(1_000_000_000))
+        .expect("set mtime");
     fs::write(dir.join("file.txt"), "changed\n").expect("modify worktree");
 
     let hook_dir = dir.to_path_buf();
+    let hook_ran = Arc::new(AtomicBool::new(false));
+    let hook_ran_in_hook = Arc::clone(&hook_ran);
     let hook = Arc::new(move || {
+        // A concurrent writer stages and commits between status loading the index and
+        // writing its refreshed copy back.
+        git(&hook_dir, &["add", "file.txt"]);
         let repo = open_grit_repo(&hook_dir);
         let req = grit_test_support::commit_request("race", "A <a@b.c> 1 +0000");
         repo.commits()
             .create_staged(&req, &mut NullProgress, &CancelToken::never())
             .expect("commit in hook");
+        hook_ran_in_hook.store(true, Ordering::SeqCst);
     });
     set_before_opportunistic_index_write_hook(Some(hook));
 
@@ -58,6 +77,10 @@ fn status_skips_stale_opportunistic_write_after_concurrent_commit() {
         .expect("status");
     set_before_opportunistic_index_write_hook(None);
 
+    assert!(
+        hook_ran.load(Ordering::SeqCst),
+        "status must reach the opportunistic index write"
+    );
     assert!(
         git_diff_cached_names(dir).is_empty(),
         "index must match HEAD after status with concurrent commit"
