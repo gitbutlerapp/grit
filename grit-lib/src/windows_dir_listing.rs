@@ -3,6 +3,7 @@
 //! Non-Windows builds expose a stub [`WorktreeListingCache`] so status can thread `Option`
 //! through shared call sites.
 
+#[cfg(not(windows))]
 use std::sync::Arc;
 
 #[cfg(not(windows))]
@@ -24,7 +25,6 @@ pub(crate) fn listing_cache_ref(
 
 #[cfg(windows)]
 mod imp {
-    use std::ffi::OsStr;
     use std::io;
     use std::os::windows::ffi::OsStrExt;
     use std::path::{Path, PathBuf};

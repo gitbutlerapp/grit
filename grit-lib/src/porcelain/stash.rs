@@ -34,7 +34,6 @@ use crate::apply::{apply_patch_to_index, IndexApplyOptions};
 use crate::check_ref_format::{RefName, RefNameRef};
 use crate::diff::HunkId;
 use crate::ident::Signature;
-#[cfg(unix)]
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, DirectoryRenameMode, TreeMergeConflictPresentation,
