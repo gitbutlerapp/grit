@@ -1871,7 +1871,9 @@ mod tests {
         ] {
             let path = root.join(name);
             fs::write(&path, b"file\n").unwrap();
-            index.add_or_replace(entry_from_stat(&path, name.as_bytes(), oid, 0o100644).unwrap());
+            index.add_or_replace(
+                entry_from_stat(&path, name.as_bytes(), oid, FileMode::REGULAR).unwrap(),
+            );
         }
         fs::OpenOptions::new()
             .write(true)
@@ -1938,7 +1940,9 @@ mod tests {
         fs::write(&path, b"file\n").unwrap();
         let oid = ObjectId::null(crate::objects::HashAlgo::Sha1);
         let mut index = Index::new();
-        index.add_or_replace(entry_from_stat(&path, b"file\0suffix", oid, 0o100644).unwrap());
+        index.add_or_replace(
+            entry_from_stat(&path, b"file\0suffix", oid, FileMode::REGULAR).unwrap(),
+        );
         let handle = open_stat_directory(tmp.path()).unwrap();
         let mut cancel_stride = 0usize;
         let boundary = StatBoundaryPoll::Worker(None);
