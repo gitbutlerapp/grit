@@ -478,7 +478,7 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_fn_pathspec_strings` | `with_pathspecs (grit-lib/src/porcelain/clean.rs:58) :: with_pathspecs(pathspecs)` |
 | `pub_fn_pathspec_strings` | `with_pathspecs (grit-lib/src/porcelain/paths.rs:63) :: with_pathspecs(pathspecs)` |
 | `pub_fn_pathspec_strings` | `with_pathspecs (grit-lib/src/porcelain/restore.rs:105) :: with_pathspecs(pathspecs)` |
-| `pub_fn_pathspec_strings` | `with_pathspecs (grit-lib/src/porcelain/stash.rs:546) :: with_pathspecs(pathspecs)` |
+| `pub_fn_pathspec_strings` | `with_pathspecs (grit-lib/src/porcelain/stash.rs:545) :: with_pathspecs(pathspecs)` |
 | `pub_fn_refname_str` | `grit_lib::repo_handles::branches::Branches::delete :: delete(name)` |
 | `pub_fn_refname_str` | `grit_lib::repo_handles::remote::RepositoryRemotes::add :: add(name)` |
 | `pub_fn_refname_str` | `grit_lib::repo_handles::remote::RepositoryRemotes::get :: get(name)` |
