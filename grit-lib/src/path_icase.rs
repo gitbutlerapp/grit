@@ -57,7 +57,8 @@ impl FoldedNames {
     fn push(&mut self, name: &[u8]) {
         let start = self.bytes.len();
         self.bytes.extend_from_slice(name);
-        self.spans.push((memihash(name), start, self.bytes.len()));
+        self.spans
+            .push((folded_name_hash(name), start, self.bytes.len()));
     }
 
     /// Make the pushed names searchable; call once after the last [`Self::push`].
@@ -67,13 +68,19 @@ impl FoldedNames {
 
     /// Names whose case-folded hash equals that of `name` (a superset of its case variants).
     fn same_fold_hash<'s>(&'s self, name: &[u8]) -> impl Iterator<Item = &'s [u8]> + 's {
-        let hash = memihash(name);
+        let hash = folded_name_hash(name);
         let first = self.spans.partition_point(|&(h, _, _)| h < hash);
         self.spans[first..]
             .iter()
             .take_while(move |&&(h, _, _)| h == hash)
             .map(|&(_, start, end)| &self.bytes[start..end])
     }
+}
+
+/// [`ascii_fold_hash`] narrowed to the width [`FoldedNames`] stores.
+fn folded_name_hash(name: &[u8]) -> u32 {
+    // The final fold of `ascii_fold_hash` already mixes the high half into the low one.
+    ascii_fold_hash(name) as u32
 }
 
 /// Add every leading directory of `path` (`a`, `a/b` for `a/b/c`), deepest first, stopping
@@ -469,12 +476,48 @@ fn paths_same_worktree_slot_str(
 /// [`memihash`] folds ASCII case even without `ignorecase`; that only makes buckets coarser,
 /// and members are compared with [`paths_same_worktree_slot_str`] before they are grouped.
 #[must_use]
-fn path_collision_bucket_hash(path: &str, opts: WorktreePathCollisionOptions) -> u32 {
+fn path_collision_bucket_hash(path: &str, opts: WorktreePathCollisionOptions) -> u64 {
     if opts.precompose_unicode {
-        memihash(precompose_utf8_path(path).as_bytes())
+        ascii_fold_hash(precompose_utf8_path(path).as_bytes())
     } else {
-        memihash(path.as_bytes())
+        ascii_fold_hash(path.as_bytes())
     }
+}
+
+/// Hash of `bytes` that ignores ASCII case, mixing eight bytes per step.
+#[must_use]
+fn ascii_fold_hash(bytes: &[u8]) -> u64 {
+    const MULTIPLIER: u64 = 0x9e37_79b9_7f4a_7c15;
+    let mix = |hash: u64, word: u64| {
+        (hash ^ ascii_lowercase_word(word))
+            .wrapping_mul(MULTIPLIER)
+            .rotate_left(29)
+    };
+    let (chunks, rest) = bytes.as_chunks::<8>();
+    let mut hash = (bytes.len() as u64).wrapping_mul(MULTIPLIER);
+    for chunk in chunks {
+        hash = mix(hash, u64::from_le_bytes(*chunk));
+    }
+    if !rest.is_empty() {
+        let mut word = [0u8; 8];
+        word[..rest.len()].copy_from_slice(rest);
+        hash = mix(hash, u64::from_le_bytes(word));
+    }
+    hash ^ (hash >> 32)
+}
+
+/// `u64::to_le_bytes(word)` with every ASCII uppercase byte lowercased; other bytes unchanged.
+#[must_use]
+const fn ascii_lowercase_word(word: u64) -> u64 {
+    const ONES: u64 = 0x0101_0101_0101_0101;
+    const HIGH_BITS: u64 = 0x8080_8080_8080_8080;
+    // Per byte, the low seven bits plus a bias set the high bit exactly when they reach the
+    // bound; no byte can carry into its neighbour.
+    let low7 = word & !HIGH_BITS;
+    let at_least_a = low7 + ONES * (0x80 - b'A' as u64);
+    let above_z = low7 + ONES * (0x80 - b'Z' as u64 - 1);
+    let upper = at_least_a & !above_z & !word & HIGH_BITS;
+    word | (upper >> 2)
 }
 
 /// Repository-relative path using each parent directory entry's on-disk spelling.
@@ -735,6 +778,64 @@ impl<'w> DentrySpellingCache<'w> {
         }
         None
     }
+}
+
+fn split_parent_leaf(path: &str) -> (&str, &str) {
+    path.rsplit_once('/').unwrap_or(("", path))
+}
+
+/// Positions in `paths` (repository-relative, `/`-separated) whose parent directory cannot be
+/// read or does not list the final component with exactly this spelling.
+///
+/// Reads each distinct parent directory once, on up to `threads` workers. Use it on a volume
+/// that does not fold case: there a readable parent is spelled as on disk, so every path left
+/// out already has its on-disk spelling and [`DentrySpellingCache::spelling`] would return it
+/// unchanged.
+pub(crate) fn paths_without_exact_dentry(
+    work_tree: &Path,
+    paths: &[&str],
+    threads: NonZeroUsize,
+) -> Vec<usize> {
+    let mut groups: Vec<(&str, Vec<usize>)> = Vec::new();
+    let mut group_of_parent: hashbrown::HashMap<&str, usize> = hashbrown::HashMap::new();
+    for (i, path) in paths.iter().enumerate() {
+        let (parent, _) = split_parent_leaf(path);
+        // Siblings are usually adjacent, so most paths skip the table.
+        if let Some((last_parent, members)) = groups.last_mut() {
+            if *last_parent == parent {
+                members.push(i);
+                continue;
+            }
+        }
+        match group_of_parent.entry(parent) {
+            hashbrown::hash_map::Entry::Occupied(slot) => groups[*slot.get()].1.push(i),
+            hashbrown::hash_map::Entry::Vacant(slot) => {
+                slot.insert(groups.len());
+                groups.push((parent, vec![i]));
+            }
+        }
+    }
+    let options = ParallelOptions {
+        threads,
+        min_items: PREFETCH_PARALLEL_MIN_DIRS,
+        min_total_bytes: None,
+        signed_entry_threshold: None,
+    };
+    let missing = par_map(&groups, options, 0, |(parent, members)| {
+        let Ok(entries) = std::fs::read_dir(work_tree.join(parent)) else {
+            return members.clone();
+        };
+        let names: hashbrown::HashSet<std::ffi::OsString> =
+            entries.flatten().map(|entry| entry.file_name()).collect();
+        members
+            .iter()
+            .copied()
+            .filter(|&i| !names.contains(std::ffi::OsStr::new(split_parent_leaf(paths[i]).1)))
+            .collect::<Vec<usize>>()
+    });
+    let mut missing: Vec<usize> = missing.into_iter().flatten().collect();
+    missing.sort_unstable();
+    missing
 }
 
 /// Resolve a worktree path for an index entry, honoring case-insensitive filesystems.
@@ -1215,35 +1316,67 @@ impl LazyDisjointSets {
 /// Only groups with at least two members are returned, each sorted by path bytes.
 fn worktree_collision_sets(paths: &[&str], opts: WorktreePathCollisionOptions) -> Vec<Vec<usize>> {
     let mut sets = LazyDisjointSets::new(paths.len());
-    // Most hashes belong to one path: keep that path inline and spill later ones to a side
-    // table, so a collision-free index costs one hash-table insert per path.
-    let mut first_by_hash: hashbrown::HashMap<u32, usize> =
-        hashbrown::HashMap::with_capacity(paths.len());
-    let mut more_by_hash: hashbrown::HashMap<u32, SmallVec<[usize; 2]>> = hashbrown::HashMap::new();
-    for (i, path) in paths.iter().enumerate() {
-        let hash = path_collision_bucket_hash(path, opts);
-        match first_by_hash.entry(hash) {
-            hashbrown::hash_map::Entry::Vacant(slot) => {
-                slot.insert(i);
-            }
-            hashbrown::hash_map::Entry::Occupied(_) => {
-                more_by_hash.entry(hash).or_default().push(i)
-            }
+    let hashes: Vec<u64> = paths
+        .iter()
+        .map(|path| path_collision_bucket_hash(path, opts))
+        .collect();
+
+    let mut dirs = hashbrown::HashSet::new();
+    let mut previous_parent: &[u8] = &[];
+    for path in paths {
+        let path = path.as_bytes();
+        let parent = path
+            .iter()
+            .rposition(|&b| b == b'/')
+            .map_or(&path[..0], |slash| &path[..slash]);
+        if parent != previous_parent {
+            insert_leading_dirs(&mut dirs, path);
+            previous_parent = parent;
         }
     }
-    let bucket = |hash: u32| -> SmallVec<[usize; 4]> {
-        let Some(&first) = first_by_hash.get(&hash) else {
-            return SmallVec::new();
-        };
-        let mut members = SmallVec::new();
-        members.push(first);
-        if let Some(more) = more_by_hash.get(&hash) {
-            members.extend_from_slice(more);
-        }
-        members
+    let dir_hashes: Vec<(&str, u64)> = dirs
+        .into_iter()
+        .filter_map(|dir| std::str::from_utf8(dir).ok())
+        .map(|dir| (dir, path_collision_bucket_hash(dir, opts)))
+        .collect();
+
+    // One bit per hash slot, few enough to stay cache-resident: a path can only collide when
+    // another path or a directory lands in its slot, and only those paths are bucketed.
+    let slot_bits = (paths.len() + dir_hashes.len())
+        .saturating_mul(8)
+        .next_power_of_two()
+        .max(64);
+    let slot = |hash: u64| {
+        let slot = (hash as usize) & (slot_bits - 1);
+        (slot / 64, 1u64 << (slot % 64))
     };
-    for &hash in more_by_hash.keys() {
-        let members = bucket(hash);
+    let mut seen = vec![0u64; slot_bits / 64];
+    let mut shared = vec![0u64; slot_bits / 64];
+    for &hash in &hashes {
+        let (word, bit) = slot(hash);
+        if seen[word] & bit == 0 {
+            seen[word] |= bit;
+        } else {
+            shared[word] |= bit;
+        }
+    }
+    for &(_, hash) in &dir_hashes {
+        let (word, bit) = slot(hash);
+        if seen[word] & bit != 0 {
+            shared[word] |= bit;
+        }
+    }
+    let in_shared_slot = |hash: u64| {
+        let (word, bit) = slot(hash);
+        shared[word] & bit != 0
+    };
+    let mut by_hash: hashbrown::HashMap<u64, SmallVec<[usize; 2]>> = hashbrown::HashMap::new();
+    for (i, &hash) in hashes.iter().enumerate() {
+        if in_shared_slot(hash) {
+            by_hash.entry(hash).or_default().push(i);
+        }
+    }
+    for members in by_hash.values().filter(|members| members.len() > 1) {
         for (a, &i) in members.iter().enumerate() {
             for &j in &members[a + 1..] {
                 if paths_same_worktree_slot_str(paths[i], paths[j], opts) {
@@ -1253,18 +1386,16 @@ fn worktree_collision_sets(paths: &[&str], opts: WorktreePathCollisionOptions) -
         }
     }
 
-    let mut dirs = hashbrown::HashSet::new();
-    for path in paths {
-        insert_leading_dirs(&mut dirs, path.as_bytes());
-    }
-    let file_at_dir: HashMap<Vec<u8>, usize> = dirs
+    let file_at_dir: HashMap<Vec<u8>, usize> = dir_hashes
         .into_iter()
-        .filter_map(|dir| {
-            let dir_str = std::str::from_utf8(dir).ok()?;
-            let file = bucket(path_collision_bucket_hash(dir_str, opts))
-                .into_iter()
-                .find(|&j| paths_same_worktree_slot_str(paths[j], dir_str, opts))?;
-            Some((dir.to_vec(), file))
+        .filter(|&(_, hash)| in_shared_slot(hash))
+        .filter_map(|(dir, hash)| {
+            let file = by_hash
+                .get(&hash)?
+                .iter()
+                .copied()
+                .find(|&j| paths_same_worktree_slot_str(paths[j], dir, opts))?;
+            Some((dir.as_bytes().to_vec(), file))
         })
         .collect();
     if !file_at_dir.is_empty() {
@@ -1439,6 +1570,236 @@ mod tests {
             collision_sets_of(&["f02398b.txt/x", "f0688b8.txt"], ICASE),
             Vec::<Vec<&str>>::new()
         );
+    }
+
+    #[test]
+    fn ascii_lowercase_word_matches_bytewise_lowercase_in_every_lane() {
+        for lane in 0..8 {
+            for byte in 0..=u8::MAX {
+                let mut bytes = *b"zZ09@[`{";
+                bytes[lane] = byte;
+                let expected = u64::from_le_bytes(bytes.map(|b| b.to_ascii_lowercase()));
+                assert_eq!(
+                    ascii_lowercase_word(u64::from_le_bytes(bytes)),
+                    expected,
+                    "byte {byte:#04x} in lane {lane}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn ascii_fold_hash_ignores_ascii_case_only() {
+        for (a, b) in [
+            ("", ""),
+            ("Readme.TXT", "readme.txt"),
+            ("SRC/Main/Lib.rs", "src/main/lib.rs"),
+            ("exactly8", "EXACTLY8"),
+        ] {
+            assert_eq!(ascii_fold_hash(a.as_bytes()), ascii_fold_hash(b.as_bytes()));
+        }
+        for (a, b) in [
+            ("a", "a\0"),
+            ("a.txt", "b.txt"),
+            ("caf\u{00e9}", "CAF\u{00c9}"),
+            ("exactly8", "exactly9"),
+        ] {
+            assert_ne!(
+                ascii_fold_hash(a.as_bytes()),
+                ascii_fold_hash(b.as_bytes()),
+                "{a:?} vs {b:?}"
+            );
+        }
+    }
+
+    /// Pairwise reference for [`worktree_collision_sets`]: union every two paths that share a
+    /// worktree slot, or where one is a leading directory (by slot) of the other.
+    fn collision_sets_by_brute_force(
+        paths: &[&str],
+        opts: WorktreePathCollisionOptions,
+    ) -> Vec<Vec<usize>> {
+        let mut sets = LazyDisjointSets::new(paths.len());
+        for i in 0..paths.len() {
+            for j in 0..paths.len() {
+                if i == j {
+                    continue;
+                }
+                let same = paths_same_worktree_slot_str(paths[i], paths[j], opts);
+                let file_is_dir_of = paths[j].match_indices('/').any(|(slash, _)| {
+                    paths_same_worktree_slot_str(paths[i], &paths[j][..slash], opts)
+                });
+                if same || file_is_dir_of {
+                    sets.union(i, j);
+                }
+            }
+        }
+        let mut sets = sets.into_multi_member_sets();
+        for set in &mut sets {
+            set.sort_by_key(|&i| paths[i]);
+        }
+        sets.sort_by_key(|set| paths[set[0]]);
+        sets
+    }
+
+    #[test]
+    fn collision_sets_match_pairwise_reference_on_a_mixed_tree() {
+        let mut owned: Vec<String> = Vec::new();
+        for d in 0..12 {
+            for f in 0..12 {
+                owned.push(format!("dir{d}/file{f}.txt"));
+            }
+            owned.push(format!("dir{d}/sub/leaf.rs"));
+        }
+        owned.extend(
+            [
+                "DIR3/File4.txt",
+                "dir5/FILE7.TXT",
+                "Dir7",
+                "dir9/sub",
+                "dir10/SUB/x",
+                "caf\u{00e9}/a",
+                "cafe\u{0301}/b",
+                "Caf\u{00e9}.md",
+                "caf\u{00e9}.md",
+                "top",
+                "TOP/inner",
+            ]
+            .map(str::to_owned),
+        );
+        owned.sort();
+        let paths: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let both = WorktreePathCollisionOptions {
+            ignorecase: true,
+            precompose_unicode: true,
+        };
+        for opts in [ICASE, PRECOMPOSE, both] {
+            let fast = worktree_collision_sets(&paths, opts);
+            assert_eq!(
+                fast,
+                collision_sets_by_brute_force(&paths, opts),
+                "{opts:?}"
+            );
+        }
+        assert_eq!(
+            collision_sets_of(&paths, ICASE)
+                .iter()
+                .find(|set| set.contains(&"Dir7"))
+                .map(Vec::len),
+            Some(14),
+            "a file named like a directory joins every path under it"
+        );
+    }
+
+    #[test]
+    fn paths_without_exact_dentry_flags_misspelled_and_missing_paths() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::create_dir_all(wt.join("dir/sub")).expect("mkdir");
+        for file in ["top.txt", "dir/a.txt", "dir/B.txt", "dir/sub/c.txt"] {
+            std::fs::write(wt.join(file), b"x").expect("write");
+        }
+        let paths = [
+            "top.txt",
+            "dir/a.txt",
+            "dir/b.txt",
+            "dir/sub/c.txt",
+            "dir/missing.txt",
+            "nope/x.txt",
+            "dir/sub/c.txt/under-file",
+            "TOP.txt",
+        ];
+        let expect_missing = |threads: usize| {
+            let threads = NonZeroUsize::new(threads).expect("threads");
+            let missing = paths_without_exact_dentry(wt, &paths, threads);
+            let names: Vec<&str> = missing.iter().map(|&i| paths[i]).collect();
+            let case_sensitive = worktree_has_distinct_icase_dentries(wt);
+            let mut expected = vec![
+                "dir/b.txt",
+                "dir/missing.txt",
+                "nope/x.txt",
+                "dir/sub/c.txt/under-file",
+            ];
+            if case_sensitive {
+                expected.push("TOP.txt");
+            }
+            let mut sorted = names.clone();
+            sorted.sort_unstable();
+            expected.sort_unstable();
+            assert_eq!(sorted, expected, "threads {threads}");
+            assert!(missing.windows(2).all(|w| w[0] < w[1]), "positions ascend");
+        };
+        expect_missing(1);
+        expect_missing(4);
+    }
+
+    #[test]
+    fn paths_without_exact_dentry_reads_parents_in_parallel_for_many_directories() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        let mut owned = Vec::new();
+        for d in 0..(PREFETCH_PARALLEL_MIN_DIRS * 2) {
+            let dir = format!("d{d:03}");
+            std::fs::create_dir(wt.join(&dir)).expect("mkdir");
+            std::fs::write(wt.join(&dir).join("f"), b"x").expect("write");
+            owned.push(format!("{dir}/f"));
+            owned.push(format!("{dir}/gone"));
+        }
+        let paths: Vec<&str> = owned.iter().map(String::as_str).collect();
+        let missing = paths_without_exact_dentry(wt, &paths, NonZeroUsize::new(4).expect("4"));
+        let expected: Vec<usize> = (0..paths.len()).filter(|i| i % 2 == 1).collect();
+        assert_eq!(missing, expected);
+    }
+
+    #[test]
+    fn worktree_path_for_index_entry_respells_missing_parent_directory() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::create_dir_all(wt.join("dir/Sub")).expect("mkdir");
+        std::fs::write(wt.join("dir/Sub/File.txt"), b"x").expect("write");
+        assert_eq!(
+            worktree_path_for_index_entry(wt, "dir/Sub/File.txt", true),
+            wt.join("dir/Sub/File.txt")
+        );
+        if !worktree_has_distinct_icase_dentries(wt) {
+            return;
+        }
+        assert_eq!(
+            worktree_path_for_index_entry(wt, "DIR/sub/file.TXT", true),
+            wt.join("dir/Sub/File.txt")
+        );
+        assert_eq!(
+            worktree_path_for_index_entry(wt, "DIR/sub/file.TXT", false),
+            wt.join("DIR/sub/file.TXT")
+        );
+        assert_eq!(
+            worktree_path_for_index_entry(wt, "dir/gone/x", true),
+            wt.join("dir/gone/x")
+        );
+    }
+
+    #[test]
+    fn dir_spelling_map_keeps_first_spelling_across_interleaved_directories() {
+        let mut index = Index::new();
+        for path in [
+            "Docs/a.md",
+            "Docs/b.md",
+            "src/Lib/x.rs",
+            "docs/c.md",
+            "SRC/lib/y.rs",
+        ] {
+            index.push_entry_unsorted(dummy_entry(path));
+        }
+        let dir_map = Stage0IcaseDirSpellingMap::from_index(&index, true);
+        assert_eq!(
+            dir_map.fold_directory_prefixes("DOCS/new.md"),
+            "Docs/new.md"
+        );
+        assert_eq!(
+            dir_map.fold_directory_prefixes("Src/LIB/z.rs"),
+            "src/Lib/z.rs"
+        );
+        assert_eq!(dir_map.fold_directory_prefixes("other/z.rs"), "other/z.rs");
+        assert_eq!(dir_map.fold_directory_prefixes("top.rs"), "top.rs");
     }
 
     #[test]

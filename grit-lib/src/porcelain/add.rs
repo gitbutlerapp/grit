@@ -25,9 +25,9 @@ use crate::index::{
 use crate::objects::FileMode;
 use crate::objects::ObjectId;
 use crate::path_icase::{
-    fold_untracked_staging_path, paths_equal, worktree_filesystem_case_insensitive,
-    DentrySpellingCache, IcaseCheckoutCollisionMap, IcaseIndexCollisionGroups,
-    Stage0IcaseDirSpellingMap, Stage0IcasePathMap,
+    fold_untracked_staging_path, paths_equal, paths_without_exact_dentry,
+    worktree_filesystem_case_insensitive, DentrySpellingCache, IcaseCheckoutCollisionMap,
+    IcaseIndexCollisionGroups, Stage0IcaseDirSpellingMap, Stage0IcasePathMap,
 };
 use crate::path_validate::{validate_path, PathValidationKind, ProtectOptions};
 use crate::pathspec::{
@@ -42,7 +42,7 @@ use crate::porcelain::index_mode::{
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
-    worktree_path_is_missing,
+    worktree_path_is_missing, PrebuiltCollisionMap,
 };
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
@@ -694,7 +694,9 @@ fn stage_inner_on_index(
         .then(|| IcaseCheckoutCollisionMap::from_index(work_tree, index, collision_opts));
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
     let icase_dir_map = Stage0IcaseDirSpellingMap::from_index(index, ignorecase);
-    let icase_volume_folds_case = ignorecase && worktree_filesystem_case_insensitive(work_tree);
+    let volume_folds_case =
+        collision_opts.active() && worktree_filesystem_case_insensitive(work_tree);
+    let icase_volume_folds_case = ignorecase && volume_folds_case;
 
     let staging_pathspecs = normalized_staging_pathspecs(&opts.pathspecs);
     let pathspec_ctx = repo.pathspec_match_context();
@@ -723,6 +725,10 @@ fn stage_inner_on_index(
             &mut rules_guard,
             staging_thresholds,
             restrict_to_paths.as_deref(),
+            icase_collisions.as_ref().map(|map| PrebuiltCollisionMap {
+                options: collision_opts,
+                map,
+            }),
             scope,
         )?;
         tracked_scan_summary = Some(summary);
@@ -939,6 +945,7 @@ fn stage_inner_on_index(
                 index,
                 dry_run,
                 parallelism.threads(),
+                volume_folds_case,
             )?);
         }
     }
@@ -1348,6 +1355,10 @@ fn apply_tracked_stage_plan(
 }
 
 /// Refresh index path spellings when the work tree uses a different ASCII case (ignorecase FS).
+///
+/// `volume_folds_case` is whether the work tree volume folds ASCII case; when it does not,
+/// paths listed exactly in their parent directory are skipped without resolving them.
+#[allow(clippy::too_many_arguments)]
 fn stage_ignorecase_spelling_updates(
     work_tree: &Path,
     icase_map: &Stage0IcasePathMap,
@@ -1356,14 +1367,21 @@ fn stage_ignorecase_spelling_updates(
     index: &mut Index,
     dry_run: bool,
     threads: std::num::NonZeroUsize,
+    volume_folds_case: bool,
 ) -> Result<Vec<String>> {
-    let candidates: Vec<&str> = index
+    let mut candidates: Vec<&str> = index
         .entries
         .iter()
         .filter(|e| e.stage() == 0 && e.mode != FileMode::GITLINK && e.mode != FileMode::TREE)
         .filter_map(|e| std::str::from_utf8(&e.path).ok())
         .filter(|path| matches(path) && !collision_groups.has_collision_sibling(path))
         .collect();
+    if !volume_folds_case {
+        candidates = paths_without_exact_dentry(work_tree, &candidates, threads)
+            .into_iter()
+            .map(|i| candidates[i])
+            .collect();
+    }
     let mut spellings = DentrySpellingCache::new(work_tree);
     spellings.prefetch_parent_dirs(candidates.iter().copied(), threads);
     let respelled: Vec<(Vec<u8>, String)> = candidates

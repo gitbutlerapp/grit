@@ -202,7 +202,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_thresholds(
     let mut progress = crate::progress::NullProgress;
     let mut scope = ProgressScope::new(&mut progress, crate::progress::CancelToken::never_ref());
     stage_tracked_modifications_in_index_with_rules(
-        repo, work_tree, index_path, index, &mut rules, thresholds, None, &mut scope,
+        repo, work_tree, index_path, index, &mut rules, thresholds, None, None, &mut scope,
     )
 }
 
@@ -211,6 +211,9 @@ pub(crate) fn stage_tracked_modifications_in_index_with_thresholds(
 /// When `restrict_to_paths` is set, only those stage-0 index paths are stat-scanned (explicit
 /// `grit add` pathspecs on large trees). Each staged or removed path advances `scope`'s sink,
 /// and a cancel stops the scan with [`Error::Cancelled`], leaving `index` partly updated.
+///
+/// `icase_collisions` is a collision map the caller already built from `index` as passed in;
+/// it is used when its options match the scan's, so the grouping is not computed twice.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     repo: &Repository,
@@ -220,6 +223,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     rules: &mut WorktreeRules,
     thresholds: IndexStagingThresholds,
     restrict_to_paths: Option<&BTreeSet<String>>,
+    icase_collisions: Option<PrebuiltCollisionMap<'_>>,
     scope: &mut ProgressScope<'_>,
 ) -> Result<StageTrackedSummary> {
     let entry_count_at_start = index.entries.len();
@@ -238,6 +242,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         parallel_restage,
         rules,
         restrict_to_paths,
+        icase_collisions,
         scope,
     );
     if bulk_untr_defer {
@@ -276,6 +281,13 @@ pub(crate) fn replay_deferred_untracked_invalidations(
     }
 }
 
+/// A collision map built by the caller, with the options it was built for.
+#[derive(Clone, Copy)]
+pub(crate) struct PrebuiltCollisionMap<'a> {
+    pub options: crate::path_icase::WorktreePathCollisionOptions,
+    pub map: &'a crate::path_icase::IcaseCheckoutCollisionMap,
+}
+
 /// When `restrict` is `Some`, only paths in the set are scanned (including empty = no tracked scan).
 fn tracked_scan_includes_path(restrict: Option<&BTreeSet<String>>, raw_path: &[u8]) -> bool {
     let Some(set) = restrict else {
@@ -297,6 +309,7 @@ fn stage_tracked_modifications_in_index_body(
     parallel_restage: bool,
     rules: &mut WorktreeRules,
     restrict_to_paths: Option<&BTreeSet<String>>,
+    prebuilt_collisions: Option<PrebuiltCollisionMap<'_>>,
     scope: &mut ProgressScope<'_>,
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
@@ -335,9 +348,20 @@ fn stage_tracked_modifications_in_index_body(
         .is_some_and(|cfg| cfg.ignore_case());
     let collision_opts =
         crate::path_icase::worktree_path_collision_options(ignorecase, precompose_unicode);
-    let icase_collisions = collision_opts.active().then(|| {
-        crate::path_icase::IcaseCheckoutCollisionMap::from_index(work_tree, index, collision_opts)
-    });
+    let built_collisions;
+    let icase_collisions = match prebuilt_collisions {
+        Some(prebuilt) if prebuilt.options == collision_opts => Some(prebuilt.map),
+        _ => {
+            built_collisions = collision_opts.active().then(|| {
+                crate::path_icase::IcaseCheckoutCollisionMap::from_index(
+                    work_tree,
+                    index,
+                    collision_opts,
+                )
+            });
+            built_collisions.as_ref()
+        }
+    };
     for raw_path in &unmerged_paths {
         if !tracked_scan_includes_path(restrict_to_paths, raw_path) {
             continue;
@@ -368,7 +392,7 @@ fn stage_tracked_modifications_in_index_body(
             index_mtime,
             mode_policy,
             precompose_unicode,
-            icase_collisions.as_ref(),
+            icase_collisions,
             &mut symlink_parent_cache,
             rules,
             &mut summary,
@@ -552,7 +576,7 @@ fn stage_tracked_modifications_in_index_body(
                     index_mtime,
                     mode_policy,
                     rules,
-                    icase_collisions: icase_collisions.as_ref(),
+                    icase_collisions,
                     fsmonitor_valid_updated: &mut fsmonitor_valid_updated,
                 };
                 let defer = parallel_restage.then_some(&mut deferred_restage);
@@ -580,7 +604,7 @@ fn stage_tracked_modifications_in_index_body(
             work_tree,
             precompose_unicode,
             ignorecase,
-            icase_collisions: icase_collisions.as_ref(),
+            icase_collisions,
         };
         let (deferred_modified, deferred_stat_refreshed) = restage_deferred_jobs(
             repo,
