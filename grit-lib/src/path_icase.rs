@@ -250,8 +250,18 @@ impl Stage0IcaseDirSpellingMap {
         if !ignorecase {
             return Self { by_fold };
         }
+        let mut previous_parent: &[u8] = &[];
         for e in index.entries.iter().filter(|e| e.stage() == 0) {
             let path = &e.path;
+            let parent = path
+                .iter()
+                .rposition(|&b| b == b'/')
+                .map_or(&path[..0], |slash| &path[..slash]);
+            // Siblings sit next to each other in the index; their prefixes are already in.
+            if parent.is_empty() || parent == previous_parent {
+                continue;
+            }
+            previous_parent = parent;
             let mut end = 0usize;
             while let Some(slash) = path[end..].iter().position(|&b| b == b'/') {
                 end += slash;
@@ -454,17 +464,16 @@ fn paths_same_worktree_slot_str(
     false
 }
 
+/// Hash shared by every spelling of `path` that can name the same worktree slot.
+///
+/// [`memihash`] folds ASCII case even without `ignorecase`; that only makes buckets coarser,
+/// and members are compared with [`paths_same_worktree_slot_str`] before they are grouped.
 #[must_use]
-fn path_collision_bucket_bytes(path: &str, opts: WorktreePathCollisionOptions) -> Vec<u8> {
-    let canonical: Cow<'_, str> = if opts.precompose_unicode {
-        precompose_utf8_path(path)
+fn path_collision_bucket_hash(path: &str, opts: WorktreePathCollisionOptions) -> u32 {
+    if opts.precompose_unicode {
+        memihash(precompose_utf8_path(path).as_bytes())
     } else {
-        Cow::Borrowed(path)
-    };
-    if opts.ignorecase {
-        canonical.to_ascii_lowercase().into_bytes()
-    } else {
-        canonical.into_owned().into_bytes()
+        memihash(path.as_bytes())
     }
 }
 
@@ -729,6 +738,11 @@ impl<'w> DentrySpellingCache<'w> {
 }
 
 /// Resolve a worktree path for an index entry, honoring case-insensitive filesystems.
+///
+/// With `ignorecase`, returns `work_tree/index_rel` when that path exists (case-folding
+/// volumes resolve it to the on-disk entry themselves); otherwise the path spelled as the
+/// matching directory entries are on disk (see [`worktree_dentry_spelling`]), falling back to
+/// `work_tree/index_rel` when nothing matches.
 #[must_use]
 pub fn worktree_path_for_index_entry(
     work_tree: &Path,
@@ -761,6 +775,12 @@ pub(crate) fn worktree_path_for_index_entry_with_options(
         return direct;
     }
     crate::worktree_scan::probe_worktree_path_resolution(&direct);
+    // On a case-sensitive volume a path that exists as spelled is listed with that spelling;
+    // a case-folding volume reaches the same file through either spelling. Only a miss needs
+    // the parent listings.
+    if std::fs::symlink_metadata(&direct).is_ok() {
+        return direct;
+    }
     if let Some(spelling) = worktree_dentry_spelling(work_tree, index_rel) {
         return work_tree.join(spelling);
     }
@@ -1195,16 +1215,37 @@ impl LazyDisjointSets {
 /// Only groups with at least two members are returned, each sorted by path bytes.
 fn worktree_collision_sets(paths: &[&str], opts: WorktreePathCollisionOptions) -> Vec<Vec<usize>> {
     let mut sets = LazyDisjointSets::new(paths.len());
-    let mut by_fold: HashMap<u32, SmallVec<[usize; 1]>> = HashMap::with_capacity(paths.len());
+    // Most hashes belong to one path: keep that path inline and spill later ones to a side
+    // table, so a collision-free index costs one hash-table insert per path.
+    let mut first_by_hash: hashbrown::HashMap<u32, usize> =
+        hashbrown::HashMap::with_capacity(paths.len());
+    let mut more_by_hash: hashbrown::HashMap<u32, SmallVec<[usize; 2]>> = hashbrown::HashMap::new();
     for (i, path) in paths.iter().enumerate() {
-        by_fold
-            .entry(memihash(&path_collision_bucket_bytes(path, opts)))
-            .or_default()
-            .push(i);
+        let hash = path_collision_bucket_hash(path, opts);
+        match first_by_hash.entry(hash) {
+            hashbrown::hash_map::Entry::Vacant(slot) => {
+                slot.insert(i);
+            }
+            hashbrown::hash_map::Entry::Occupied(_) => {
+                more_by_hash.entry(hash).or_default().push(i)
+            }
+        }
     }
-    for bucket in by_fold.values().filter(|b| b.len() > 1) {
-        for (a, &i) in bucket.iter().enumerate() {
-            for &j in &bucket[a + 1..] {
+    let bucket = |hash: u32| -> SmallVec<[usize; 4]> {
+        let Some(&first) = first_by_hash.get(&hash) else {
+            return SmallVec::new();
+        };
+        let mut members = SmallVec::new();
+        members.push(first);
+        if let Some(more) = more_by_hash.get(&hash) {
+            members.extend_from_slice(more);
+        }
+        members
+    };
+    for &hash in more_by_hash.keys() {
+        let members = bucket(hash);
+        for (a, &i) in members.iter().enumerate() {
+            for &j in &members[a + 1..] {
                 if paths_same_worktree_slot_str(paths[i], paths[j], opts) {
                     sets.union(i, j);
                 }
@@ -1220,11 +1261,10 @@ fn worktree_collision_sets(paths: &[&str], opts: WorktreePathCollisionOptions) -
         .into_iter()
         .filter_map(|dir| {
             let dir_str = std::str::from_utf8(dir).ok()?;
-            let bucket = by_fold.get(&memihash(&path_collision_bucket_bytes(dir_str, opts)))?;
-            let file = bucket
-                .iter()
-                .find(|&&j| paths_same_worktree_slot_str(paths[j], dir_str, opts))?;
-            Some((dir.to_vec(), *file))
+            let file = bucket(path_collision_bucket_hash(dir_str, opts))
+                .into_iter()
+                .find(|&j| paths_same_worktree_slot_str(paths[j], dir_str, opts))?;
+            Some((dir.to_vec(), file))
         })
         .collect();
     if !file_at_dir.is_empty() {
