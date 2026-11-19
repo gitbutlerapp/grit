@@ -599,19 +599,28 @@ enum CaseCollisionReport {
 ///
 /// `staged` is that index unless the pass was a dry run (the on-disk index is unchanged) or
 /// keeps sparse-directory placeholders, whose hidden files a fully expanded index lists;
-/// those cases read the index back from disk.
+/// those cases drop `staged` and read the index back from disk.
 fn worktree_case_collisions_after_staging(
     repo: &Repository,
-    staged: &Index,
+    staged: Index,
     dry_run: bool,
 ) -> Result<Vec<crate::status::CaseCollisionGroup>> {
+    let config = repo.config().snapshot()?;
+    let collision_opts = crate::path_icase::worktree_path_collision_options(
+        config.ignore_case(),
+        config.precompose_unicode(),
+    );
+    if !collision_opts.active() {
+        return Ok(Vec::new());
+    }
     if dry_run || staged.has_sparse_directory_placeholders() {
+        drop(staged);
         let on_disk = repo
             .index()
             .load(&crate::index::IndexLoadOptions::default())?;
         return crate::status::worktree_case_collision_groups(repo, &on_disk);
     }
-    crate::status::worktree_case_collision_groups(repo, staged)
+    crate::status::worktree_case_collision_groups(repo, &staged)
 }
 
 /// List every untracked file unless the index UNTR cache stores collapsed (normal-mode)
@@ -632,7 +641,7 @@ fn stage_inner(
     case_collisions: CaseCollisionReport,
 ) -> Result<StageOutcome> {
     let mut scope = ProgressScope::new(progress, cancel);
-    let with_collisions = |mut outcome: StageOutcome, index: &Index| -> Result<StageOutcome> {
+    let with_collisions = |mut outcome: StageOutcome, index: Index| -> Result<StageOutcome> {
         if case_collisions == CaseCollisionReport::Report {
             outcome.worktree_case_collisions =
                 worktree_case_collisions_after_staging(repo, index, opts.dry_run)?;
@@ -661,7 +670,7 @@ fn stage_inner(
             None,
             None,
         )?;
-        return with_collisions(outcome, &index);
+        return with_collisions(outcome, index);
     }
     let (mut lock, mut index) = repo.lock_and_load_index_preserving_sparse()?;
     if !opts.pathspecs.is_empty() {
@@ -685,7 +694,7 @@ fn stage_inner(
         None,
     )?;
     drop(lock);
-    with_collisions(outcome, &index)
+    with_collisions(outcome, index)
 }
 
 /// Shared staging engine.
