@@ -914,6 +914,8 @@ fn stage_inner_on_index(
                 repo.write_index_with_lock(lock, index, false)?;
             }
         }
+        outcome.worktree_case_collisions =
+            case_collisions_after_staging(repo, index, icase_collisions.as_ref(), &outcome)?;
         return Ok(outcome);
     }
 
@@ -1093,7 +1095,32 @@ fn stage_inner_on_index(
         }));
     }
 
+    outcome.worktree_case_collisions =
+        case_collisions_after_staging(repo, index, icase_collisions.as_ref(), &outcome)?;
     Ok(outcome)
+}
+
+/// Work-tree case-collision groups in `index` after staging.
+///
+/// `before` is the collision map built from the index before staging (`None` when collision
+/// handling is off). Removing paths or respelling one cannot create a group, so when it had no
+/// groups and staging added no paths the full check, which re-reads colliding files, is skipped.
+fn case_collisions_after_staging(
+    repo: &Repository,
+    index: &Index,
+    before: Option<&IcaseCheckoutCollisionMap>,
+    outcome: &StageOutcome,
+) -> Result<Vec<crate::status::CaseCollisionGroup>> {
+    let Some(before) = before else {
+        return Ok(Vec::new());
+    };
+    let added_paths = !outcome.added.is_empty()
+        || !outcome.intent_to_add.is_empty()
+        || !outcome.embedded_gitlinks.is_empty();
+    if before.collision_groups().member_groups().is_empty() && !added_paths {
+        return Ok(Vec::new());
+    }
+    crate::status::worktree_case_collision_groups(repo, index)
 }
 
 /// Stage worktree content for explicit pathspecs that match unmerged index entries.
@@ -2608,6 +2635,102 @@ mod tests {
         assert!(index.get(b"fresh.txt", 0).is_some());
         assert!(index.get(b"modify.txt", 0).is_some());
         assert!(index.get(b"remove.txt", 0).is_none());
+    }
+
+    fn enable_ignorecase(repo: &Repository, root: &Path) {
+        fs::write(
+            root.join(".git/config"),
+            "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tignorecase = true\n",
+        )
+        .unwrap();
+        repo.reload_config().unwrap();
+    }
+
+    fn stage_with(repo: &Repository, mode: StageMode, dry_run: bool) -> StageOutcome {
+        let opts = StageOptions {
+            mode,
+            dry_run,
+            ..StageOptions::default()
+        };
+        stage(
+            repo,
+            &opts,
+            &mut NullProgress,
+            &crate::progress::CancelToken::never(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn stage_outcome_reports_worktree_case_collisions_like_status() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "File.txt", b"upper\n");
+        stage_file_in_index(&repo, &mut index, "file.txt", b"lower\n");
+        stage_file_in_index(&repo, &mut index, "other.txt", b"old\n");
+        write_index(&repo, &mut index);
+        enable_ignorecase(&repo, root);
+        // One dentry for both spellings, as on a case-insensitive volume.
+        fs::remove_file(root.join("file.txt")).unwrap();
+        fs::write(root.join("other.txt"), b"new\n").unwrap();
+
+        for (mode, dry_run) in [
+            (StageMode::Update, true),
+            (StageMode::All, true),
+            (StageMode::Update, false),
+        ] {
+            let outcome = stage_with(&repo, mode, dry_run);
+            let expected = repo
+                .status()
+                .worktree_case_collisions(&repo.load_index().unwrap())
+                .unwrap();
+            assert_eq!(
+                expected.iter().map(|g| g.paths.clone()).collect::<Vec<_>>(),
+                vec![vec!["File.txt".to_owned(), "file.txt".to_owned()]],
+                "{mode:?} dry_run={dry_run}"
+            );
+            assert_eq!(
+                outcome.worktree_case_collisions, expected,
+                "{mode:?} dry_run={dry_run}"
+            );
+        }
+    }
+
+    #[test]
+    fn stage_outcome_reports_case_collision_created_by_added_path() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "Readme.md", b"tracked\n");
+        write_index(&repo, &mut index);
+        enable_ignorecase(&repo, root);
+        fs::write(root.join("README.md"), b"new spelling\n").unwrap();
+
+        let outcome = stage_with(&repo, StageMode::All, false);
+        let expected = repo
+            .status()
+            .worktree_case_collisions(&repo.load_index().unwrap())
+            .unwrap();
+        assert_eq!(outcome.worktree_case_collisions, expected);
+    }
+
+    #[test]
+    fn stage_outcome_has_no_case_collisions_without_ignorecase() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "File.txt", b"upper\n");
+        stage_file_in_index(&repo, &mut index, "file.txt", b"lower\n");
+        write_index(&repo, &mut index);
+        fs::remove_file(root.join("file.txt")).unwrap();
+
+        let outcome = stage_with(&repo, StageMode::Update, false);
+        assert!(outcome.worktree_case_collisions.is_empty());
+        assert_eq!(outcome.removed, ["file.txt"]);
     }
 
     #[test]
@@ -4715,6 +4838,7 @@ mod tests {
             embedded_gitlinks: Vec::new(),
             worktree_case_collisions: Vec::new(),
             stat_refreshed: false,
+            ..StageOutcome::default()
         };
         sort_outcome_paths_in_index_order(&mut outcome, &index);
         assert_eq!(
@@ -4745,6 +4869,7 @@ mod tests {
             embedded_gitlinks: Vec::new(),
             worktree_case_collisions: Vec::new(),
             stat_refreshed: false,
+            ..StageOutcome::default()
         };
 
         let start = std::time::Instant::now();
