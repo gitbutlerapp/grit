@@ -459,7 +459,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, &changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsTree(tree) => {
             let changes = filter_file_changes(
@@ -467,7 +467,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, &changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::IndexVsHead => {
             let index = repo.load_index()?;
@@ -479,7 +479,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, &changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsIndex => {
             let changes = filter_file_changes(
@@ -487,7 +487,7 @@ pub(crate) fn collect_files_for_target(
                 repo,
                 pathspecs,
             )?;
-            file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts.clone())?
+            file_diffs_from_worktree_changes(repo, &changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::Commit(oid) => {
             let items = commit_changes(
@@ -633,13 +633,13 @@ pub(crate) fn file_diff_from_tree_structured(
         .unwrap_or_default();
     let old_path = e.old_path.clone().filter(|op| *op != path);
     let mut structured = t.structured;
-    if !t.binary {
-        if let Ok((old_bytes, _)) = super::tree_content::load_old_side(repo.odb(), e) {
-            if let Ok(matcher) = funcname_attrs.matcher_arc_for_path(repo, config, &path) {
+    if !t.binary && !structured.hunks.is_empty() {
+        if let Ok(Some(matcher)) = funcname_attrs.matcher_arc_for_path(repo, config, &path) {
+            if let Ok((old_bytes, _)) = super::tree_content::load_old_side(repo.odb(), e) {
                 crate::diff::structured::apply_patch_funcname_to_hunks(
                     &mut structured.hunks,
-                    &old_bytes.text(),
-                    matcher.as_deref(),
+                    &String::from_utf8_lossy(&old_bytes.data),
+                    Some(&matcher),
                 );
             }
         }
@@ -677,7 +677,7 @@ pub(crate) fn file_diffs_from_changes(
 ) -> Result<Vec<FileDiff>> {
     let config = repo.config().snapshot()?;
     let thread_policy = repo.thread_policy();
-    file_diffs_from_worktree_changes(repo, changes.to_vec(), &config, &thread_policy, opts)
+    file_diffs_from_worktree_changes(repo, changes, &config, &thread_policy, opts)
 }
 
 /// Patch-style [`FileDiff`] rows from tree diff entries.
@@ -715,7 +715,7 @@ pub(crate) fn file_diffs_from_entries(
 
 fn file_diffs_from_worktree_changes(
     repo: &Repository,
-    changes: Vec<FileChange>,
+    changes: &[FileChange],
     config: &ConfigSet,
     thread_policy: &ThreadPolicy,
     opts: DiffOptions,
@@ -725,7 +725,7 @@ fn file_diffs_from_worktree_changes(
     let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
     par_opts.min_items = 0;
     let est_bytes = changes.len().saturating_mul(8192);
-    Ok(par_map(&changes, par_opts, est_bytes, |fc| {
+    Ok(par_map(changes, par_opts, est_bytes, |fc| {
         build_file_diff(repo, config, &funcname_attrs, fc, opts.clone())
     })
     .into_iter()
@@ -741,12 +741,12 @@ fn build_file_diff(
     diff_options: DiffOptions,
 ) -> FileDiff {
     let mut structured = fc.structured(diff_options.clone());
-    if !fc.binary {
-        if let Ok(matcher) = funcname_attrs.matcher_arc_for_path(repo, config, &fc.path) {
+    if !fc.binary && !structured.hunks.is_empty() {
+        if let Ok(Some(matcher)) = funcname_attrs.matcher_arc_for_path(repo, config, &fc.path) {
             crate::diff::structured::apply_patch_funcname_to_hunks(
                 &mut structured.hunks,
-                &fc.old_bytes.text(),
-                matcher.as_deref(),
+                &String::from_utf8_lossy(&fc.old_bytes.data),
+                Some(&matcher),
             );
         }
     }
@@ -1469,7 +1469,7 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
         repo,
         pathspecs,
     )?;
-    let files = file_diffs_from_worktree_changes(repo, unstaged, &config, &thread_policy, opts)?;
+    let files = file_diffs_from_worktree_changes(repo, &unstaged, &config, &thread_policy, opts)?;
     Ok((files, peer_hunks))
 }
 
@@ -1500,7 +1500,7 @@ pub(crate) fn hunk_diff_bundle(
     let (unstaged_fc, peer_hunks) =
         unstaged_raw_changes_with_peer_hunks(repo, pathspec.specs(), opts.clone())?;
     let unstaged =
-        file_diffs_from_worktree_changes(repo, unstaged_fc, &config, &thread_policy, opts)?;
+        file_diffs_from_worktree_changes(repo, &unstaged_fc, &config, &thread_policy, opts)?;
     Ok(HunkDiffBundle {
         unstaged,
         peer_hunks,
