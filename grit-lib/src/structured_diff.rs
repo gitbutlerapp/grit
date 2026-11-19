@@ -180,7 +180,7 @@ pub(crate) fn text_bytes_for_diff(data: &[u8]) -> Cow<'_, str> {
 }
 
 /// Decode side bytes as UTF-8 when valid to avoid an extra allocation on the hot path.
-fn side_text_for_diff(side: &SideBytes) -> Cow<'_, str> {
+pub(crate) fn side_text_for_diff(side: &SideBytes) -> Cow<'_, str> {
     text_bytes_for_diff(&side.data)
 }
 

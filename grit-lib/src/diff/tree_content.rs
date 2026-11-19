@@ -218,8 +218,8 @@ pub(crate) fn tree_diff_stat_parallel(
                 None
             } else {
                 Some(line_stat_for_options(
-                    &String::from_utf8_lossy(&old_bytes.data),
-                    &String::from_utf8_lossy(&new_bytes.data),
+                    &crate::diff::structured::side_text_for_diff(&old_bytes),
+                    &crate::diff::structured::side_text_for_diff(&new_bytes),
                     &line_diff_opts,
                 ))
             };

@@ -136,8 +136,8 @@ impl FileChange {
             return None;
         }
         Some(super::detail::line_stat_for_options(
-            &self.old_bytes.text(),
-            &self.new_bytes.text(),
+            &crate::diff::structured::side_text_for_diff(&self.old_bytes),
+            &crate::diff::structured::side_text_for_diff(&self.new_bytes),
             options,
         ))
     }
@@ -940,6 +940,34 @@ mod tests {
                 insertions: 1,
                 deletions: 0,
             })
+        );
+    }
+
+    #[test]
+    fn line_stat_decodes_invalid_utf8_sides_lossily() {
+        let (dir, repo) = staged_repo(&[("latin1.txt", b"caf\xe9\nkeep\nold \xff\n")]);
+        std::fs::write(dir.path().join("latin1.txt"), b"caf\xe9\nkeep\nnew \xfe\n")
+            .unwrap_or_else(|e| panic!("{e}"));
+        let entries = unstaged(&repo);
+        let index = repo.load_index().unwrap_or_else(|e| panic!("index: {e}"));
+        let changes = UncommittedDiff::new(&repo, index)
+            .load_worktree_changes(entries)
+            .unwrap_or_else(|e| panic!("load: {e}"));
+        assert!(!changes[0].binary);
+        assert!(changes[0].old_bytes.encoding_lossy);
+        let options = DiffOptions::default();
+        let expected = super::super::detail::line_stat_for_options(
+            &changes[0].old_bytes.text(),
+            &changes[0].new_bytes.text(),
+            &options,
+        );
+        assert_eq!(changes[0].line_stat(&options), Some(expected));
+        assert_eq!(
+            expected,
+            LineStat {
+                insertions: 1,
+                deletions: 1,
+            }
         );
     }
 

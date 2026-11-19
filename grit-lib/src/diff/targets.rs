@@ -638,7 +638,7 @@ pub(crate) fn file_diff_from_tree_structured(
             if let Ok((old_bytes, _)) = super::tree_content::load_old_side(repo.odb(), e) {
                 crate::diff::structured::apply_patch_funcname_to_hunks(
                     &mut structured.hunks,
-                    &String::from_utf8_lossy(&old_bytes.data),
+                    &crate::diff::structured::side_text_for_diff(&old_bytes),
                     Some(&matcher),
                 );
             }
@@ -745,7 +745,7 @@ fn build_file_diff(
         if let Ok(Some(matcher)) = funcname_attrs.matcher_arc_for_path(repo, config, &fc.path) {
             crate::diff::structured::apply_patch_funcname_to_hunks(
                 &mut structured.hunks,
-                &String::from_utf8_lossy(&fc.old_bytes.data),
+                &crate::diff::structured::side_text_for_diff(&fc.old_bytes),
                 Some(&matcher),
             );
         }
