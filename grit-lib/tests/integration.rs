@@ -30,6 +30,8 @@ mod add_after_clone_parallel_loose;
 #[cfg(feature = "full-tests")]
 #[path = "add_executable_git_compat.rs"]
 mod add_executable_git_compat;
+#[path = "add_icase_path_settings_git_compat.rs"]
+mod add_icase_path_settings_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "add_ignorecase_clean_tree_perf_git_compat.rs"]
 mod add_ignorecase_clean_tree_perf_git_compat;

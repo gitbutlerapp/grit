@@ -16,6 +16,7 @@ use crate::repo::{Repository, RepositoryError};
 /// Returned when the work tree cannot faithfully represent every member of the group
 /// (a collision loser is absent or the dentry holds a sibling's blob).
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 #[non_exhaustive]
 pub struct CaseCollisionGroup {
     /// Index spellings in the collision group, sorted.

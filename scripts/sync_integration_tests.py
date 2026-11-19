@@ -74,6 +74,7 @@ DEFAULT_SUITE_OVERRIDE: set[tuple[str, str]] = {
     ("grit-lib", "text_diff_options"),
     ("grit-lib", "options_request_builders_coverage"),
     ("grit-cli", "diff_hunk_funcname_context"),
+    ("grit-lib", "add_icase_path_settings_git_compat"),
 }
 MODULE_CFG_OVERRIDE: dict[tuple[str, str], str] = {
     ("grit-cli", "rebase_exec_interrupt"): "unix",

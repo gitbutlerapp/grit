@@ -14325,6 +14325,7 @@ pub grit_lib::porcelain::add::StageOutcome::embedded_gitlinks: alloc::vec::Vec<a
 pub grit_lib::porcelain::add::StageOutcome::intent_to_add: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOutcome::modified: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::add::StageOutcome::removed: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::add::StageOutcome::worktree_case_collisions: alloc::vec::Vec<grit_lib::status::CaseCollisionGroup>
 impl grit_lib::porcelain::add::StageOutcome
 pub fn grit_lib::porcelain::add::StageOutcome::total(&self) -> usize
 impl core::clone::Clone for grit_lib::porcelain::add::StageOutcome

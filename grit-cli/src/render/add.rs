@@ -54,12 +54,7 @@ pub struct AddOutcome {
 }
 
 impl AddOutcome {
-    pub(crate) fn from_stage(
-        outcome: StageOutcome,
-        dry_run: bool,
-        no_paths: bool,
-        worktree_case_collisions: Vec<AddWorktreeCaseCollisionJson>,
-    ) -> Self {
+    pub(crate) fn from_stage(outcome: StageOutcome, dry_run: bool, no_paths: bool) -> Self {
         let count = outcome.total();
         Self {
             added: outcome.added,
@@ -73,7 +68,11 @@ impl AddOutcome {
             staged_lines: BTreeMap::new(),
             no_paths,
             embedded_gitlinks: outcome.embedded_gitlinks,
-            worktree_case_collisions,
+            worktree_case_collisions: outcome
+                .worktree_case_collisions
+                .into_iter()
+                .map(|group| AddWorktreeCaseCollisionJson { paths: group.paths })
+                .collect(),
             path_display: None,
         }
     }

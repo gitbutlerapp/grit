@@ -1,4 +1,4 @@
-//! `commit` JSON `kind` for active work-tree case collisions (issue #2581).
+//! `commit` JSON `kind` and `add` output for active work-tree case collisions (issue #2581).
 
 use std::error::Error;
 use std::fs;
@@ -102,5 +102,78 @@ fn commit_json_worktree_case_collision_kind() -> TestResult {
             .is_some_and(|e| e.contains("collide on this filesystem")),
         "{v}"
     );
+    Ok(())
+}
+
+fn collision_paths(v: &Value) -> Vec<Vec<String>> {
+    v["worktree_case_collisions"]
+        .as_array()
+        .map(|groups| {
+            groups
+                .iter()
+                .map(|g| {
+                    g["paths"]
+                        .as_array()
+                        .map(|paths| {
+                            paths
+                                .iter()
+                                .filter_map(|p| p.as_str().map(str::to_owned))
+                                .collect()
+                        })
+                        .unwrap_or_default()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+#[test]
+fn add_json_reports_worktree_case_collisions_for_dry_run_and_real_run() -> TestResult {
+    let tmp = tempfile::tempdir()?;
+    build_readme_collision_repo(tmp.path())?;
+    fs::write(tmp.path().join("new.txt"), b"new\n")?;
+    let expected = vec![vec!["Readme.TXT".to_owned(), "readme.txt".to_owned()]];
+    let index_before = fs::read(tmp.path().join(".git/index"))?;
+
+    let (code, stdout) = grit(tmp.path(), &["add", "--dry-run", "--json"]);
+    assert_eq!(code, 0, "{stdout}");
+    let v: Value = serde_json::from_str(stdout.trim())?;
+    assert_eq!(collision_paths(&v), expected, "{v}");
+    assert_eq!(v["dry_run"].as_bool(), Some(true), "{v}");
+    assert_eq!(v["added"][0].as_str(), Some("new.txt"), "{v}");
+    assert_eq!(fs::read(tmp.path().join(".git/index"))?, index_before);
+
+    let (code, stdout) = grit(tmp.path(), &["add", "--markdown"]);
+    assert_eq!(code, 0, "{stdout}");
+    assert!(
+        stdout.contains("`Readme.TXT`") && stdout.contains("`readme.txt`"),
+        "{stdout}"
+    );
+
+    let (code, stdout) = grit(tmp.path(), &["add", "--json"]);
+    assert_eq!(code, 0, "{stdout}");
+    let v: Value = serde_json::from_str(stdout.trim())?;
+    assert_eq!(collision_paths(&v), expected, "{v}");
+    assert_eq!(v["dry_run"].as_bool(), Some(false), "{v}");
+    Ok(())
+}
+
+#[test]
+fn add_json_omits_collisions_without_ignorecase() -> TestResult {
+    let tmp = tempfile::tempdir()?;
+    Repository::init(
+        tmp.path(),
+        &InitOptions::new()
+            .with_initial_branch("master".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )?;
+    fs::write(tmp.path().join("Readme.TXT"), b"UPPER\n")?;
+    fs::write(tmp.path().join("readme.txt"), b"lower\n")?;
+
+    let (code, stdout) = grit(tmp.path(), &["add", "--json"]);
+    assert_eq!(code, 0, "{stdout}");
+    let v: Value = serde_json::from_str(stdout.trim())?;
+    assert!(v.get("worktree_case_collisions").is_none(), "{v}");
+    assert_eq!(v["count"].as_u64(), Some(2), "{v}");
     Ok(())
 }

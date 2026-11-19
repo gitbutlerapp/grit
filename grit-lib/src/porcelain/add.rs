@@ -116,6 +116,12 @@ pub struct StageOutcome {
     /// Nested repositories newly recorded as gitlinks (mode 160000) because they were not yet
     /// indexed at stage 0.
     pub embedded_gitlinks: Vec<String>,
+    /// Tracked path groups that share one work-tree file under `core.ignorecase` or
+    /// `core.precomposeunicode` and that the work tree cannot represent faithfully, as
+    /// [`crate::status::Status::worktree_case_collisions`] reports them for the index
+    /// left by this call. Filled by [`crate::index::IndexFile::stage`]; empty when neither
+    /// setting is enabled.
+    pub worktree_case_collisions: Vec<crate::status::CaseCollisionGroup>,
     /// Index stat cache refreshed without staging new content (not counted in [`Self::total`]).
     pub(crate) stat_refreshed: bool,
 }
@@ -187,7 +193,7 @@ pub(crate) fn stage_for_commit(
         mode: stage_mode_for_commit(config.as_ref())?,
         ..StageOptions::default()
     };
-    stage_with_tracked_scan(repo, &opts, progress, cancel)
+    stage_with_tracked_scan(repo, &opts, progress, cancel, CaseCollisionReport::Skip)
 }
 
 /// Staging mode for commit auto-staging from `status.showUntrackedFiles`.
@@ -308,10 +314,11 @@ pub(crate) fn stage(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
 ) -> Result<StageOutcome> {
+    let report = CaseCollisionReport::Report;
     if uses_tracked_scan_fast_path(opts) {
-        return stage_with_tracked_scan(repo, opts, progress, cancel);
+        return stage_with_tracked_scan(repo, opts, progress, cancel, report);
     }
-    stage_via_worktree_diff(repo, opts, progress, cancel)
+    stage_via_worktree_diff(repo, opts, progress, cancel, report)
 }
 
 fn uses_tracked_scan_fast_path(opts: &StageOptions) -> bool {
@@ -566,8 +573,9 @@ fn stage_via_worktree_diff(
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
+    case_collisions: CaseCollisionReport,
 ) -> Result<StageOutcome> {
-    stage_inner(repo, opts, progress, cancel, false)
+    stage_inner(repo, opts, progress, cancel, false, case_collisions)
 }
 
 fn stage_with_tracked_scan(
@@ -575,8 +583,35 @@ fn stage_with_tracked_scan(
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
+    case_collisions: CaseCollisionReport,
 ) -> Result<StageOutcome> {
-    stage_inner(repo, opts, progress, cancel, true)
+    stage_inner(repo, opts, progress, cancel, true, case_collisions)
+}
+
+/// Whether a staging pass fills [`StageOutcome::worktree_case_collisions`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CaseCollisionReport {
+    Report,
+    Skip,
+}
+
+/// Collision groups for the index a staging pass leaves on disk.
+///
+/// `staged` is that index unless the pass was a dry run (the on-disk index is unchanged) or
+/// keeps sparse-directory placeholders, whose hidden files a fully expanded index lists;
+/// those cases read the index back from disk.
+fn worktree_case_collisions_after_staging(
+    repo: &Repository,
+    staged: &Index,
+    dry_run: bool,
+) -> Result<Vec<crate::status::CaseCollisionGroup>> {
+    if dry_run || staged.has_sparse_directory_placeholders() {
+        let on_disk = repo
+            .index()
+            .load(&crate::index::IndexLoadOptions::default())?;
+        return crate::status::worktree_case_collision_groups(repo, &on_disk);
+    }
+    crate::status::worktree_case_collision_groups(repo, staged)
 }
 
 /// List every untracked file unless the index UNTR cache stores collapsed (normal-mode)
@@ -594,8 +629,16 @@ fn stage_inner(
     progress: &mut dyn ProgressSink,
     cancel: &CancelToken,
     tracked_scan: bool,
+    case_collisions: CaseCollisionReport,
 ) -> Result<StageOutcome> {
     let mut scope = ProgressScope::new(progress, cancel);
+    let with_collisions = |mut outcome: StageOutcome, index: &Index| -> Result<StageOutcome> {
+        if case_collisions == CaseCollisionReport::Report {
+            outcome.worktree_case_collisions =
+                worktree_case_collisions_after_staging(repo, index, opts.dry_run)?;
+        }
+        Ok(outcome)
+    };
     if opts.dry_run {
         let mut index = repo.load_index_preserving_sparse()?;
         if !opts.pathspecs.is_empty() {
@@ -608,7 +651,7 @@ fn stage_inner(
         if let Ok(cfg) = repo.config().snapshot() {
             repo.clear_present_skip_worktree(&mut index, cfg.as_ref());
         }
-        return stage_inner_on_index(
+        let outcome = stage_inner_on_index(
             repo,
             opts,
             &mut scope,
@@ -617,7 +660,8 @@ fn stage_inner(
             true,
             None,
             None,
-        );
+        )?;
+        return with_collisions(outcome, &index);
     }
     let (mut lock, mut index) = repo.lock_and_load_index_preserving_sparse()?;
     if !opts.pathspecs.is_empty() {
@@ -630,7 +674,7 @@ fn stage_inner(
     if let Ok(cfg) = repo.config().snapshot() {
         repo.clear_present_skip_worktree(&mut index, cfg.as_ref());
     }
-    stage_inner_on_index(
+    let outcome = stage_inner_on_index(
         repo,
         opts,
         &mut scope,
@@ -639,7 +683,9 @@ fn stage_inner(
         true,
         Some(&mut lock),
         None,
-    )
+    )?;
+    drop(lock);
+    with_collisions(outcome, &index)
 }
 
 /// Shared staging engine.
@@ -4658,6 +4704,7 @@ mod tests {
             removed: Vec::new(),
             intent_to_add: Vec::new(),
             embedded_gitlinks: Vec::new(),
+            worktree_case_collisions: Vec::new(),
             stat_refreshed: false,
         };
         sort_outcome_paths_in_index_order(&mut outcome, &index);
@@ -4687,6 +4734,7 @@ mod tests {
             removed: Vec::new(),
             intent_to_add: Vec::new(),
             embedded_gitlinks: Vec::new(),
+            worktree_case_collisions: Vec::new(),
             stat_refreshed: false,
         };
 
