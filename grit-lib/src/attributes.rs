@@ -706,6 +706,18 @@ pub fn collect_attrs_for_path(
     icase: bool,
 ) -> HashMap<String, AttrValue> {
     let mut map: HashMap<String, AttrValue> = HashMap::new();
+    apply_matching_rules(&mut map, rules, macros, rel_path, icase);
+    map
+}
+
+/// Apply every rule in `rules` that matches `rel_path` to `map`, in order (later rules win).
+fn apply_matching_rules(
+    map: &mut HashMap<String, AttrValue>,
+    rules: &[AttrRule],
+    macros: &MacroTable,
+    rel_path: &str,
+    icase: bool,
+) {
     for rule in rules {
         if rule.skip {
             continue;
@@ -725,7 +737,6 @@ pub fn collect_attrs_for_path(
             }
         }
     }
-    map
 }
 
 /// Quote a path for `check-attr` output (C-style) when needed.
@@ -964,28 +975,25 @@ pub(crate) fn load_gitattributes_stack_uncached(
     repo: &Repository,
     work_tree: &Path,
 ) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
-    let mut merged = ParsedGitAttributes::default();
-
-    if let Some(g) = global_attributes_path(repo)? {
-        if g.exists() {
-            if let Ok(content) = fs::read_to_string(&g) {
-                if content.len() <= MAX_ATTR_FILE_BYTES {
-                    let mut p =
-                        parse_gitattributes_file_content(&content, g.to_string_lossy().as_ref());
-                    merged.rules.append(&mut p.rules);
-                    merged.macros.defs.extend(p.macros.defs.drain());
-                    merged.warnings.append(&mut p.warnings);
-                } else {
-                    merged
-                        .warnings
-                        .push(crate::diagnostics::warning_line(&format!(
-                            "ignoring overly large gitattributes file '{}'",
-                            g.display()
-                        )));
-                }
-            }
-        }
+    let mut merged = load_global_and_root_attributes(repo, work_tree)?;
+    for rel in collect_nested_gitattributes_dirs(work_tree) {
+        let prefix = rel.to_string_lossy().replace('\\', "/");
+        let mut rules = load_nested_dir_attributes(work_tree, &prefix, &mut merged.warnings);
+        merged.rules.append(&mut rules);
     }
+    merge_info_attributes(repo, &mut merged);
+    Ok(merged)
+}
+
+/// The global attributes file followed by the work tree's root `.gitattributes`: the
+/// lowest-precedence part of the work-tree stack, and the only part that may define macros
+/// besides `info/attributes`.
+fn load_global_and_root_attributes(
+    repo: &Repository,
+    work_tree: &Path,
+) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
+    let mut merged = ParsedGitAttributes::default();
+    merge_global_attributes_file(repo, &mut merged)?;
 
     let root_ga = work_tree.join(".gitattributes");
     if let Some(content) =
@@ -1002,47 +1010,120 @@ pub(crate) fn load_gitattributes_stack_uncached(
             ));
         }
     }
-
-    for rel in collect_nested_gitattributes_dirs(work_tree) {
-        let ga = work_tree.join(&rel).join(".gitattributes");
-        if let Some(content) = read_gitattributes_maybe_symlink(
-            &ga,
-            &format!("{}/.gitattributes", rel.display()),
-            &mut merged.warnings,
-        ) {
-            if content.len() > MAX_ATTR_FILE_BYTES {
-                merged
-                    .warnings
-                    .push(crate::diagnostics::warning_line(&format!(
-                        "ignoring overly large gitattributes file '{}'",
-                        ga.display()
-                    )));
-                continue;
-            }
-            let prefix = rel.to_string_lossy().replace('\\', "/");
-            let mut p = parse_gitattributes_file_content_with_base(
-                &content,
-                &ga.to_string_lossy(),
-                &prefix,
-            );
-            merged.rules.append(&mut p.rules);
-            merged.warnings.append(&mut p.warnings);
-        }
-    }
-
-    let info = repo.git_dir().join("info/attributes");
-    if info.exists() {
-        if let Ok(content) = fs::read_to_string(&info) {
-            if content.len() <= MAX_ATTR_FILE_BYTES {
-                let mut p = parse_gitattributes_file_content(&content, "info/attributes");
-                merged.rules.append(&mut p.rules);
-                merged.macros.defs.extend(p.macros.defs.drain());
-                merged.warnings.append(&mut p.warnings);
-            }
-        }
-    }
-
     Ok(merged)
+}
+
+/// Rules from `<work_tree>/<rel_dir>/.gitattributes` (`rel_dir` uses `/` separators), scoped to
+/// that directory. Missing, symlinked and oversized files contribute no rules.
+fn load_nested_dir_attributes(
+    work_tree: &Path,
+    rel_dir: &str,
+    warnings: &mut Vec<String>,
+) -> Vec<AttrRule> {
+    let ga = work_tree.join(rel_dir).join(".gitattributes");
+    let Some(content) =
+        read_gitattributes_maybe_symlink(&ga, &format!("{rel_dir}/.gitattributes"), warnings)
+    else {
+        return Vec::new();
+    };
+    if content.len() > MAX_ATTR_FILE_BYTES {
+        warnings.push(crate::diagnostics::warning_line(&format!(
+            "ignoring overly large gitattributes file '{}'",
+            ga.display()
+        )));
+        return Vec::new();
+    }
+    let mut p =
+        parse_gitattributes_file_content_with_base(&content, &ga.to_string_lossy(), rel_dir);
+    warnings.append(&mut p.warnings);
+    p.rules
+}
+
+/// Work-tree attribute stack that reads nested `.gitattributes` files on demand.
+///
+/// Answers the same questions as [`load_gitattributes_stack`] without walking the whole work
+/// tree: a rule from `dir/.gitattributes` only applies to paths under `dir`, so a lookup for
+/// `a/b/file` only needs the files in `a` and `a/b`. Each directory is read at most once per
+/// stack. Like the full walk, directories named `.git` and directories reached through a
+/// symlink contribute nothing.
+pub(crate) struct WorktreeAttrStack {
+    work_tree: PathBuf,
+    /// Global attributes file and root `.gitattributes` (lowest precedence).
+    head: Vec<AttrRule>,
+    /// `info/attributes` (highest precedence).
+    tail: Vec<AttrRule>,
+    macros: MacroTable,
+    /// Rules per repo-relative directory; `None` marks a directory that is not a real directory
+    /// in the work tree, so nothing below it contributes either.
+    dirs: std::sync::Mutex<HashMap<String, Option<Arc<[AttrRule]>>>>,
+}
+
+impl WorktreeAttrStack {
+    /// Read the global attributes file, the root `.gitattributes` and `info/attributes`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates failures resolving `core.attributesFile`.
+    pub(crate) fn load(
+        repo: &Repository,
+        work_tree: &Path,
+    ) -> std::result::Result<Self, crate::error::Error> {
+        let head = load_global_and_root_attributes(repo, work_tree)?;
+        let mut tail = ParsedGitAttributes {
+            macros: head.macros,
+            ..ParsedGitAttributes::default()
+        };
+        merge_info_attributes(repo, &mut tail);
+        Ok(Self {
+            work_tree: work_tree.to_path_buf(),
+            head: head.rules,
+            tail: tail.rules,
+            macros: tail.macros,
+            dirs: std::sync::Mutex::new(HashMap::new()),
+        })
+    }
+
+    /// Attributes assigned to the file at repo-relative `rel_path` (`/` separators), like
+    /// [`collect_attrs_for_path`] over the full work-tree stack.
+    pub(crate) fn collect_attrs_for_path(
+        &self,
+        rel_path: &str,
+        icase: bool,
+    ) -> HashMap<String, AttrValue> {
+        let mut map = HashMap::new();
+        apply_matching_rules(&mut map, &self.head, &self.macros, rel_path, icase);
+        for (end, _) in rel_path.match_indices('/') {
+            let Some(rules) = self.dir_rules(&rel_path[..end]) else {
+                break;
+            };
+            apply_matching_rules(&mut map, &rules, &self.macros, rel_path, icase);
+        }
+        apply_matching_rules(&mut map, &self.tail, &self.macros, rel_path, icase);
+        map
+    }
+
+    fn dir_rules(&self, rel_dir: &str) -> Option<Arc<[AttrRule]>> {
+        if let Some(cached) = self
+            .dirs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .get(rel_dir)
+        {
+            return cached.clone();
+        }
+        let is_real_dir = !rel_dir
+            .rsplit('/')
+            .next()
+            .is_some_and(|name| name == ".git")
+            && fs::symlink_metadata(self.work_tree.join(rel_dir)).is_ok_and(|m| m.is_dir());
+        let rules: Option<Arc<[AttrRule]>> = is_real_dir
+            .then(|| load_nested_dir_attributes(&self.work_tree, rel_dir, &mut Vec::new()).into());
+        self.dirs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .insert(rel_dir.to_owned(), rules.clone());
+        rules
+    }
 }
 
 /// Bare repository: only `info/attributes` from disk (no in-repo `.gitattributes` file).
@@ -1251,14 +1332,13 @@ fn append_gitattributes_from_tree(
 ///
 /// Returns an error when a tree-ish source is set from the environment or command line and cannot
 /// be resolved (Git: *"bad --attr-source or GIT_ATTR_SOURCE"*).
-#[allow(dead_code)] // integration / re-export use only
 pub(crate) fn load_gitattributes_for_diff(
     repo: &Repository,
-) -> std::result::Result<ParsedGitAttributes, crate::error::Error> {
+) -> std::result::Result<DiffAttributes, crate::error::Error> {
     let (treeish, ignore_bad_tree) = resolve_attr_treeish(repo, None)?;
     if let Some(spec) = treeish.filter(|s| !s.is_empty()) {
         match resolve_tree_oid(repo, &spec) {
-            Ok(oid) => return load_gitattributes_from_tree(repo, &oid),
+            Ok(oid) => return load_gitattributes_from_tree(repo, &oid).map(DiffAttributes::Parsed),
             Err(_) if ignore_bad_tree => {}
             Err(_) => {
                 return Err(crate::error::Error::Ref(RefError::Invalid {
@@ -1268,9 +1348,33 @@ pub(crate) fn load_gitattributes_for_diff(
         }
     }
     if let Some(wt) = repo.work_tree() {
-        return load_gitattributes_stack(repo, wt);
+        return WorktreeAttrStack::load(repo, wt).map(DiffAttributes::Worktree);
     }
-    load_gitattributes_bare(repo)
+    load_gitattributes_bare(repo).map(DiffAttributes::Parsed)
+}
+
+/// Attribute rules a diff consults, from [`load_gitattributes_for_diff`].
+pub(crate) enum DiffAttributes {
+    /// Fully parsed rules (a tree-ish attribute source, or a bare repository).
+    Parsed(ParsedGitAttributes),
+    /// The work-tree stack, read per directory as paths are looked up.
+    Worktree(WorktreeAttrStack),
+}
+
+impl DiffAttributes {
+    /// Attributes assigned to repo-relative `rel_path`.
+    pub(crate) fn collect_attrs_for_path(
+        &self,
+        rel_path: &str,
+        icase: bool,
+    ) -> HashMap<String, AttrValue> {
+        match self {
+            Self::Parsed(parsed) => {
+                collect_attrs_for_path(&parsed.rules, &parsed.macros, rel_path, icase)
+            }
+            Self::Worktree(stack) => stack.collect_attrs_for_path(rel_path, icase),
+        }
+    }
 }
 
 /// Resolve `attr.tree`, `GIT_ATTR_SOURCE`, `--source` precedence for check-attr.
@@ -1819,5 +1923,125 @@ mod attr_cache_tests {
         // info/attributes appearing after a cached empty load must be seen.
         fs::write(repo.git_dir().join("info/attributes"), "from-info text\n").expect("write info");
         assert_eq!(rules_for(&repo, wt), vec!["from-info".to_string()]);
+    }
+}
+
+#[cfg(test)]
+mod worktree_attr_stack_tests {
+    use super::*;
+
+    fn test_repo(td: &Path) -> Repository {
+        crate::repo::init_repository(td, false, "main", None, crate::RefStorageFormat::Files)
+            .expect("init repo")
+    }
+
+    fn write(path: &Path, content: &str) {
+        fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        fs::write(path, content).expect("write");
+    }
+
+    fn full_walk_attrs(repo: &Repository, wt: &Path, path: &str) -> HashMap<String, AttrValue> {
+        let parsed = load_gitattributes_stack_uncached(repo, wt).expect("full stack");
+        collect_attrs_for_path(&parsed.rules, &parsed.macros, path, false)
+    }
+
+    #[test]
+    fn lazy_stack_matches_full_walk() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        write(
+            &wt.join(".gitattributes"),
+            "[attr]cfam diff=cpp text\n*.c cfam\n*.txt diff=root\n",
+        );
+        write(&wt.join("a/.gitattributes"), "*.txt diff=a\nb/** depth=a\n");
+        write(
+            &wt.join("a/b/.gitattributes"),
+            "*.txt -diff\nx.c !text\n/only-here mark\n",
+        );
+        write(&wt.join("c/.gitattributes"), "* diff=sibling\n");
+        write(&wt.join("a/b/c/d/.gitattributes"), "*.txt diff=deep\n");
+        write(&repo.git_dir().join("info/attributes"), "*.md diff=info\n");
+
+        let stack = WorktreeAttrStack::load(&repo, wt).expect("lazy stack");
+        for path in [
+            "top.c",
+            "top.txt",
+            "a/f.txt",
+            "a/x.c",
+            "a/b/f.txt",
+            "a/b/x.c",
+            "a/b/only-here",
+            "a/only-here",
+            "a/b/c/d/f.txt",
+            "a/b/c/d/e/f.txt",
+            "c/f.txt",
+            "missing/dir/f.txt",
+            "a/b/readme.md",
+        ] {
+            assert_eq!(
+                stack.collect_attrs_for_path(path, false),
+                full_walk_attrs(&repo, wt, path),
+                "attributes for {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn lazy_stack_reads_only_ancestor_directories() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        write(&wt.join("a/b/.gitattributes"), "*.txt diff=ab\n");
+        write(&wt.join("z/.gitattributes"), "*.txt diff=z\n");
+
+        let stack = WorktreeAttrStack::load(&repo, wt).expect("lazy stack");
+        let attrs = stack.collect_attrs_for_path("a/b/f.txt", false);
+        assert_eq!(attrs.get("diff"), Some(&AttrValue::Value("ab".into())));
+        let mut read: Vec<String> = stack
+            .dirs
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect();
+        read.sort();
+        assert_eq!(read, ["a", "a/b"]);
+    }
+
+    #[test]
+    fn lazy_stack_skips_git_dirs_like_full_walk() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        write(&wt.join("sub/.git/.gitattributes"), "* diff=inside-git\n");
+        write(&wt.join("sub/.git/x/.gitattributes"), "* diff=below-git\n");
+        let stack = WorktreeAttrStack::load(&repo, wt).expect("lazy stack");
+        for path in ["sub/.git/f", "sub/.git/x/f"] {
+            let lazy = stack.collect_attrs_for_path(path, false);
+            assert!(lazy.is_empty(), "{path}: {lazy:?}");
+            assert_eq!(lazy, full_walk_attrs(&repo, wt, path), "{path}");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn lazy_stack_ignores_symlinked_directories_like_full_walk() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let repo = test_repo(wt);
+        write(&wt.join("real/.gitattributes"), "* diff=real\n");
+        write(&wt.join("real/in/.gitattributes"), "* diff=real-in\n");
+        std::os::unix::fs::symlink("real", wt.join("link")).expect("symlink");
+        let stack = WorktreeAttrStack::load(&repo, wt).expect("lazy stack");
+        for path in ["link/f", "link/in/f"] {
+            let lazy = stack.collect_attrs_for_path(path, false);
+            assert!(lazy.is_empty(), "{path}: {lazy:?}");
+            assert_eq!(lazy, full_walk_attrs(&repo, wt, path), "{path}");
+        }
+        assert_eq!(
+            stack.collect_attrs_for_path("real/in/f", false),
+            full_walk_attrs(&repo, wt, "real/in/f")
+        );
     }
 }

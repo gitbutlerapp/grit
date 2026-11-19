@@ -293,7 +293,11 @@ fn grit_worktree_patch_hunk_headers(root: &Path) -> Vec<String> {
     use grit_lib::repo::Repository;
     use grit_test_support::rev_parse;
 
-    let repo = Repository::open(root, &RepositoryOptions::default()).expect("open repo");
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open repo");
     let mut uncommitted = repo.diff().uncommitted().expect("uncommitted");
     let head_tree = rev_parse(root, "HEAD^{tree}");
     let entries = uncommitted
@@ -426,5 +430,134 @@ fn userdiff_attr_custom_xfuncname_match_git() {
     assert_eq!(
         git_hdrs, grit_hdrs,
         "custom xfuncname driver: hunk headers differ from git diff"
+    );
+}
+
+fn git_headers(root: &Path, args: &[&str]) -> Vec<String> {
+    let mut all = vec!["-c", "core.quotepath=false", "diff", "-U3", "--no-color"];
+    all.extend(args);
+    grit_test_support::git(root, &all)
+        .lines()
+        .filter(|l| l.starts_with("@@"))
+        .map(str::to_owned)
+        .collect()
+}
+
+fn grit_target_headers(root: &Path, target: grit_lib::diff::DiffTarget) -> Vec<String> {
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::diff::structured::format_hunk_range;
+    use grit_lib::repo::Repository;
+    use grit_lib::worktree::pathspec::{Pathspec, PathspecGlobalFlags};
+
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open repo");
+    let mut opts = grit_lib::diff::DiffOptions::default();
+    opts.word_level_inline = false;
+    let everything = Pathspec::entire_tree(PathspecGlobalFlags::default());
+    let mut files = repo
+        .diff()
+        .files(&target, &everything, &opts)
+        .expect("diff files");
+    files.sort_by(|a, b| a.path.cmp(&b.path));
+    files
+        .iter()
+        .flat_map(|f| &f.hunks)
+        .map(|h| {
+            let context = h
+                .context
+                .as_deref()
+                .map(|c| format!(" {c}"))
+                .unwrap_or_default();
+            format!(
+                "@@ -{} +{} @@{context}",
+                format_hunk_range(h.old_start, h.old_lines),
+                format_hunk_range(h.new_start, h.new_lines)
+            )
+        })
+        .collect()
+}
+
+/// Nested `.gitattributes` files pick the driver for the paths below them only, for every diff
+/// target (worktree, index and tree-to-tree) and for the patch writer.
+#[test]
+fn nested_gitattributes_diff_drivers_match_git() {
+    use grit_lib::diff::DiffTarget;
+    use grit_test_support::git;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "diff.section.xfuncname", "^SECTION .*$"]);
+    git(root, &["config", "diff.label.xfuncname", "^LABEL .*$"]);
+
+    let body = |tail: &str| {
+        format!(
+            "SECTION one\nLABEL two\nint f(void)\n{{\n\ta;\n\tb;\n\tc;\n\td;\n\te;\n\t{tail};\n}}\n"
+        )
+    };
+    let files = [
+        "top.c",
+        "sub/mid.c",
+        "sub/deep/x.c",
+        "sub/deep/er/y.c",
+        "other/z.c",
+    ];
+    std::fs::write(root.join(".gitattributes"), "*.c diff=cpp\n").unwrap();
+    for dir in ["sub/deep/er", "other"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+    }
+    std::fs::write(root.join("sub/.gitattributes"), "*.c diff=section\n").unwrap();
+    std::fs::write(
+        root.join("sub/deep/.gitattributes"),
+        "x.c diff=label\ner/** diff=label\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("other/.gitattributes"), "*.c diff=section\n").unwrap();
+    std::fs::write(root.join("other/unrelated.c"), body("old")).unwrap();
+    for f in files {
+        std::fs::write(root.join(f), body("old")).unwrap();
+    }
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    for f in files {
+        std::fs::write(root.join(f), body("new")).unwrap();
+    }
+    let worktree = git_headers(root, &[]);
+    assert_eq!(worktree.len(), files.len(), "{worktree:?}");
+    assert!(worktree.iter().any(|h| h.ends_with("@@ SECTION one")));
+    assert!(worktree.iter().any(|h| h.ends_with("@@ LABEL two")));
+    assert!(worktree.iter().any(|h| h.ends_with("@@ int f(void)")));
+    assert_eq!(
+        grit_target_headers(root, DiffTarget::WorktreeVsIndex),
+        worktree
+    );
+    assert_eq!(grit_worktree_patch_hunk_headers(root), worktree);
+
+    git(root, &["add", "-A"]);
+    assert_eq!(
+        grit_target_headers(root, DiffTarget::IndexVsHead),
+        git_headers(root, &["--cached"])
+    );
+
+    git(root, &["commit", "-qm", "change"]);
+    let tip: grit_lib::objects::ObjectId =
+        git(root, &["rev-parse", "HEAD"]).trim().parse().unwrap();
+    let base: grit_lib::objects::ObjectId =
+        git(root, &["rev-parse", "HEAD~1"]).trim().parse().unwrap();
+    assert_eq!(
+        grit_target_headers(
+            root,
+            DiffTarget::Trees {
+                old: Some(base),
+                new: tip,
+            }
+        ),
+        git_headers(root, &["HEAD~1", "HEAD"])
     );
 }
