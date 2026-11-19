@@ -302,14 +302,14 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `command_runner` | 506 | 59 | 1 | 0 | 1 |
 | `commit` | 307 | 81 | 3 | 0 | 2 |
 | `commits` | 273 | 63 | 0 | 0 | 0 |
-| `config` | 1,032 | 783 | 0 | 0 | 0 |
+| `config` | 1,032 | 784 | 0 | 0 | 0 |
 | `diagnostics` | 131 | 17 | 0 | 0 | 0 |
 | `diff` | 2,414 | 179 | 26 | 5 | 4 |
 | `divergence` | 243 | 5 | 0 | 0 | 0 |
 | `error` | 1,500 | 388 | 0 | 0 | 0 |
 | `gitbutler` | 66 | 4 | 0 | 1 | 0 |
 | `ident` | 190 | 64 | 0 | 0 | 0 |
-| `index` | 964 | 183 | 1 | 1 | 0 |
+| `index` | 964 | 184 | 1 | 1 | 0 |
 | `line_range` | 45 | 1 | 0 | 0 | 0 |
 | `list_limit` | 23 | 3 | 0 | 0 | 0 |
 | `lockfile` | 128 | 13 | 1 | 0 | 1 |
@@ -321,12 +321,12 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `ownership_check` | 79 | 5 | 0 | 0 | 0 |
 | `parallel` | 133 | 34 | 1 | 0 | 0 |
 | `path_validate` | 122 | 8 | 0 | 0 | 0 |
-| `porcelain` | 2,931 | 303 | 5 | 2 | 2 |
+| `porcelain` | 2,931 | 304 | 5 | 2 | 2 |
 | `prelude` | 1,172 | 9 | 0 | 0 | 0 |
-| `progress` | 256 | 539 | 0 | 0 | 3 |
+| `progress` | 256 | 540 | 0 | 0 | 3 |
 | `refs` | 2,253 | 327 | 8 | 5 | 3 |
 | `remote` | 2,669 | 228 | 1 | 1 | 0 |
-| `repo` | 448 | 858 | 11 | 2 | 2 |
+| `repo` | 448 | 859 | 11 | 2 | 2 |
 | `repo_handles` | 847 | 55 | 3 | 0 | 3 |
 | `revwalk` | 3,159 | 211 | 2 | 2 | 2 |
 | `stash` | 349 | 29 | 3 | 3 | 0 |
@@ -350,7 +350,7 @@ Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.t
 | `diff` | `grit_lib::diff::Diff<'_>` | 526 | 93 |
 | `history` | `grit_lib::revwalk::history::History<'_>` | 213 | 40 |
 | `hooks` | `grit_lib::repo_handles::RepositoryHooks<'_>` | 28 | 10 |
-| `index` | `grit_lib::index::IndexFile<'_>` | 41 | 200 |
+| `index` | `grit_lib::index::IndexFile<'_>` | 41 | 201 |
 | `maintenance` | `grit_lib::maintenance::Maintenance<'_>` | 34 | 50 |
 | `merge` | `grit_lib::merge::Merge<'_>` | 142 | 33 |
 | `notes` | `grit_lib::repo_handles::RepositoryNotes<'_>` | 33 | 14 |
@@ -361,7 +361,7 @@ Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.t
 | `remotes` | `grit_lib::repo_handles::RepositoryRemotes<'_>` | 44 | 90 |
 | `revwalk` | `grit_lib::revwalk::handle::RevWalk<'_>` | 164 | 157 |
 | `stash` | `grit_lib::repo_handles::RepositoryStash<'_>` | 34 | 28 |
-| `status` | `grit_lib::status::Status<'_>` | 99 | 344 |
+| `status` | `grit_lib::status::Status<'_>` | 99 | 345 |
 | `tags` | `grit_lib::repo_handles::Tags<'_>` | 23 | 18 |
 | `workspace_snapshot` | `grit_lib::repo_handles::RepositoryWorkspaceSnapshot<'_>` | 21 | 0 |
 | `worktrees` | `grit_lib::repo_handles::RepositoryWorktrees<'_>` | 30 | 27 |
@@ -583,87 +583,87 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_free_fn_repository_first` | `grit_lib::refs_fsck::refs_fsck :: refs_fsck` |
 | `pub_free_fn_repository_first` | `grit_lib::tree_sha256::tag_verify::verify_tag :: verify_tag` |
 | `pub_free_fn_repository_first` | `grit_lib::tree_sha256::tree_sha256 :: tree_sha256` |
-| `pub_items_multiple_paths` | `id 1053: grit_lib::diff::rerere::RerereEvent | grit_lib::merge::RerereEvent` |
-| `pub_items_multiple_paths` | `id 1054: grit_lib::commits::CommitOutcome | grit_lib::porcelain::commit::CommitOutcome` |
-| `pub_items_multiple_paths` | `id 10948: grit_lib::objects::hash::Parallelism | grit_lib::parallel::Parallelism` |
-| `pub_items_multiple_paths` | `id 1118: grit_lib::commits::CommitError | grit_lib::porcelain::CommitError` |
-| `pub_items_multiple_paths` | `id 1192: grit_lib::merge::MergeError | grit_lib::porcelain::MergeError` |
-| `pub_items_multiple_paths` | `id 14277: grit_lib::error::PathspecResolveError | grit_lib::worktree::pathspec::PathspecResolveError` |
-| `pub_items_multiple_paths` | `id 14774: grit_lib::diff::merge_diff::all_blob_paths_in_tree_order | grit_lib::merge::merge_diff::all_blob_paths_in_tree_order` |
-| `pub_items_multiple_paths` | `id 14776: grit_lib::diff::merge_diff::blob_oid_at_path | grit_lib::merge::merge_diff::blob_oid_at_path` |
-| `pub_items_multiple_paths` | `id 14778: grit_lib::diff::merge_diff::blob_text_for_diff | grit_lib::merge::merge_diff::blob_text_for_diff` |
-| `pub_items_multiple_paths` | `id 14780: grit_lib::diff::merge_diff::blob_text_for_diff_with_oid | grit_lib::merge::merge_diff::blob_text_for_diff_with_oid` |
-| `pub_items_multiple_paths` | `id 14782: grit_lib::diff::merge_diff::combined_diff_paths | grit_lib::merge::merge_diff::combined_diff_paths` |
-| `pub_items_multiple_paths` | `id 14784: grit_lib::diff::merge_diff::combined_merge_parent_blob_paths | grit_lib::merge::merge_diff::combined_merge_parent_blob_paths` |
-| `pub_items_multiple_paths` | `id 14786: grit_lib::diff::merge_diff::convert_blob_to_worktree_for_path | grit_lib::merge::merge_diff::convert_blob_to_worktree_for_path` |
-| `pub_items_multiple_paths` | `id 14788: grit_lib::diff::merge_diff::diff_attr_external_driver | grit_lib::merge::merge_diff::diff_attr_external_driver` |
-| `pub_items_multiple_paths` | `id 14790: grit_lib::diff::merge_diff::diff_attr_forces_binary | grit_lib::merge::merge_diff::diff_attr_forces_binary` |
-| `pub_items_multiple_paths` | `id 14792: grit_lib::diff::merge_diff::diff_attr_forces_text | grit_lib::merge::merge_diff::diff_attr_forces_text` |
-| `pub_items_multiple_paths` | `id 14794: grit_lib::diff::merge_diff::diff_cachetextconv_enabled | grit_lib::merge::merge_diff::diff_cachetextconv_enabled` |
-| `pub_items_multiple_paths` | `id 14796: grit_lib::diff::merge_diff::diff_driver_forces_text | grit_lib::merge::merge_diff::diff_driver_forces_text` |
-| `pub_items_multiple_paths` | `id 14798: grit_lib::diff::merge_diff::diff_forced_binary_by_driver | grit_lib::merge::merge_diff::diff_forced_binary_by_driver` |
-| `pub_items_multiple_paths` | `id 14800: grit_lib::diff::merge_diff::diff_textconv_active | grit_lib::merge::merge_diff::diff_textconv_active` |
-| `pub_items_multiple_paths` | `id 14802: grit_lib::diff::merge_diff::diff_textconv_cmd_line | grit_lib::merge::merge_diff::diff_textconv_cmd_line` |
-| `pub_items_multiple_paths` | `id 14804: grit_lib::diff::merge_diff::enrich_combined_path_renames | grit_lib::merge::merge_diff::enrich_combined_path_renames` |
-| `pub_items_multiple_paths` | `id 14806: grit_lib::diff::merge_diff::format_combined_binary | grit_lib::merge::merge_diff::format_combined_binary` |
-| `pub_items_multiple_paths` | `id 14808: grit_lib::diff::merge_diff::format_combined_binary_header | grit_lib::merge::merge_diff::format_combined_binary_header` |
-| `pub_items_multiple_paths` | `id 14810: grit_lib::diff::merge_diff::format_combined_binary_header_n | grit_lib::merge::merge_diff::format_combined_binary_header_n` |
-| `pub_items_multiple_paths` | `id 14812: grit_lib::diff::merge_diff::format_combined_textconv_patch | grit_lib::merge::merge_diff::format_combined_textconv_patch` |
-| `pub_items_multiple_paths` | `id 14814: grit_lib::diff::merge_diff::format_worktree_conflict_combined | grit_lib::merge::merge_diff::format_worktree_conflict_combined` |
-| `pub_items_multiple_paths` | `id 14816: grit_lib::diff::merge_diff::is_binary_for_diff | grit_lib::merge::merge_diff::is_binary_for_diff` |
-| `pub_items_multiple_paths` | `id 14818: grit_lib::diff::merge_diff::read_blob_at_path | grit_lib::merge::merge_diff::read_blob_at_path` |
-| `pub_items_multiple_paths` | `id 14820: grit_lib::diff::merge_diff::run_textconv | grit_lib::merge::merge_diff::run_textconv` |
-| `pub_items_multiple_paths` | `id 14822: grit_lib::diff::merge_diff::run_textconv_raw | grit_lib::merge::merge_diff::run_textconv_raw` |
-| `pub_items_multiple_paths` | `id 14824: grit_lib::diff::merge_diff::CombinedDiffFormat | grit_lib::merge::merge_diff::CombinedDiffFormat` |
-| `pub_items_multiple_paths` | `id 14826: grit_lib::diff::merge_diff::CombinedPatchOptions | grit_lib::merge::merge_diff::CombinedPatchOptions` |
-| `pub_items_multiple_paths` | `id 14828: grit_lib::diff::merge_diff::CombinedPathLabels | grit_lib::merge::merge_diff::CombinedPathLabels` |
-| `pub_items_multiple_paths` | `id 14830: grit_lib::diff::merge_diff::ConflictStages | grit_lib::merge::merge_diff::ConflictStages` |
-| `pub_items_multiple_paths` | `id 14832: grit_lib::diff::merge_diff::Textconv | grit_lib::merge::merge_diff::Textconv` |
-| `pub_items_multiple_paths` | `id 14836: grit_lib::diff::merge_file::is_binary | grit_lib::merge::merge_file::is_binary` |
-| `pub_items_multiple_paths` | `id 14838: grit_lib::diff::merge_file::merge | grit_lib::merge::merge_file::merge` |
-| `pub_items_multiple_paths` | `id 14842: grit_lib::diff::merge_file::MergeInput | grit_lib::merge::merge_file::MergeInput` |
-| `pub_items_multiple_paths` | `id 14844: grit_lib::diff::merge_file::MergeOutput | grit_lib::merge::merge_file::MergeOutput` |
-| `pub_items_multiple_paths` | `id 14847: grit_lib::diff::merge_trees::apply_tree_merge_output_to_index | grit_lib::merge::merge_trees::apply_tree_merge_output_to_index` |
-| `pub_items_multiple_paths` | `id 14849: grit_lib::diff::merge_trees::apply_tree_merge_output_to_worktree_index | grit_lib::merge::merge_trees::apply_tree_merge_output_to_worktree_index` |
-| `pub_items_multiple_paths` | `id 14851: grit_lib::diff::merge_trees::index_tree_oid_matches_head | grit_lib::merge::merge_trees::index_tree_oid_matches_head` |
-| `pub_items_multiple_paths` | `id 14853: grit_lib::diff::merge_trees::materialized_merge_result_tree | grit_lib::merge::merge_trees::materialized_merge_result_tree` |
-| `pub_items_multiple_paths` | `id 14855: grit_lib::diff::merge_trees::merge_trees_three_way | grit_lib::merge::merge_trees::merge_trees_three_way` |
-| `pub_items_multiple_paths` | `id 14857: grit_lib::diff::merge_trees::refresh_tree_merge_index_stat_cache | grit_lib::merge::merge_trees::refresh_tree_merge_index_stat_cache` |
-| `pub_items_multiple_paths` | `id 14859: grit_lib::diff::merge_trees::DirectoryRenameConflict | grit_lib::merge::merge_trees::DirectoryRenameConflict` |
-| `pub_items_multiple_paths` | `id 14862: grit_lib::diff::merge_trees::MergeSide | grit_lib::merge::merge_trees::MergeSide` |
-| `pub_items_multiple_paths` | `id 14864: grit_lib::diff::merge_trees::RenameRenameConflict | grit_lib::merge::merge_trees::RenameRenameConflict` |
-| `pub_items_multiple_paths` | `id 14866: grit_lib::diff::merge_trees::TheirsConflictLabel | grit_lib::merge::merge_trees::TheirsConflictLabel` |
-| `pub_items_multiple_paths` | `id 14868: grit_lib::diff::merge_trees::TreeMergeConflictPresentation | grit_lib::merge::merge_trees::TreeMergeConflictPresentation` |
-| `pub_items_multiple_paths` | `id 14870: grit_lib::diff::merge_trees::TreeMergeOutput | grit_lib::merge::merge_trees::TreeMergeOutput` |
-| `pub_items_multiple_paths` | `id 14881: grit_lib::diff::rerere::RerereAutoupdate | grit_lib::merge::RerereAutoupdate` |
-| `pub_items_multiple_paths` | `id 14884: grit_lib::diff::rerere::RerereEventKind | grit_lib::merge::RerereEventKind` |
-| `pub_items_multiple_paths` | `id 15471: grit_lib::objects::odb::WritableObjectStore | grit_lib::objects::odb::store::WritableObjectStore` |
-| `pub_items_multiple_paths` | `id 15983: grit_lib::error::RepositoryError | grit_lib::repo::RepositoryError | grit_lib::repo::error::RepositoryError` |
-| `pub_items_multiple_paths` | `id 16026: grit_lib::index::IndexError | grit_lib::index::error::IndexError` |
-| `pub_items_multiple_paths` | `id 16256: grit_lib::remote::http_client::HttpClient | grit_lib::remote::transport::http::HttpClient` |
-| `pub_items_multiple_paths` | `id 16858: grit_lib::error::PathspecFromFileParseError | grit_lib::worktree::pathspec::PathspecFromFileParseError` |
-| `pub_items_multiple_paths` | `id 1695: grit_lib::merge::FastForwardPolicy | grit_lib::porcelain::merge::FastForwardPolicy` |
-| `pub_items_multiple_paths` | `id 1728: grit_lib::merge::MergeCommitMode | grit_lib::porcelain::merge::MergeCommitMode` |
-| `pub_items_multiple_paths` | `id 1762: grit_lib::diff::merge_file::MergeFavor | grit_lib::merge::merge_file::MergeFavor` |
-| `pub_items_multiple_paths` | `id 1765: grit_lib::diff::merge_file::ConflictStyle | grit_lib::merge::merge_file::ConflictStyle` |
-| `pub_items_multiple_paths` | `id 1771: grit_lib::diff::merge_trees::DirectoryRenameMode | grit_lib::merge::merge_trees::DirectoryRenameMode` |
-| `pub_items_multiple_paths` | `id 1773: grit_lib::merge::MergeOptions | grit_lib::porcelain::merge::MergeOptions` |
-| `pub_items_multiple_paths` | `id 1813: grit_lib::merge::IntegrateBranchOptions | grit_lib::porcelain::merge::IntegrateBranchOptions` |
-| `pub_items_multiple_paths` | `id 1855: grit_lib::diff::merge_trees::WhitespaceMergeOptions | grit_lib::merge::merge_trees::WhitespaceMergeOptions` |
-| `pub_items_multiple_paths` | `id 1859: grit_lib::merge::MergePredictionOptions | grit_lib::porcelain::merge::MergePredictionOptions` |
-| `pub_items_multiple_paths` | `id 18747: grit_lib::objects::hash::ParallelHashError | grit_lib::parallel::ParallelHashError` |
-| `pub_items_multiple_paths` | `id 1898: grit_lib::merge::MergePrediction | grit_lib::porcelain::merge::MergePrediction` |
-| `pub_items_multiple_paths` | `id 1931: grit_lib::merge::WrittenMergeTree | grit_lib::porcelain::merge::WrittenMergeTree` |
-| `pub_items_multiple_paths` | `id 1932: grit_lib::merge::MergeTreeStage | grit_lib::porcelain::merge::MergeTreeStage` |
-| `pub_items_multiple_paths` | `id 1999: grit_lib::merge::MergeDryRunPlan | grit_lib::porcelain::merge::MergeDryRunPlan` |
-| `pub_items_multiple_paths` | `id 2031: grit_lib::merge::MergeSourceKind | grit_lib::porcelain::merge::MergeSourceKind` |
-| `pub_items_multiple_paths` | `id 2061: grit_lib::merge::MergeSource | grit_lib::porcelain::merge::MergeSource` |
-| `pub_items_multiple_paths` | `id 2107: grit_lib::merge::IntegrateBranchOutcome | grit_lib::porcelain::merge::IntegrateBranchOutcome` |
-| `pub_items_multiple_paths` | `id 2138: grit_lib::merge::ContinueOptions | grit_lib::porcelain::merge::ContinueOptions` |
-| `pub_items_multiple_paths` | `id 2169: grit_lib::merge::ContinueOutcome | grit_lib::porcelain::merge::ContinueOutcome` |
-| `pub_items_multiple_paths` | `id 22004: grit_lib::index::IndexCorruptReason | grit_lib::index::error::IndexCorruptReason` |
-| `pub_items_multiple_paths` | `id 22037: grit_lib::index::IndexCorrupt | grit_lib::index::error::IndexCorrupt` |
-| `pub_items_multiple_paths` | `id 22073: grit_lib::index::IndexChmodReason | grit_lib::index::error::IndexChmodReason` |
+| `pub_items_multiple_paths` | `id 1054: grit_lib::diff::rerere::RerereEvent | grit_lib::merge::RerereEvent` |
+| `pub_items_multiple_paths` | `id 1055: grit_lib::commits::CommitOutcome | grit_lib::porcelain::commit::CommitOutcome` |
+| `pub_items_multiple_paths` | `id 10949: grit_lib::objects::hash::Parallelism | grit_lib::parallel::Parallelism` |
+| `pub_items_multiple_paths` | `id 1119: grit_lib::commits::CommitError | grit_lib::porcelain::CommitError` |
+| `pub_items_multiple_paths` | `id 1193: grit_lib::merge::MergeError | grit_lib::porcelain::MergeError` |
+| `pub_items_multiple_paths` | `id 14278: grit_lib::error::PathspecResolveError | grit_lib::worktree::pathspec::PathspecResolveError` |
+| `pub_items_multiple_paths` | `id 14775: grit_lib::diff::merge_diff::all_blob_paths_in_tree_order | grit_lib::merge::merge_diff::all_blob_paths_in_tree_order` |
+| `pub_items_multiple_paths` | `id 14777: grit_lib::diff::merge_diff::blob_oid_at_path | grit_lib::merge::merge_diff::blob_oid_at_path` |
+| `pub_items_multiple_paths` | `id 14779: grit_lib::diff::merge_diff::blob_text_for_diff | grit_lib::merge::merge_diff::blob_text_for_diff` |
+| `pub_items_multiple_paths` | `id 14781: grit_lib::diff::merge_diff::blob_text_for_diff_with_oid | grit_lib::merge::merge_diff::blob_text_for_diff_with_oid` |
+| `pub_items_multiple_paths` | `id 14783: grit_lib::diff::merge_diff::combined_diff_paths | grit_lib::merge::merge_diff::combined_diff_paths` |
+| `pub_items_multiple_paths` | `id 14785: grit_lib::diff::merge_diff::combined_merge_parent_blob_paths | grit_lib::merge::merge_diff::combined_merge_parent_blob_paths` |
+| `pub_items_multiple_paths` | `id 14787: grit_lib::diff::merge_diff::convert_blob_to_worktree_for_path | grit_lib::merge::merge_diff::convert_blob_to_worktree_for_path` |
+| `pub_items_multiple_paths` | `id 14789: grit_lib::diff::merge_diff::diff_attr_external_driver | grit_lib::merge::merge_diff::diff_attr_external_driver` |
+| `pub_items_multiple_paths` | `id 14791: grit_lib::diff::merge_diff::diff_attr_forces_binary | grit_lib::merge::merge_diff::diff_attr_forces_binary` |
+| `pub_items_multiple_paths` | `id 14793: grit_lib::diff::merge_diff::diff_attr_forces_text | grit_lib::merge::merge_diff::diff_attr_forces_text` |
+| `pub_items_multiple_paths` | `id 14795: grit_lib::diff::merge_diff::diff_cachetextconv_enabled | grit_lib::merge::merge_diff::diff_cachetextconv_enabled` |
+| `pub_items_multiple_paths` | `id 14797: grit_lib::diff::merge_diff::diff_driver_forces_text | grit_lib::merge::merge_diff::diff_driver_forces_text` |
+| `pub_items_multiple_paths` | `id 14799: grit_lib::diff::merge_diff::diff_forced_binary_by_driver | grit_lib::merge::merge_diff::diff_forced_binary_by_driver` |
+| `pub_items_multiple_paths` | `id 14801: grit_lib::diff::merge_diff::diff_textconv_active | grit_lib::merge::merge_diff::diff_textconv_active` |
+| `pub_items_multiple_paths` | `id 14803: grit_lib::diff::merge_diff::diff_textconv_cmd_line | grit_lib::merge::merge_diff::diff_textconv_cmd_line` |
+| `pub_items_multiple_paths` | `id 14805: grit_lib::diff::merge_diff::enrich_combined_path_renames | grit_lib::merge::merge_diff::enrich_combined_path_renames` |
+| `pub_items_multiple_paths` | `id 14807: grit_lib::diff::merge_diff::format_combined_binary | grit_lib::merge::merge_diff::format_combined_binary` |
+| `pub_items_multiple_paths` | `id 14809: grit_lib::diff::merge_diff::format_combined_binary_header | grit_lib::merge::merge_diff::format_combined_binary_header` |
+| `pub_items_multiple_paths` | `id 14811: grit_lib::diff::merge_diff::format_combined_binary_header_n | grit_lib::merge::merge_diff::format_combined_binary_header_n` |
+| `pub_items_multiple_paths` | `id 14813: grit_lib::diff::merge_diff::format_combined_textconv_patch | grit_lib::merge::merge_diff::format_combined_textconv_patch` |
+| `pub_items_multiple_paths` | `id 14815: grit_lib::diff::merge_diff::format_worktree_conflict_combined | grit_lib::merge::merge_diff::format_worktree_conflict_combined` |
+| `pub_items_multiple_paths` | `id 14817: grit_lib::diff::merge_diff::is_binary_for_diff | grit_lib::merge::merge_diff::is_binary_for_diff` |
+| `pub_items_multiple_paths` | `id 14819: grit_lib::diff::merge_diff::read_blob_at_path | grit_lib::merge::merge_diff::read_blob_at_path` |
+| `pub_items_multiple_paths` | `id 14821: grit_lib::diff::merge_diff::run_textconv | grit_lib::merge::merge_diff::run_textconv` |
+| `pub_items_multiple_paths` | `id 14823: grit_lib::diff::merge_diff::run_textconv_raw | grit_lib::merge::merge_diff::run_textconv_raw` |
+| `pub_items_multiple_paths` | `id 14825: grit_lib::diff::merge_diff::CombinedDiffFormat | grit_lib::merge::merge_diff::CombinedDiffFormat` |
+| `pub_items_multiple_paths` | `id 14827: grit_lib::diff::merge_diff::CombinedPatchOptions | grit_lib::merge::merge_diff::CombinedPatchOptions` |
+| `pub_items_multiple_paths` | `id 14829: grit_lib::diff::merge_diff::CombinedPathLabels | grit_lib::merge::merge_diff::CombinedPathLabels` |
+| `pub_items_multiple_paths` | `id 14831: grit_lib::diff::merge_diff::ConflictStages | grit_lib::merge::merge_diff::ConflictStages` |
+| `pub_items_multiple_paths` | `id 14833: grit_lib::diff::merge_diff::Textconv | grit_lib::merge::merge_diff::Textconv` |
+| `pub_items_multiple_paths` | `id 14837: grit_lib::diff::merge_file::is_binary | grit_lib::merge::merge_file::is_binary` |
+| `pub_items_multiple_paths` | `id 14839: grit_lib::diff::merge_file::merge | grit_lib::merge::merge_file::merge` |
+| `pub_items_multiple_paths` | `id 14843: grit_lib::diff::merge_file::MergeInput | grit_lib::merge::merge_file::MergeInput` |
+| `pub_items_multiple_paths` | `id 14845: grit_lib::diff::merge_file::MergeOutput | grit_lib::merge::merge_file::MergeOutput` |
+| `pub_items_multiple_paths` | `id 14848: grit_lib::diff::merge_trees::apply_tree_merge_output_to_index | grit_lib::merge::merge_trees::apply_tree_merge_output_to_index` |
+| `pub_items_multiple_paths` | `id 14850: grit_lib::diff::merge_trees::apply_tree_merge_output_to_worktree_index | grit_lib::merge::merge_trees::apply_tree_merge_output_to_worktree_index` |
+| `pub_items_multiple_paths` | `id 14852: grit_lib::diff::merge_trees::index_tree_oid_matches_head | grit_lib::merge::merge_trees::index_tree_oid_matches_head` |
+| `pub_items_multiple_paths` | `id 14854: grit_lib::diff::merge_trees::materialized_merge_result_tree | grit_lib::merge::merge_trees::materialized_merge_result_tree` |
+| `pub_items_multiple_paths` | `id 14856: grit_lib::diff::merge_trees::merge_trees_three_way | grit_lib::merge::merge_trees::merge_trees_three_way` |
+| `pub_items_multiple_paths` | `id 14858: grit_lib::diff::merge_trees::refresh_tree_merge_index_stat_cache | grit_lib::merge::merge_trees::refresh_tree_merge_index_stat_cache` |
+| `pub_items_multiple_paths` | `id 14860: grit_lib::diff::merge_trees::DirectoryRenameConflict | grit_lib::merge::merge_trees::DirectoryRenameConflict` |
+| `pub_items_multiple_paths` | `id 14863: grit_lib::diff::merge_trees::MergeSide | grit_lib::merge::merge_trees::MergeSide` |
+| `pub_items_multiple_paths` | `id 14865: grit_lib::diff::merge_trees::RenameRenameConflict | grit_lib::merge::merge_trees::RenameRenameConflict` |
+| `pub_items_multiple_paths` | `id 14867: grit_lib::diff::merge_trees::TheirsConflictLabel | grit_lib::merge::merge_trees::TheirsConflictLabel` |
+| `pub_items_multiple_paths` | `id 14869: grit_lib::diff::merge_trees::TreeMergeConflictPresentation | grit_lib::merge::merge_trees::TreeMergeConflictPresentation` |
+| `pub_items_multiple_paths` | `id 14871: grit_lib::diff::merge_trees::TreeMergeOutput | grit_lib::merge::merge_trees::TreeMergeOutput` |
+| `pub_items_multiple_paths` | `id 14882: grit_lib::diff::rerere::RerereAutoupdate | grit_lib::merge::RerereAutoupdate` |
+| `pub_items_multiple_paths` | `id 14885: grit_lib::diff::rerere::RerereEventKind | grit_lib::merge::RerereEventKind` |
+| `pub_items_multiple_paths` | `id 15472: grit_lib::objects::odb::WritableObjectStore | grit_lib::objects::odb::store::WritableObjectStore` |
+| `pub_items_multiple_paths` | `id 15984: grit_lib::error::RepositoryError | grit_lib::repo::RepositoryError | grit_lib::repo::error::RepositoryError` |
+| `pub_items_multiple_paths` | `id 16027: grit_lib::index::IndexError | grit_lib::index::error::IndexError` |
+| `pub_items_multiple_paths` | `id 16257: grit_lib::remote::http_client::HttpClient | grit_lib::remote::transport::http::HttpClient` |
+| `pub_items_multiple_paths` | `id 16859: grit_lib::error::PathspecFromFileParseError | grit_lib::worktree::pathspec::PathspecFromFileParseError` |
+| `pub_items_multiple_paths` | `id 1696: grit_lib::merge::FastForwardPolicy | grit_lib::porcelain::merge::FastForwardPolicy` |
+| `pub_items_multiple_paths` | `id 1729: grit_lib::merge::MergeCommitMode | grit_lib::porcelain::merge::MergeCommitMode` |
+| `pub_items_multiple_paths` | `id 1763: grit_lib::diff::merge_file::MergeFavor | grit_lib::merge::merge_file::MergeFavor` |
+| `pub_items_multiple_paths` | `id 1766: grit_lib::diff::merge_file::ConflictStyle | grit_lib::merge::merge_file::ConflictStyle` |
+| `pub_items_multiple_paths` | `id 1772: grit_lib::diff::merge_trees::DirectoryRenameMode | grit_lib::merge::merge_trees::DirectoryRenameMode` |
+| `pub_items_multiple_paths` | `id 1774: grit_lib::merge::MergeOptions | grit_lib::porcelain::merge::MergeOptions` |
+| `pub_items_multiple_paths` | `id 1814: grit_lib::merge::IntegrateBranchOptions | grit_lib::porcelain::merge::IntegrateBranchOptions` |
+| `pub_items_multiple_paths` | `id 1856: grit_lib::diff::merge_trees::WhitespaceMergeOptions | grit_lib::merge::merge_trees::WhitespaceMergeOptions` |
+| `pub_items_multiple_paths` | `id 1860: grit_lib::merge::MergePredictionOptions | grit_lib::porcelain::merge::MergePredictionOptions` |
+| `pub_items_multiple_paths` | `id 18748: grit_lib::objects::hash::ParallelHashError | grit_lib::parallel::ParallelHashError` |
+| `pub_items_multiple_paths` | `id 1899: grit_lib::merge::MergePrediction | grit_lib::porcelain::merge::MergePrediction` |
+| `pub_items_multiple_paths` | `id 1932: grit_lib::merge::WrittenMergeTree | grit_lib::porcelain::merge::WrittenMergeTree` |
+| `pub_items_multiple_paths` | `id 1933: grit_lib::merge::MergeTreeStage | grit_lib::porcelain::merge::MergeTreeStage` |
+| `pub_items_multiple_paths` | `id 2000: grit_lib::merge::MergeDryRunPlan | grit_lib::porcelain::merge::MergeDryRunPlan` |
+| `pub_items_multiple_paths` | `id 2032: grit_lib::merge::MergeSourceKind | grit_lib::porcelain::merge::MergeSourceKind` |
+| `pub_items_multiple_paths` | `id 2062: grit_lib::merge::MergeSource | grit_lib::porcelain::merge::MergeSource` |
+| `pub_items_multiple_paths` | `id 2108: grit_lib::merge::IntegrateBranchOutcome | grit_lib::porcelain::merge::IntegrateBranchOutcome` |
+| `pub_items_multiple_paths` | `id 2139: grit_lib::merge::ContinueOptions | grit_lib::porcelain::merge::ContinueOptions` |
+| `pub_items_multiple_paths` | `id 2170: grit_lib::merge::ContinueOutcome | grit_lib::porcelain::merge::ContinueOutcome` |
+| `pub_items_multiple_paths` | `id 22005: grit_lib::index::IndexCorruptReason | grit_lib::index::error::IndexCorruptReason` |
+| `pub_items_multiple_paths` | `id 22038: grit_lib::index::IndexCorrupt | grit_lib::index::error::IndexCorrupt` |
+| `pub_items_multiple_paths` | `id 22074: grit_lib::index::IndexChmodReason | grit_lib::index::error::IndexChmodReason` |
 | `pub_items_multiple_paths` | `id 23589: grit_lib::objects::pack_objects::PackBuildOptions | grit_lib::remote::transfer::PackBuildOptions` |
 | `pub_items_multiple_paths` | `id 26564: grit_lib::objects::odb::ObjectStore | grit_lib::objects::odb::store::ObjectStore` |
 | `pub_items_multiple_paths` | `id 26567: grit_lib::objects::odb::ObjectStream | grit_lib::objects::odb::store::ObjectStream` |
@@ -672,17 +672,17 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_items_multiple_paths` | `id 26729: grit_lib::objects::pack_objects::PackObjects | grit_lib::remote::transfer::PackObjects` |
 | `pub_items_multiple_paths` | `id 26731: grit_lib::objects::pack_objects::PackObjectsOptions | grit_lib::remote::transfer::PackObjectsOptions` |
 | `pub_items_multiple_paths` | `id 26733: grit_lib::objects::pack_objects::PackStats | grit_lib::remote::transfer::PackStats` |
-| `pub_items_multiple_paths` | `id 2736: grit_lib::merge::ReplayDirection | grit_lib::porcelain::replay::ReplayDirection` |
-| `pub_items_multiple_paths` | `id 2768: grit_lib::merge::ReplayRequest | grit_lib::porcelain::replay::ReplayRequest` |
-| `pub_items_multiple_paths` | `id 2804: grit_lib::merge::ReplayOutcome | grit_lib::porcelain::replay::ReplayOutcome` |
-| `pub_items_multiple_paths` | `id 2834: grit_lib::merge::ReplayEmptyPolicy | grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy` |
-| `pub_items_multiple_paths` | `id 2872: grit_lib::merge::ReplayOptions | grit_lib::porcelain::replay_sequence::ReplayOptions` |
-| `pub_items_multiple_paths` | `id 2909: grit_lib::merge::ReplaySequenceRequest | grit_lib::porcelain::replay_sequence::ReplaySequenceRequest` |
-| `pub_items_multiple_paths` | `id 2941: grit_lib::merge::ReplayCreated | grit_lib::porcelain::replay_sequence::ReplayCreated` |
-| `pub_items_multiple_paths` | `id 2980: grit_lib::merge::SequencePrediction | grit_lib::porcelain::replay_sequence::SequencePrediction` |
+| `pub_items_multiple_paths` | `id 2737: grit_lib::merge::ReplayDirection | grit_lib::porcelain::replay::ReplayDirection` |
+| `pub_items_multiple_paths` | `id 2769: grit_lib::merge::ReplayRequest | grit_lib::porcelain::replay::ReplayRequest` |
+| `pub_items_multiple_paths` | `id 2805: grit_lib::merge::ReplayOutcome | grit_lib::porcelain::replay::ReplayOutcome` |
+| `pub_items_multiple_paths` | `id 2835: grit_lib::merge::ReplayEmptyPolicy | grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy` |
+| `pub_items_multiple_paths` | `id 2873: grit_lib::merge::ReplayOptions | grit_lib::porcelain::replay_sequence::ReplayOptions` |
+| `pub_items_multiple_paths` | `id 2910: grit_lib::merge::ReplaySequenceRequest | grit_lib::porcelain::replay_sequence::ReplaySequenceRequest` |
+| `pub_items_multiple_paths` | `id 2942: grit_lib::merge::ReplayCreated | grit_lib::porcelain::replay_sequence::ReplayCreated` |
+| `pub_items_multiple_paths` | `id 2981: grit_lib::merge::SequencePrediction | grit_lib::porcelain::replay_sequence::SequencePrediction` |
 | `pub_items_multiple_paths` | `id 30122: grit_lib::refs::reflog::MessageMatcher | grit_lib::repo_handles::MessageMatcher` |
-| `pub_items_multiple_paths` | `id 3023: grit_lib::merge::SequenceOutcome | grit_lib::porcelain::replay_sequence::SequenceOutcome` |
-| `pub_items_multiple_paths` | `id 3053: grit_lib::merge::ReplayAbortOutcome | grit_lib::porcelain::replay_sequence::ReplayAbortOutcome` |
+| `pub_items_multiple_paths` | `id 3024: grit_lib::merge::SequenceOutcome | grit_lib::porcelain::replay_sequence::SequenceOutcome` |
+| `pub_items_multiple_paths` | `id 3054: grit_lib::merge::ReplayAbortOutcome | grit_lib::porcelain::replay_sequence::ReplayAbortOutcome` |
 | `pub_items_multiple_paths` | `id 32203: grit_lib::remote::http_client::UreqHttpClient | grit_lib::remote::transport::http::ureq_client::UreqHttpClient` |
 | `pub_items_multiple_paths` | `id 33065: grit_lib::remote::transport::http::http_client_arc | grit_lib::remote::transport::http_client_arc` |
 | `pub_items_multiple_paths` | `id 33090: grit_lib::remote::redact_url_for_display | grit_lib::remote::transport_path::redact_url_for_display` |
@@ -690,40 +690,40 @@ Remaining ratchet offenders at the snapshot above. These counts may only go down
 | `pub_items_multiple_paths` | `id 33228: grit_lib::repo::V1OnlyExtensionsInFormatZero | grit_lib::repo::error::V1OnlyExtensionsInFormatZero` |
 | `pub_items_multiple_paths` | `id 33359: grit_lib::repo::RepositoryResult | grit_lib::repo::error::RepositoryResult` |
 | `pub_items_multiple_paths` | `id 34837: grit_lib::repo_handles::LockWorktreeOptions | grit_lib::worktree::LockWorktreeOptions` |
-| `pub_items_multiple_paths` | `id 3961: grit_lib::porcelain::status::UntrackedMode | grit_lib::status::UntrackedMode` |
-| `pub_items_multiple_paths` | `id 3992: grit_lib::porcelain::status::IgnoredMode | grit_lib::status::IgnoredMode` |
-| `pub_items_multiple_paths` | `id 4022: grit_lib::porcelain::status::RenameDetection | grit_lib::status::RenameDetection` |
-| `pub_items_multiple_paths` | `id 4065: grit_lib::porcelain::status::StatusOptions | grit_lib::status::StatusOptions` |
-| `pub_items_multiple_paths` | `id 4122: grit_lib::porcelain::status::InterruptedRewrite | grit_lib::status::InterruptedRewrite` |
-| `pub_items_multiple_paths` | `id 4123: grit_lib::porcelain::status::StatusModel | grit_lib::status::StatusModel` |
-| `pub_items_multiple_paths` | `id 4126: grit_lib::porcelain::status::ConflictGroup | grit_lib::status::ConflictGroup` |
-| `pub_items_multiple_paths` | `id 4129: grit_lib::porcelain::status::StatusGuidance | grit_lib::status::StatusGuidance` |
-| `pub_items_multiple_paths` | `id 4227: grit_lib::porcelain::status::StatusAction | grit_lib::status::StatusAction` |
-| `pub_items_multiple_paths` | `id 4288: grit_lib::porcelain::status::UntrackedCollectMeta | grit_lib::status::UntrackedCollectMeta` |
-| `pub_items_multiple_paths` | `id 4312: grit_lib::porcelain::status::format_porcelain_v2 | grit_lib::status::format_porcelain_v2` |
-| `pub_items_multiple_paths` | `id 4389: grit_lib::porcelain::status::short_status_lines | grit_lib::status::short_status_lines` |
-| `pub_items_multiple_paths` | `id 5393: grit_lib::refs::check_ref_format::RefName | grit_lib::refs::store::RefName` |
-| `pub_items_multiple_paths` | `id 5430: grit_lib::revwalk::CommitFilterError | grit_lib::revwalk::filter::CommitFilterError` |
-| `pub_items_multiple_paths` | `id 5454: grit_lib::revwalk::CommitFilter | grit_lib::revwalk::filter::CommitFilter` |
-| `pub_items_multiple_paths` | `id 5486: grit_lib::revwalk::CommitFilterBuilder | grit_lib::revwalk::filter::CommitFilterBuilder` |
-| `pub_items_multiple_paths` | `id 5738: grit_lib::revwalk::AuthorGroup | grit_lib::revwalk::group_by::AuthorGroup` |
-| `pub_items_multiple_paths` | `id 5767: grit_lib::revwalk::GroupByAuthorOptions | grit_lib::revwalk::group_by::GroupByAuthorOptions` |
-| `pub_items_multiple_paths` | `id 5796: grit_lib::revwalk::RevWalk | grit_lib::revwalk::handle::RevWalk` |
-| `pub_items_multiple_paths` | `id 5819: grit_lib::revwalk::StdinRevisionSpecs | grit_lib::revwalk::handle::StdinRevisionSpecs` |
-| `pub_items_multiple_paths` | `id 5827: grit_lib::revwalk::RevWalkCommitIter | grit_lib::revwalk::handle::RevWalkCommitIter` |
-| `pub_items_multiple_paths` | `id 6268: grit_lib::diff::Pickaxe | grit_lib::revwalk::Pickaxe` |
-| `pub_items_multiple_paths` | `id 6274: grit_lib::revwalk::CommitExtent | grit_lib::revwalk::rev_list::CommitExtent` |
-| `pub_items_multiple_paths` | `id 6769: grit_lib::diff::PickaxeError | grit_lib::revwalk::PickaxeError` |
-| `pub_items_multiple_paths` | `id 6771: grit_lib::diff::PickaxeKind | grit_lib::revwalk::PickaxeKind` |
-| `pub_items_multiple_paths` | `id 794: grit_lib::commits::HookPolicy | grit_lib::porcelain::commit::HookPolicy` |
-| `pub_items_multiple_paths` | `id 827: grit_lib::commits::CommitAuthorInfo | grit_lib::porcelain::commit::CommitAuthorInfo` |
-| `pub_items_multiple_paths` | `id 885: grit_lib::commits::CommitRequest | grit_lib::porcelain::commit::CommitRequest` |
-| `pub_items_multiple_paths` | `id 915: grit_lib::commits::CommitFile | grit_lib::porcelain::commit::CommitFile` |
-| `pub_items_multiple_paths` | `id 9328: grit_lib::refs::check_ref_format::RefNameRef | grit_lib::refs::store::RefNameRef` |
-| `pub_items_multiple_paths` | `id 947: grit_lib::commits::CommitPlan | grit_lib::porcelain::commit::CommitPlan` |
-| `pub_items_multiple_paths` | `id 9527: grit_lib::remote::DEFAULT_REMOTE | grit_lib::remote::push_plan::DEFAULT_REMOTE` |
-| `pub_items_multiple_paths` | `id 980: grit_lib::commits::CommitPatchInput | grit_lib::porcelain::commit::CommitPatchInput` |
-| `pub_items_multiple_paths` | `id 983: grit_lib::commits::CommitScope | grit_lib::porcelain::commit::CommitScope` |
+| `pub_items_multiple_paths` | `id 3962: grit_lib::porcelain::status::UntrackedMode | grit_lib::status::UntrackedMode` |
+| `pub_items_multiple_paths` | `id 3993: grit_lib::porcelain::status::IgnoredMode | grit_lib::status::IgnoredMode` |
+| `pub_items_multiple_paths` | `id 4023: grit_lib::porcelain::status::RenameDetection | grit_lib::status::RenameDetection` |
+| `pub_items_multiple_paths` | `id 4066: grit_lib::porcelain::status::StatusOptions | grit_lib::status::StatusOptions` |
+| `pub_items_multiple_paths` | `id 4123: grit_lib::porcelain::status::InterruptedRewrite | grit_lib::status::InterruptedRewrite` |
+| `pub_items_multiple_paths` | `id 4124: grit_lib::porcelain::status::StatusModel | grit_lib::status::StatusModel` |
+| `pub_items_multiple_paths` | `id 4127: grit_lib::porcelain::status::ConflictGroup | grit_lib::status::ConflictGroup` |
+| `pub_items_multiple_paths` | `id 4130: grit_lib::porcelain::status::StatusGuidance | grit_lib::status::StatusGuidance` |
+| `pub_items_multiple_paths` | `id 4228: grit_lib::porcelain::status::StatusAction | grit_lib::status::StatusAction` |
+| `pub_items_multiple_paths` | `id 4289: grit_lib::porcelain::status::UntrackedCollectMeta | grit_lib::status::UntrackedCollectMeta` |
+| `pub_items_multiple_paths` | `id 4313: grit_lib::porcelain::status::format_porcelain_v2 | grit_lib::status::format_porcelain_v2` |
+| `pub_items_multiple_paths` | `id 4390: grit_lib::porcelain::status::short_status_lines | grit_lib::status::short_status_lines` |
+| `pub_items_multiple_paths` | `id 5394: grit_lib::refs::check_ref_format::RefName | grit_lib::refs::store::RefName` |
+| `pub_items_multiple_paths` | `id 5431: grit_lib::revwalk::CommitFilterError | grit_lib::revwalk::filter::CommitFilterError` |
+| `pub_items_multiple_paths` | `id 5455: grit_lib::revwalk::CommitFilter | grit_lib::revwalk::filter::CommitFilter` |
+| `pub_items_multiple_paths` | `id 5487: grit_lib::revwalk::CommitFilterBuilder | grit_lib::revwalk::filter::CommitFilterBuilder` |
+| `pub_items_multiple_paths` | `id 5739: grit_lib::revwalk::AuthorGroup | grit_lib::revwalk::group_by::AuthorGroup` |
+| `pub_items_multiple_paths` | `id 5768: grit_lib::revwalk::GroupByAuthorOptions | grit_lib::revwalk::group_by::GroupByAuthorOptions` |
+| `pub_items_multiple_paths` | `id 5797: grit_lib::revwalk::RevWalk | grit_lib::revwalk::handle::RevWalk` |
+| `pub_items_multiple_paths` | `id 5820: grit_lib::revwalk::StdinRevisionSpecs | grit_lib::revwalk::handle::StdinRevisionSpecs` |
+| `pub_items_multiple_paths` | `id 5828: grit_lib::revwalk::RevWalkCommitIter | grit_lib::revwalk::handle::RevWalkCommitIter` |
+| `pub_items_multiple_paths` | `id 6269: grit_lib::diff::Pickaxe | grit_lib::revwalk::Pickaxe` |
+| `pub_items_multiple_paths` | `id 6275: grit_lib::revwalk::CommitExtent | grit_lib::revwalk::rev_list::CommitExtent` |
+| `pub_items_multiple_paths` | `id 6770: grit_lib::diff::PickaxeError | grit_lib::revwalk::PickaxeError` |
+| `pub_items_multiple_paths` | `id 6772: grit_lib::diff::PickaxeKind | grit_lib::revwalk::PickaxeKind` |
+| `pub_items_multiple_paths` | `id 795: grit_lib::commits::HookPolicy | grit_lib::porcelain::commit::HookPolicy` |
+| `pub_items_multiple_paths` | `id 828: grit_lib::commits::CommitAuthorInfo | grit_lib::porcelain::commit::CommitAuthorInfo` |
+| `pub_items_multiple_paths` | `id 886: grit_lib::commits::CommitRequest | grit_lib::porcelain::commit::CommitRequest` |
+| `pub_items_multiple_paths` | `id 916: grit_lib::commits::CommitFile | grit_lib::porcelain::commit::CommitFile` |
+| `pub_items_multiple_paths` | `id 9329: grit_lib::refs::check_ref_format::RefNameRef | grit_lib::refs::store::RefNameRef` |
+| `pub_items_multiple_paths` | `id 948: grit_lib::commits::CommitPlan | grit_lib::porcelain::commit::CommitPlan` |
+| `pub_items_multiple_paths` | `id 9528: grit_lib::remote::DEFAULT_REMOTE | grit_lib::remote::push_plan::DEFAULT_REMOTE` |
+| `pub_items_multiple_paths` | `id 981: grit_lib::commits::CommitPatchInput | grit_lib::porcelain::commit::CommitPatchInput` |
+| `pub_items_multiple_paths` | `id 984: grit_lib::commits::CommitScope | grit_lib::porcelain::commit::CommitScope` |
 | `pub_progress_interfaces` | `grit_lib::progress::NullProgress :: struct NullProgress` |
 | `pub_progress_interfaces` | `grit_lib::progress::ProgressSink :: trait ProgressSink` |
 | `pub_repo_constructor_offenders` | `grit_lib::repo::Repository::discover :: discover` |
