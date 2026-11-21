@@ -2287,6 +2287,8 @@ mod uncommitted_diff_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "untracked_cache_git_compat.rs"]
 mod untracked_cache_git_compat;
+#[path = "untracked_cache_wide_deep_git_compat.rs"]
+mod untracked_cache_wide_deep_git_compat;
 #[cfg(feature = "full-tests")]
 #[path = "upload_pack_blob_memory_support.rs"]
 mod upload_pack_blob_memory_support;

@@ -309,13 +309,8 @@ fn write_one_dir(ucd: &UntrackedCacheDir, wd: &mut WriteDirCtx<'_>) {
     let i = *wd.index;
     *wd.index += 1;
 
-    let mut ucd = ucd.clone();
-    if !ucd.valid {
-        ucd.untracked.clear();
-        ucd.check_only = false;
-    }
-
-    if ucd.check_only {
+    // An invalid directory is written without its untracked names or check-only flag.
+    if ucd.valid && ucd.check_only {
         wd.check_only.set_bit_extend(i);
     }
     if ucd.valid {
@@ -327,8 +322,13 @@ fn write_one_dir(ucd: &UntrackedCacheDir, wd: &mut WriteDirCtx<'_>) {
         wd.sb_sha1.extend_from_slice(ucd.exclude_oid.as_bytes());
     }
 
-    ucd.untracked.sort();
-    encode_varint(ucd.untracked.len() as u64, &mut wd.out);
+    let mut untracked: Vec<&String> = if ucd.valid {
+        ucd.untracked.iter().collect()
+    } else {
+        Vec::new()
+    };
+    untracked.sort_unstable();
+    encode_varint(untracked.len() as u64, &mut wd.out);
 
     let recurse_count = ucd.dirs.iter().filter(|d| d.recurse).count() as u64;
     encode_varint(recurse_count, &mut wd.out);
@@ -336,7 +336,7 @@ fn write_one_dir(ucd: &UntrackedCacheDir, wd: &mut WriteDirCtx<'_>) {
     wd.out.extend_from_slice(&storage_bytes(&ucd.name));
     wd.out.push(0);
 
-    for n in &ucd.untracked {
+    for n in untracked {
         wd.out.extend_from_slice(&storage_bytes(n));
         wd.out.push(0);
     }
@@ -378,10 +378,7 @@ pub fn write_untracked_extension(uc: &UntrackedCache) -> Vec<u8> {
         sb_stat: Vec::new(),
         sb_sha1: Vec::new(),
     };
-    let mut sorted_root = root.clone();
-    sorted_root.untracked.sort();
-    sorted_root.dirs.sort_by(|a, b| a.name.cmp(&b.name));
-    write_one_dir(&sorted_root, &mut wd);
+    write_one_dir(root, &mut wd);
 
     encode_varint(*wd.index as u64, &mut out);
     out.append(&mut wd.out);
@@ -520,12 +517,16 @@ fn parse_untracked_extension_body(data: &[u8]) -> Option<UntrackedCache> {
     let rest = &rest[slen..];
 
     let n = n_nodes as usize;
-    let mut check_bits = Vec::new();
-    check_bm.each_set_bit(|i| check_bits.push(i));
-    let mut valid_bits = Vec::new();
-    valid_bm.each_set_bit(|i| valid_bits.push(i));
-    let mut sha_bits = Vec::new();
-    sha_bm.each_set_bit(|i| sha_bits.push(i));
+    let collect_bits = |bm: &EwahBitmap| {
+        let mut bits = Vec::new();
+        bm.each_set_bit(|i| bits.push(i));
+        bits.sort_unstable();
+        bits.dedup();
+        bits
+    };
+    let check_bits = collect_bits(&check_bm);
+    let valid_bits = collect_bits(&valid_bm);
+    let sha_bits = collect_bits(&sha_bm);
 
     let stat_len = valid_bits.len() * STAT_DATA_LEN;
     let oid_len = sha_bits.len() * 20;
@@ -540,20 +541,40 @@ fn parse_untracked_extension_body(data: &[u8]) -> Option<UntrackedCache> {
     let mut stat_slice = stat_part;
     let mut oid_slice = oid_part;
 
+    /// Ascending set-bit positions, consumed as nodes are visited in increasing order.
+    struct BitCursor<'a> {
+        bits: &'a [usize],
+    }
+
+    impl BitCursor<'_> {
+        fn take(&mut self, i: usize) -> bool {
+            while let Some((&first, rest)) = self.bits.split_first() {
+                if first > i {
+                    break;
+                }
+                self.bits = rest;
+                if first == i {
+                    return true;
+                }
+            }
+            false
+        }
+    }
+
     fn apply(
         u: &mut UntrackedCacheDir,
         idx: &mut usize,
-        check: &[usize],
-        valid: &[usize],
-        sha: &[usize],
+        check: &mut BitCursor<'_>,
+        valid: &mut BitCursor<'_>,
+        sha: &mut BitCursor<'_>,
         stat_bytes: &mut &[u8],
         oid_bytes: &mut &[u8],
     ) -> Option<()> {
         let i = *idx;
         *idx += 1;
         u.recurse = true;
-        u.check_only = check.contains(&i);
-        if valid.contains(&i) {
+        u.check_only = check.take(i);
+        if valid.take(i) {
             u.valid = true;
             if stat_bytes.len() < STAT_DATA_LEN {
                 return None;
@@ -561,7 +582,7 @@ fn parse_untracked_extension_body(data: &[u8]) -> Option<UntrackedCache> {
             u.stat_data = StatDataDisk::from_bytes(&stat_bytes[..STAT_DATA_LEN])?;
             *stat_bytes = &stat_bytes[STAT_DATA_LEN..];
         }
-        if sha.contains(&i) {
+        if sha.take(i) {
             if oid_bytes.len() < 20 {
                 return None;
             }
@@ -579,9 +600,9 @@ fn parse_untracked_extension_body(data: &[u8]) -> Option<UntrackedCache> {
     apply(
         &mut root,
         &mut idx,
-        &check_bits,
-        &valid_bits,
-        &sha_bits,
+        &mut BitCursor { bits: &check_bits },
+        &mut BitCursor { bits: &valid_bits },
+        &mut BitCursor { bits: &sha_bits },
         &mut stat_slice,
         &mut oid_slice,
     )?;
@@ -2262,6 +2283,100 @@ mod tests {
         let raw = write_untracked_extension(&uc);
         let back = parse_untracked_extension(&raw).expect("parse deep tree");
         assert!(back.root.is_some());
+    }
+
+    /// Preorder `(name, valid, check_only, exclude_oid, stat mtime, untracked)` per node.
+    fn flatten(
+        dir: &UntrackedCacheDir,
+        out: &mut Vec<(String, bool, bool, ObjectId, u32, Vec<String>)>,
+    ) {
+        out.push((
+            dir.name.clone(),
+            dir.valid,
+            dir.valid && dir.check_only,
+            dir.exclude_oid,
+            if dir.valid {
+                dir.stat_data.mtime_sec
+            } else {
+                0
+            },
+            if dir.valid {
+                dir.untracked.clone()
+            } else {
+                Vec::new()
+            },
+        ));
+        let mut children: Vec<_> = dir.dirs.iter().filter(|d| d.recurse).collect();
+        children.sort_by(|a, b| a.name.cmp(&b.name));
+        for child in children {
+            flatten(child, out);
+        }
+    }
+
+    #[test]
+    fn untracked_extension_wide_deep_tree_keeps_per_node_flags() {
+        let oid = |n: u32| {
+            let mut raw = [0u8; 20];
+            raw[..4].copy_from_slice(&(n + 1).to_be_bytes());
+            ObjectId::from_bytes(&raw).expect("oid")
+        };
+        let mut next = 0u32;
+        let mut node = |name: String| {
+            let n = next;
+            next += 1;
+            let mut d = UntrackedCacheDir::new(name);
+            d.recurse = true;
+            d.valid = n % 3 != 1;
+            d.check_only = n % 5 == 0;
+            if n % 7 == 0 {
+                d.exclude_oid = oid(n);
+            }
+            d.stat_data.mtime_sec = n;
+            if n % 2 == 0 {
+                d.untracked = vec![format!("z{n}"), format!("a{n}")];
+            }
+            d
+        };
+        let mut root = node(String::new());
+        root.valid = true;
+        root.check_only = false;
+        // Children are added in reverse name order so the writer has to sort them.
+        for top in (0..60).rev() {
+            let mut chain = node(format!("t{top:02}"));
+            let mut level = &mut chain;
+            for depth in 0..6 {
+                level.dirs.push(node(format!("d{depth}")));
+                if depth % 2 == 0 {
+                    level.dirs.push(node(format!("c{depth}")));
+                }
+                let deeper = level
+                    .dirs
+                    .iter()
+                    .position(|d| d.name == format!("d{depth}"))
+                    .expect("chain child");
+                level = &mut level.dirs[deeper];
+            }
+            root.dirs.push(chain);
+        }
+        let mut skipped = node("not-recursed".to_string());
+        skipped.recurse = false;
+        root.dirs.push(skipped);
+
+        let mut uc = UntrackedCache::new_shell(6, b"id\x00".to_vec());
+        uc.root = Some(root);
+        let raw = write_untracked_extension(&uc);
+        let back = parse_untracked_extension(&raw).expect("parse wide deep tree");
+
+        let mut want = Vec::new();
+        flatten(uc.root.as_ref().expect("root"), &mut want);
+        let mut got = Vec::new();
+        flatten(back.root.as_ref().expect("root back"), &mut got);
+        for row in &mut want {
+            row.5.sort();
+        }
+        assert!(want.len() > 500, "{} nodes", want.len());
+        assert_eq!(got, want);
+        assert_eq!(write_untracked_extension(&back), raw);
     }
 
     #[test]
