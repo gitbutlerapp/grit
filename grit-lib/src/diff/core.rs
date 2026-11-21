@@ -8922,8 +8922,14 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
         std::collections::BTreeMap::new();
     let mut index_paths: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
     let mut stage0_paths: std::collections::BTreeSet<Vec<u8>> = std::collections::BTreeSet::new();
+    let in_scope = |ie: &IndexEntry| {
+        extras
+            .restrict_to_paths
+            .as_ref()
+            .is_none_or(|limit| limit.contains(&*String::from_utf8_lossy(&ie.path)))
+    };
     for ie in &index.entries {
-        if ie.stage() != 0 {
+        if ie.stage() != 0 || !in_scope(ie) {
             continue;
         }
         let path = String::from_utf8_lossy(&ie.path).to_string();
@@ -8937,7 +8943,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
     let mut unmerged_only_paths: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
     for ie in &index.entries {
-        if !(1..=3).contains(&ie.stage()) {
+        if !(1..=3).contains(&ie.stage()) || !in_scope(ie) {
             continue;
         }
         if stage0_paths.contains(&ie.path) {
