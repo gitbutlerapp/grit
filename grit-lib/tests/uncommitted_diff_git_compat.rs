@@ -10,7 +10,7 @@ use grit_lib::diff::{
     name_status_line, DiffOptions, DiffRequest, DiffSide, DiffTarget, FileChange, RenameDetection,
     ResolveDiffArgumentsError, UncommittedDiff,
 };
-use grit_lib::error::Error;
+use grit_lib::error::{DiffError, Error};
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::{Repository, RepositoryError};
@@ -188,6 +188,90 @@ fn worktree_entries_match_git_diff_against_a_tree() {
         git_lines(
             dir.path(),
             &["diff", empty_tree.trim(), "--name-status", "--no-renames"]
+        )
+    );
+}
+
+/// With something staged, the working tree is compared with `HEAD` over the paths either side of
+/// the index changed. Staged changes undone in the working tree, mode-only changes, intent-to-add
+/// entries, and files whose stat data changed but whose contents did not must all come out as
+/// `git diff HEAD` reports them, including deep in a nested tree.
+#[test]
+fn worktree_entries_with_staged_changes_match_git_diff_head() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    let deep = "a/b/c/d/e/f/g/h";
+    for i in 0..6 {
+        write(root, &format!("{deep}/f{i}.txt"), &format!("deep {i}\n"));
+    }
+    write(root, "reverted.txt", "same\n");
+    write(root, "staged-then-edited.txt", "1\n");
+    write(root, "unstaged.txt", "u\n");
+    write(root, "removed.txt", "r\n");
+    write(root, "touched.txt", "t\n");
+    write(root, "mode-staged.sh", "#!/bin/sh\n");
+    write(root, "mode-unstaged.sh", "#!/bin/sh\n");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "base"]);
+
+    write(root, &format!("{deep}/f1.txt"), "deep staged\n");
+    write(root, "reverted.txt", "changed\n");
+    write(root, "staged-then-edited.txt", "2\n");
+    write(root, "added-then-removed.txt", "tmp\n");
+    git(
+        root,
+        &["update-index", "--chmod=+x", "--add", "mode-staged.sh"],
+    );
+    git(root, &["add", "-A"]);
+
+    write(root, "reverted.txt", "same\n");
+    write(root, "staged-then-edited.txt", "3\n");
+    fs::remove_file(root.join("added-then-removed.txt")).expect("rm");
+    write(root, &format!("{deep}/f4.txt"), "deep unstaged\n");
+    write(root, "unstaged.txt", "U\n");
+    fs::remove_file(root.join("removed.txt")).expect("rm");
+    write(root, "touched.txt", "t\n");
+    write(root, "intent.txt", "later\n");
+    git(root, &["add", "-N", "intent.txt"]);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            root.join("mode-unstaged.sh"),
+            fs::Permissions::from_mode(0o755),
+        )
+        .expect("chmod");
+    }
+
+    let repo = open(root);
+    let head_tree = rev_parse(root, "HEAD^{tree}");
+    let mut diff = repo.diff().uncommitted().expect("uncommitted");
+    let entries = diff
+        .worktree_entries(Some(&head_tree), RenameDetection::Off)
+        .expect("worktree vs HEAD");
+    assert_eq!(
+        names(&entries),
+        git_lines(root, &["diff", "HEAD", "--name-status", "--no-renames"])
+    );
+    assert!(names(&entries).contains(&format!("M\t{deep}/f1.txt")));
+    assert!(!names(&entries).iter().any(|l| l.ends_with("reverted.txt")
+        || l.ends_with("touched.txt")
+        || l.ends_with("added-then-removed.txt")));
+
+    let mut diff = repo.diff().uncommitted().expect("uncommitted");
+    let limited = diff
+        .entries(
+            &DiffTarget::WorktreeVsHead,
+            &Pathspec::scoped(vec!["a/b".to_owned()], PathspecGlobalFlags::default()),
+            &DiffOptions::default().with_renames(RenameDetection::Off),
+        )
+        .expect("limited");
+    assert_eq!(
+        names(&limited.entries),
+        git_lines(
+            root,
+            &["diff", "HEAD", "--name-status", "--no-renames", "--", "a/b"]
         )
     );
 }
@@ -391,7 +475,9 @@ fn bare_repository_rejects_working_tree_diffs() {
     ] {
         assert!(matches!(
             repo.diff().resolve_request(None, &request),
-            Err(ResolveDiffArgumentsError::NoWorkTree)
+            Err(Error::Diff(DiffError::Arguments(
+                ResolveDiffArgumentsError::NoWorkTree
+            )))
         ));
     }
     let staged = DiffRequest::default().with_staged(true);

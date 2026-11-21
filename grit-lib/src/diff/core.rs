@@ -8908,7 +8908,10 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules_extras(
     // Flatten the tree into a BTreeMap keyed by path
     let tree_flat = match tree_oid {
         Some(oid) if sparse_index => flatten_tree_with_index(odb, oid, "", Some(index))?,
-        Some(oid) => flatten_tree(odb, oid, "")?,
+        Some(oid) => match extras.restrict_to_paths.as_deref() {
+            Some(limit) => tree_leaves_at_paths(odb, oid, limit)?,
+            None => flatten_tree(odb, oid, "")?,
+        },
         None => Vec::new(),
     };
     let tree_map: std::collections::BTreeMap<String, &FlatEntry> =
@@ -11352,6 +11355,31 @@ fn flatten_tree(odb: &Odb, tree_oid: &ObjectId, prefix: &str) -> Result<Vec<Flat
     flatten_tree_with_index(odb, tree_oid, prefix, None)
 }
 
+/// The entries [`flatten_tree`] would return for `paths` (stored form), found by looking each
+/// path up instead of reading every tree. Paths that are missing or name a tree are skipped.
+fn tree_leaves_at_paths(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    paths: &std::collections::BTreeSet<String>,
+) -> Result<Vec<FlatEntry>> {
+    let mut result = Vec::new();
+    for path in paths.iter().filter(|p| !p.is_empty()) {
+        let raw = crate::repo_relpath::storage_bytes(path);
+        let Some(entry) = odb.tree_entry_at_path(tree_oid, &raw)? else {
+            continue;
+        };
+        if is_tree_mode(entry.mode) {
+            continue;
+        }
+        result.push(FlatEntry {
+            path: path.clone(),
+            mode: entry.mode,
+            oid: entry.oid,
+        });
+    }
+    Ok(result)
+}
+
 fn sparse_index_skips_tree_descent(index: &Index, dir_path: &str, tree_oid: &ObjectId) -> bool {
     let mut storage = crate::repo_relpath::storage_bytes(dir_path).into_owned();
     if !storage.ends_with(b"/") {
@@ -12690,6 +12718,37 @@ mod diff_index_to_tree_cache_tree_tests {
             matches!(err, Error::Object(ObjectError::Corrupt { .. })),
             "{err:?}"
         );
+    }
+
+    #[test]
+    fn tree_leaves_at_paths_matches_the_filtered_full_flatten() {
+        let (_temp, odb, head_tree, _) = repo_with_tree(4, 3);
+        let paths: std::collections::BTreeSet<String> = [
+            "unchanged/d1/f2.txt",
+            "unchanged/d3/f0.txt",
+            "unchanged/d2",
+            "unchanged/d1/f2.txt/below-a-blob",
+            "unchanged/d9/missing.txt",
+            "missing",
+            "",
+        ]
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+
+        let looked_up = tree_leaves_at_paths(&odb, &head_tree, &paths).expect("lookup");
+        let expected: Vec<(String, FileMode, ObjectId)> = flatten_tree(&odb, &head_tree, "")
+            .expect("flatten")
+            .into_iter()
+            .filter(|e| paths.contains(&e.path))
+            .map(|e| (e.path, e.mode, e.oid))
+            .collect();
+        let got: Vec<(String, FileMode, ObjectId)> = looked_up
+            .into_iter()
+            .map(|e| (e.path, e.mode, e.oid))
+            .collect();
+        assert_eq!(got, expected);
+        assert_eq!(got.len(), 2);
     }
 }
 

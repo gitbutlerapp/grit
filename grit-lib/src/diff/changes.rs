@@ -452,6 +452,18 @@ pub(crate) fn worktree_entries_in(
         );
     }
     let config = repo.config().snapshot()?;
+    let restrict_to_paths = match base_tree {
+        Some(base) => Some(Arc::new(worktree_change_candidates(
+            repo,
+            index,
+            work_tree,
+            rules,
+            base,
+            &config,
+            restrict_to_paths,
+        )?)),
+        None => restrict_to_paths,
+    };
     let raw = {
         let rules = rules.lock().unwrap_or_else(|e| e.into_inner());
         diff_tree_to_worktree_with_git_dir_and_rules_extras(
@@ -480,6 +492,66 @@ pub(crate) fn worktree_entries_in(
     )?;
     sort_entries_by_path(&mut entries);
     Ok(entries)
+}
+
+/// Paths where the working tree may differ from `base_tree`, within `restrict_to_paths`.
+///
+/// A path whose index entry matches `base_tree` and whose file matches the index cannot differ,
+/// so the candidates are the index-vs-tree changes plus the worktree-vs-index changes. Both
+/// scans are cheap: the first skips subtrees the cache tree proves unchanged, the second stats
+/// only tracked files. Unmerged, gitlink and intent-to-add entries are always included because
+/// the tree-to-worktree comparison judges them by its own rules. Each path is added in both its
+/// stored form and the lossy form the tree-to-worktree walk keys index paths by.
+fn worktree_change_candidates(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    rules: &Arc<Mutex<WorktreeRules>>,
+    base_tree: &ObjectId,
+    config: &crate::config::ConfigSet,
+    restrict_to_paths: Option<Arc<BTreeSet<String>>>,
+) -> Result<BTreeSet<String>> {
+    use crate::repo_relpath::{storage_bytes, storage_string};
+
+    let staged = diff_index_to_tree_with_renames(
+        repo.odb(),
+        index,
+        Some(base_tree),
+        false,
+        RENAME_DETECTION_DISABLED,
+        config,
+        &repo.thread_policy(),
+    )?;
+    let unstaged = unstaged_entries_in(
+        repo,
+        index,
+        work_tree,
+        rules,
+        RENAME_DETECTION_DISABLED,
+        restrict_to_paths.clone(),
+    )?;
+    let mut candidates = BTreeSet::new();
+    let mut insert_raw = |raw: &[u8]| {
+        candidates.insert(String::from_utf8_lossy(raw).into_owned());
+        candidates.insert(storage_string(raw));
+    };
+    for entry in staged.iter().chain(&unstaged) {
+        for path in [entry.old_path.as_deref(), entry.new_path.as_deref()]
+            .into_iter()
+            .flatten()
+        {
+            insert_raw(&storage_bytes(path));
+        }
+    }
+    for entry in &index.entries {
+        if entry.stage() != 0 || entry.mode.is_gitlink() || entry.intent_to_add() {
+            insert_raw(&entry.path);
+        }
+    }
+    if let Some(limit) = restrict_to_paths {
+        candidates.retain(|path| limit.contains(path));
+    }
+    Ok(candidates)
 }
 
 /// Staged, unstaged, and working-tree diffs over one loaded index.
