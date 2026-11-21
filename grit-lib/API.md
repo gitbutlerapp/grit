@@ -302,14 +302,14 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `command_runner` | 506 | 59 | 1 | 0 | 1 |
 | `commit` | 307 | 81 | 3 | 0 | 2 |
 | `commits` | 273 | 63 | 0 | 0 | 0 |
-| `config` | 1,032 | 784 | 0 | 0 | 0 |
+| `config` | 1,032 | 785 | 0 | 0 | 0 |
 | `diagnostics` | 131 | 17 | 0 | 0 | 0 |
 | `diff` | 2,414 | 179 | 26 | 5 | 4 |
 | `divergence` | 243 | 5 | 0 | 0 | 0 |
 | `error` | 1,500 | 388 | 0 | 0 | 0 |
 | `gitbutler` | 66 | 4 | 0 | 1 | 0 |
 | `ident` | 190 | 64 | 0 | 0 | 0 |
-| `index` | 964 | 184 | 1 | 1 | 0 |
+| `index` | 964 | 185 | 1 | 1 | 0 |
 | `line_range` | 45 | 1 | 0 | 0 | 0 |
 | `list_limit` | 23 | 3 | 0 | 0 | 0 |
 | `lockfile` | 128 | 13 | 1 | 0 | 1 |
@@ -326,7 +326,7 @@ Top-level modules match `grep -E '^pub mod grit_lib::[a-z_0-9]+$' grit-lib/publi
 | `progress` | 256 | 540 | 0 | 0 | 3 |
 | `refs` | 2,253 | 327 | 8 | 5 | 3 |
 | `remote` | 2,669 | 228 | 1 | 1 | 0 |
-| `repo` | 448 | 859 | 11 | 2 | 2 |
+| `repo` | 448 | 860 | 11 | 2 | 2 |
 | `repo_handles` | 847 | 55 | 3 | 0 | 3 |
 | `revwalk` | 3,159 | 211 | 2 | 2 | 2 |
 | `stash` | 349 | 29 | 3 | 3 | 0 |
@@ -350,7 +350,7 @@ Listed accessors are `Repository::<name>(&self) -> …` entries in `public-api.t
 | `diff` | `grit_lib::diff::Diff<'_>` | 526 | 93 |
 | `history` | `grit_lib::revwalk::history::History<'_>` | 213 | 40 |
 | `hooks` | `grit_lib::repo_handles::RepositoryHooks<'_>` | 28 | 10 |
-| `index` | `grit_lib::index::IndexFile<'_>` | 41 | 201 |
+| `index` | `grit_lib::index::IndexFile<'_>` | 41 | 202 |
 | `maintenance` | `grit_lib::maintenance::Maintenance<'_>` | 34 | 50 |
 | `merge` | `grit_lib::merge::Merge<'_>` | 142 | 33 |
 | `notes` | `grit_lib::repo_handles::RepositoryNotes<'_>` | 33 | 14 |
