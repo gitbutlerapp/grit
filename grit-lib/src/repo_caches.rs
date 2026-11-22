@@ -469,6 +469,17 @@ impl RepoCaches {
         Ok(parsed)
     }
 
+    /// Whether any work-tree attribute stack, which walks every directory of the work tree,
+    /// has been loaded through this cache.
+    #[cfg(test)]
+    pub(crate) fn has_loaded_full_worktree_attr_stack(&self) -> bool {
+        !self
+            .attr_stack
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .is_empty()
+    }
+
     /// Memoized bare-repo gitattributes (info/attributes + global file).
     ///
     /// # Errors
